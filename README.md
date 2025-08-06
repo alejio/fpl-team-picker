@@ -110,7 +110,7 @@ This project requires FPL datasets located in `../fpl-dataset-builder/data/`:
 - `match_results_previous_season.csv` - Historical match results
 - `injury_tracking_template.csv` - Player availability tracking
 
-> **Note:** The dataset builder is a separate project. See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
+> **Note:** The dataset builder is a separate project.
 
 ## ⚡ MVP Implementation Notes
 
