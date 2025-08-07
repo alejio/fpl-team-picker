@@ -279,7 +279,7 @@ def __(mo):
 
 
 @app.cell
-def __(fixtures, teams, team_strength, pd):
+def __(fixtures, teams, team_strength):
     # Get GW1-5 fixtures
     multi_gw_fixtures = fixtures[fixtures['event'].isin([1, 2, 3, 4, 5])].copy()
     
@@ -571,16 +571,48 @@ def __(mo):
 
 
 @app.cell
-def __(players_xp, pd, np):
+def __(players_xp, np, pd):
     # Simulated Annealing team optimization
-    def select_optimal_team(players_df, budget=100.0, formation=(2, 5, 5, 3), iterations=5000):
+    def select_optimal_team(players_df, budget=100.0, formation=(2, 5, 5, 3), iterations=5000, must_include_ids=None, must_exclude_ids=None):
         """
         Select optimal 15-player squad using Simulated Annealing optimization
         Formation: (2 GKP, 5 DEF, 5 MID, 3 FWD) = 15 players
-        Constraints: £100m budget, max 3 players per team
+        Constraints: £100m budget, max 3 players per team, must_include/exclude players
+        
+        Args:
+            must_include_ids: List of player IDs that must be in the final team
+            must_exclude_ids: List of player IDs that must be excluded from consideration
         """
         import random
         import math
+        
+        # Handle constraints
+        must_include_ids = must_include_ids or []
+        must_exclude_ids = must_exclude_ids or []
+        
+        print(f"Constraints: Must include {len(must_include_ids)} players, exclude {len(must_exclude_ids)} players")
+        
+        # Debug: Show which players are being excluded
+        if must_exclude_ids:
+            print(f"🚫 Players being excluded:")
+            for player_id in must_exclude_ids:
+                excluded_player = players_df[players_df['player_id'] == player_id]
+                if len(excluded_player) > 0:
+                    player = excluded_player.iloc[0]
+                    print(f"   - {player['web_name']} (ID: {player_id}, {player['position']}, {player['name']})")
+                else:
+                    print(f"   - Player ID {player_id} (not found in dataset)")
+        
+        # Debug: Show which players are being included
+        if must_include_ids:
+            print(f"✅ Players being included:")
+            for player_id in must_include_ids:
+                included_player = players_df[players_df['player_id'] == player_id]
+                if len(included_player) > 0:
+                    player = included_player.iloc[0]
+                    print(f"   - {player['web_name']} (ID: {player_id}, {player['position']}, {player['name']})")
+                else:
+                    print(f"   - Player ID {player_id} (not found in dataset)")
         
         gkp_count, def_count, mid_count, fwd_count = formation
         position_requirements = {'GKP': gkp_count, 'DEF': def_count, 'MID': mid_count, 'FWD': fwd_count}
@@ -599,8 +631,53 @@ def __(players_xp, pd, np):
         print(f"Players missing xA90: {players_df['xA90'].isna().sum()}")
         print(f"Players missing expected_minutes: {players_df['expected_minutes'].isna().sum()}")
         
-        # Filter players with valid xP data and debug
-        valid_players = players_df[players_df['xP'].notna()].copy().reset_index(drop=True)
+        # Filter players with valid xP data and apply exclusions
+        valid_players = players_df[
+            (players_df['xP'].notna()) & 
+            (~players_df['player_id'].isin(must_exclude_ids))
+        ].copy().reset_index(drop=True)
+        
+        # Validate must-include players exist in valid set
+        must_include_players = players_df[players_df['player_id'].isin(must_include_ids)]
+        invalid_includes = []
+        for player_id in must_include_ids:
+            player = players_df[players_df['player_id'] == player_id]
+            if len(player) == 0:
+                invalid_includes.append(f"ID {player_id} (not found)")
+            elif player.iloc[0]['xP'] != player.iloc[0]['xP']:  # Check for NaN
+                invalid_includes.append(f"{player.iloc[0]['web_name']} (no xP data)")
+            elif player_id in must_exclude_ids:
+                invalid_includes.append(f"{player.iloc[0]['web_name']} (also in exclude list)")
+        
+        if invalid_includes:
+            print(f"⚠️  WARNING: Invalid must-include players: {', '.join(invalid_includes)}")
+            # Remove invalid includes
+            must_include_ids = [pid for pid in must_include_ids if pid not in [p.split('ID ')[1].split(' ')[0] if 'ID ' in p else None for p in invalid_includes]]
+        
+        # Check constraint feasibility
+        if len(must_include_ids) > 15:
+            print(f"❌ ERROR: Cannot include {len(must_include_ids)} players in 15-player squad")
+            return [], budget
+        
+        # Check position requirements for must-include players
+        must_include_positions = must_include_players.groupby('position').size().to_dict()
+        position_violations = []
+        for pos, required in position_requirements.items():
+            included_count = must_include_positions.get(pos, 0)
+            if included_count > required:
+                position_violations.append(f"{pos}: {included_count} required but only {required} slots")
+        
+        if position_violations:
+            print(f"❌ ERROR: Must-include players violate formation: {', '.join(position_violations)}")
+            return [], budget
+        
+        # Check budget feasibility for must-include players
+        must_include_cost = must_include_players['price_gbp'].sum()
+        if must_include_cost > budget:
+            print(f"❌ ERROR: Must-include players cost £{must_include_cost:.1f}m (budget: £{budget:.1f}m)")
+            return [], budget
+        
+        print(f"✅ Must-include players: £{must_include_cost:.1f}m, {len(must_include_ids)} players")
         
         # Debug: Check player counts by position
         position_counts = valid_players.groupby('position').size()
@@ -619,12 +696,22 @@ def __(players_xp, pd, np):
                 print(cheapest.to_string(index=False))
         
         def generate_random_team():
-            """Generate a random valid team - simplified approach"""
+            """Generate a random valid team - enforce budget, formation, and 3-per-team during generation"""
             import random
             team = []
             remaining_budget = budget
             team_counts = {}
-            
+
+            # Start with must-include players; fail fast if they violate 3-per-team
+            for player_id in must_include_ids:
+                player = players_df[players_df['player_id'] == player_id].iloc[0]
+                team_name = player['name']
+                if team_counts.get(team_name, 0) >= 3:
+                    return None  # violates team limit
+                team.append(player.to_dict())
+                remaining_budget -= player['price_gbp']
+                team_counts[team_name] = team_counts.get(team_name, 0) + 1
+
             # Get cheapest player per position to ensure minimum budget feasibility
             min_costs = {}
             for position in ['GKP', 'DEF', 'MID', 'FWD']:
@@ -633,50 +720,55 @@ def __(players_xp, pd, np):
                     min_costs[position] = pos_players['price_gbp'].min()
                 else:
                     return None
-            
+
             # Check if we can afford minimum team
-            min_team_cost = (min_costs['GKP'] * 2 + min_costs['DEF'] * 5 + 
-                           min_costs['MID'] * 5 + min_costs['FWD'] * 3)
+            min_team_cost = (min_costs['GKP'] * 2 + min_costs['DEF'] * 5 +
+                             min_costs['MID'] * 5 + min_costs['FWD'] * 3)
             if min_team_cost > budget:
                 return None
-            
-            # Fill each position randomly from affordable players
+
+            # Fill each position with affordable players while respecting 3-per-team limit
             for position in ['GKP', 'DEF', 'MID', 'FWD']:
                 count = position_requirements[position]
-                
-                # Get all affordable players for this position
-                position_players = valid_players[
-                    (valid_players['position'] == position) & 
-                    (valid_players['price_gbp'] <= remaining_budget - 
-                     sum(min_costs[p] * position_requirements[p] for p in ['GKP', 'DEF', 'MID', 'FWD'] 
-                         if p != position) + len([p for p in team if p['position'] == position]) * min_costs[position])
-                ].copy()
-                
-                for i in range(count):
-                    if len(position_players) == 0:
-                        # Fallback to any affordable player for this position
-                        position_players = valid_players[
-                            (valid_players['position'] == position) & 
-                            (valid_players['price_gbp'] <= remaining_budget)
-                        ].copy()
-                        
-                    if len(position_players) == 0:
-                        print(f"No affordable {position} players, budget: £{remaining_budget:.1f}m")
+
+                already_have = sum(1 for p in team if p['position'] == position)
+                remaining_needed = count - already_have
+                if remaining_needed <= 0:
+                    continue
+
+                for _ in range(remaining_needed):
+                    team_player_ids = {p['player_id'] for p in team}
+                    # Compute remaining minimum cost for other slots to keep budget feasible
+                    remaining_slots_cost = 0.0
+                    for ppos in ['GKP', 'DEF', 'MID', 'FWD']:
+                        if ppos == position:
+                            continue
+                        slots_needed = position_requirements[ppos] - sum(1 for tp in team if tp['position'] == ppos)
+                        remaining_slots_cost += max(0, slots_needed) * min_costs[ppos]
+
+                    # Candidates: correct position, not already chosen, under remaining budget after reserving for other slots, respect 3-per-team
+                    max_affordable_price = remaining_budget - remaining_slots_cost
+                    candidates = valid_players[
+                        (valid_players['position'] == position) &
+                        (~valid_players['player_id'].isin(team_player_ids)) &
+                        (valid_players['price_gbp'] <= max_affordable_price)
+                    ].copy()
+
+                    # Enforce 3-per-team here without adding temp columns
+                    team_ok_mask = candidates['name'].map(lambda t: team_counts.get(t, 0) < 3)
+                    candidates = candidates[team_ok_mask]
+
+                    if len(candidates) == 0:
                         return None
-                    
-                    # Randomly select a player
-                    player = position_players.sample(n=1).iloc[0]
-                    player_dict = player.to_dict()
-                    team.append(player_dict)
+
+                    # Prefer higher xP within affordability, slight randomness
+                    topk = min(8, len(candidates))
+                    candidates = candidates.sort_values('xP', ascending=False).head(topk)
+                    player = candidates.sample(n=1).iloc[0]
+                    team.append(player.to_dict())
                     remaining_budget -= player['price_gbp']
-                    
-                    # Update team count (but don't enforce constraint during generation)
-                    team_name = player['name']
-                    team_counts[team_name] = team_counts.get(team_name, 0) + 1
-                    
-                    # Remove this player from available pool
-                    position_players = position_players[position_players['player_id'] != player['player_id']]
-            
+                    team_counts[player['name']] = team_counts.get(player['name'], 0) + 1
+
             return team if len(team) == 15 else None
         
         def get_best_starting_11(squad):
@@ -793,16 +885,24 @@ def __(players_xp, pd, np):
             current_cost = calculate_team_cost(new_team)
             remaining_budget = budget - current_cost
             
-            # Pick random player to replace
-            replace_idx = random.randint(0, 14)
+            # Get list of players that can be swapped (not must-include)
+            swappable_indices = [i for i, p in enumerate(new_team) 
+                               if p['player_id'] not in must_include_ids]
+            
+            if not swappable_indices:
+                return None  # All players are must-include, no swaps possible
+            
+            # Pick random swappable player to replace
+            replace_idx = random.choice(swappable_indices)
             old_player = new_team[replace_idx]
             position = old_player['position']
             
-            # Get available players for this position (not already in team)
+            # Get available players for this position (not already in team, not excluded)
             team_player_ids = {p['player_id'] for p in new_team}
             available = valid_players[
                 (valid_players['position'] == position) & 
-                (~valid_players['player_id'].isin(team_player_ids))
+                (~valid_players['player_id'].isin(team_player_ids)) &
+                (~valid_players['player_id'].isin(must_exclude_ids))  # Ensure exclusions are respected
             ]
             
             # Allow all swaps - constraint will be enforced via penalty in calculate_team_xp
@@ -932,6 +1032,25 @@ def __(players_xp, pd, np):
         print(f"SA Stats: {improvements} improvements, {failed_swaps}/{total_swaps} failed swaps")
         print(f"Final team xP: {best_xp:.2f}, cost: £{calculate_team_cost(best_team):.1f}m")
         
+        # ⚠️ CRITICAL VALIDATION: Check if any excluded players made it into the final team
+        if must_exclude_ids:
+            final_team_ids = {player['player_id'] for player in best_team}
+            # Ensure must_exclude_ids are integers/hashable for set operations
+            exclude_set = set(must_exclude_ids) if isinstance(must_exclude_ids[0], (int, str)) else set([id['value'] if isinstance(id, dict) else id for id in must_exclude_ids])
+            excluded_in_team = final_team_ids.intersection(exclude_set)
+            if excluded_in_team:
+                print(f"🚨 BUG DETECTED: Excluded players found in final team!")
+                for player_id in excluded_in_team:
+                    violating_player = players_df[players_df['player_id'] == player_id].iloc[0]
+                    print(f"   ❌ {violating_player['web_name']} (ID: {player_id}) should have been excluded!")
+                
+                # Remove excluded players from the final team (emergency fix)
+                print("🔧 Emergency fix: Removing excluded players...")
+                best_team = [p for p in best_team if p['player_id'] not in excluded_in_team]
+                print(f"   Remaining players in team: {len(best_team)}/15")
+            else:
+                print(f"✅ Exclusion constraint verified: No excluded players in final team")
+        
         # Print transfer risk analysis
         transfer_risky_players = [p for p in best_team if p.get('transfer_risk', False)]
         print(f"\nTransfer Risk Analysis:")
@@ -962,7 +1081,6 @@ def __(players_xp, pd, np):
         total_squad_xp = team_df['xP'].sum()
         
         # Get best starting 11 and their stats
-        starting_11 = select_optimal_team.__code__.co_consts  # Get function reference
         def get_best_11_from_squad(squad_list):
             by_position = {'GKP': [], 'DEF': [], 'MID': [], 'FWD': []}
             for player in squad_list:
@@ -1083,25 +1201,308 @@ def __(mo):
     mo.md("### Starting 11 (Your Point-Scoring Team) - 5-Week Breakdown")
 
 @app.cell  
-def __(starting_11_df):
-    starting_11_df
-
-@app.cell
-def __(mo):
-    mo.md("### Transfer Risk Analysis")
-
-@app.cell
-def __(risky_squad_df):
-    # Show players in our selected team flagged as transfer risks
-    risky_squad_df if len(risky_squad_df) > 0 else "No players in your selected team are flagged as high transfer risk - excellent squad stability!"
+def __(starting_11_df, mo):
+    # Display starting 11 with all rows visible
+    mo.ui.table(starting_11_df, page_size=15) if starting_11_df is not None and hasattr(starting_11_df, 'empty') and not starting_11_df.empty else "No starting 11 available"
 
 @app.cell
 def __(mo):
     mo.md("### Full 15-Player Squad")
 
 @app.cell
-def __(team_df):
-    team_df
+def __(team_df, mo):
+    # Display original unconstrained squad (before rerun button) with all 15 rows
+    mo.ui.table(team_df, page_size=15) if team_df is not None and hasattr(team_df, 'empty') and not team_df.empty else "No squad available"
+
+@app.cell
+def __(mo):
+    mo.md("### Transfer Risk Analysis")
+
+@app.cell
+def __(risky_squad_df, mo):
+    # Display original transfer risk analysis (before rerun button) with all rows
+    mo.ui.table(risky_squad_df, page_size=15) if len(risky_squad_df) > 0 else "No players in your selected team are flagged as high transfer risk - excellent squad stability!"
+
+@app.cell
+def __(mo):
+    mo.md("## Interactive Team Customization")
+
+@app.cell
+def __(players_xp, mo):
+    # Create player options for dropdowns
+    def create_player_options(players_df):
+        """Create formatted player options for dropdowns"""
+        valid_players = players_df[players_df['xP'].notna()].copy()
+        
+        # Sort by position then by xP descending
+        valid_players = valid_players.sort_values(['position', 'xP'], ascending=[True, False])
+        
+        options = []
+        for _, player in valid_players.iterrows():
+            # Format: "Name (POS, TEAM) - £X.Xm, Y.YY xP"
+            label = f"{player['web_name']} ({player['position']}, {player['name']}) - £{player['price_gbp']}m, {player['xP']:.2f} xP"
+            options.append({"label": label, "value": player['player_id']})
+        
+        return options
+    
+    player_options = create_player_options(players_xp)
+    
+    # Create dropdown UI elements - using multiselect instead of dropdown with multiple
+    must_include_dropdown = mo.ui.multiselect(
+        options=player_options,
+        label="Must Include Players (max 15 for valid squad)"
+    )
+    
+    must_exclude_dropdown = mo.ui.multiselect(
+        options=player_options,
+        label="Must Exclude Players"
+    )
+    
+    rerun_button = mo.ui.run_button(
+        label="🔄 Rerun Optimization with Constraints"
+    )
+    
+    return must_include_dropdown, must_exclude_dropdown, rerun_button, player_options
+
+@app.cell
+def __(mo, must_include_dropdown, must_exclude_dropdown, rerun_button):
+    mo.md("### Customize Team Selection")
+    mo.vstack([
+        mo.md("**Force Include Players:** Select players that must be in your final 15-player squad"),
+        must_include_dropdown,
+        mo.md("**Exclude Players:** Select players to remove from consideration entirely"), 
+        must_exclude_dropdown,
+        mo.md("**Rerun Optimization:** Click to generate a new team with your constraints"),
+        rerun_button
+    ])
+
+@app.cell  
+def __(rerun_button):
+    # Track button clicks using a counter - marimo can properly track this
+    import time
+    
+    # Create a unique value each time button is clicked
+    if rerun_button.value:
+        optimization_trigger = time.time()  # Unique timestamp for each click
+    else:
+        optimization_trigger = None
+    
+    return optimization_trigger,
+
+@app.cell
+def __(mo):
+    # Persistent state for constrained optimization results
+    get_constrained_results, set_constrained_results = mo.state({
+        'team_df': None,
+        'starting_11_df': None,
+        'summary': None,
+        'team': []
+    })
+    return get_constrained_results, set_constrained_results
+
+@app.cell
+def __(optimization_trigger, must_include_dropdown, must_exclude_dropdown, select_optimal_team, players_xp, pd, get_constrained_results, set_constrained_results):
+    # Run constrained optimization when trigger changes
+    if optimization_trigger is not None:
+        print("🔄 Rerunning optimization with your constraints...")
+        
+        # Get selected constraint values - extract just the player IDs
+        must_include_ids = must_include_dropdown.value or []
+        must_exclude_ids = must_exclude_dropdown.value or []
+        
+        # Extract player IDs if they come as option objects
+        if must_include_ids and isinstance(must_include_ids[0], dict):
+            must_include_ids = [option['value'] for option in must_include_ids]
+        if must_exclude_ids and isinstance(must_exclude_ids[0], dict):
+            must_exclude_ids = [option['value'] for option in must_exclude_ids]
+        
+        print(f"Running with constraints: {len(must_include_ids)} must include, {len(must_exclude_ids)} must exclude")
+        
+        # Run constrained optimization
+        constrained_team, constrained_remaining_budget = select_optimal_team(
+            players_xp, 
+            must_include_ids=must_include_ids,
+            must_exclude_ids=must_exclude_ids
+        )
+        
+        # Create results 
+        if constrained_team:
+            # Show constraint summary
+            included_players = players_xp[players_xp['player_id'].isin(must_include_ids)]
+            excluded_count = len(must_exclude_ids)
+            
+            print(f"✅ Applied constraints:")
+            if len(must_include_ids) > 0:
+                print(f"   • Must include: {len(must_include_ids)} players")
+                for _, player in included_players.iterrows():
+                    print(f"     - {player['web_name']} ({player['position']}, {player['name']}) - £{player['price_gbp']}m")
+            if excluded_count > 0:
+                print(f"   • Excluded: {excluded_count} players from consideration")
+            
+            constrained_team_df = pd.DataFrame(constrained_team)[
+                ['web_name', 'position', 'name', 'price_gbp', 'xP', 'transfer_risk']
+            ].round(3)
+            
+            constrained_team_df['xP_per_price'] = (constrained_team_df['xP'] / constrained_team_df['price_gbp']).round(3)
+            
+            # Calculate metrics
+            constrained_total_cost = constrained_team_df['price_gbp'].sum()
+            
+            # Get best starting 11 using same logic as before
+            def get_best_11_from_squad_constrained(squad_list):
+                by_position = {'GKP': [], 'DEF': [], 'MID': [], 'FWD': []}
+                for player in squad_list:
+                    by_position[player['position']].append(player)
+                
+                for pos in by_position:
+                    by_position[pos].sort(key=lambda p: p['xP'], reverse=True)
+                
+                valid_formations = [
+                    (1, 3, 5, 2), (1, 3, 4, 3), (1, 4, 5, 1),
+                    (1, 4, 4, 2), (1, 4, 3, 3), (1, 5, 4, 1),
+                    (1, 5, 3, 2), (1, 5, 2, 3)
+                ]
+                
+                best_11 = []
+                best_xp = 0
+                
+                for gkp, def_count, mid, fwd in valid_formations:
+                    if (gkp <= len(by_position['GKP']) and 
+                        def_count <= len(by_position['DEF']) and
+                        mid <= len(by_position['MID']) and
+                        fwd <= len(by_position['FWD'])):
+                        
+                        formation_11 = (
+                            by_position['GKP'][:gkp] +
+                            by_position['DEF'][:def_count] +
+                            by_position['MID'][:mid] +
+                            by_position['FWD'][:fwd]
+                        )
+                        
+                        formation_xp = sum(p['xP'] for p in formation_11)
+                        
+                        if formation_xp > best_xp:
+                            best_xp = formation_xp
+                            best_11 = formation_11
+                
+                return best_11
+            
+            constrained_starting_11 = get_best_11_from_squad_constrained(constrained_team)
+            constrained_starting_11_xp = sum(p['xP'] for p in constrained_starting_11)
+            constrained_starting_11_cost = sum(p['price_gbp'] for p in constrained_starting_11)
+            
+            constrained_team_summary = {
+                'total_cost': constrained_total_cost,
+                'remaining_budget': constrained_remaining_budget,
+                'budget_used_pct': (constrained_total_cost / 100.0) * 100,
+                'starting_11_xp': constrained_starting_11_xp,
+                'starting_11_cost': constrained_starting_11_cost,
+                'avg_xp_per_starter': constrained_starting_11_xp / 11,
+                'xp_per_million_starters': constrained_starting_11_xp / constrained_starting_11_cost,
+                'transfer_risk_count': sum(1 for player in constrained_team if player.get('transfer_risk', False))
+            }
+            
+            constrained_starting_11_df = pd.DataFrame(constrained_starting_11)[
+                ['web_name', 'position', 'name', 'price_gbp', 'xP', 'transfer_risk', 
+                 'xP_gw1', 'xP_gw2', 'xP_gw3', 'xP_gw4', 'xP_gw5']
+            ].round(3)
+            constrained_starting_11_df['xP_per_price'] = (constrained_starting_11_df['xP'] / constrained_starting_11_df['price_gbp']).round(3)
+            
+            # Persist results in state so they aren't cleared when the button resets
+            set_constrained_results({
+                'team_df': constrained_team_df,
+                'starting_11_df': constrained_starting_11_df,
+                'summary': constrained_team_summary,
+                'team': constrained_team,
+            })
+        else:
+            constrained_team = []
+            constrained_team_df = pd.DataFrame()
+            constrained_starting_11_df = pd.DataFrame()
+            constrained_team_summary = {'error': 'Could not create valid team with constraints'}
+            set_constrained_results({
+                'team_df': constrained_team_df,
+                'starting_11_df': constrained_starting_11_df,
+                'summary': constrained_team_summary,
+                'team': constrained_team,
+            })
+    else:
+        # No new optimization requested - reuse last results from state
+        _current = get_constrained_results()
+        constrained_team_df = _current.get('team_df') if _current else None
+        constrained_starting_11_df = _current.get('starting_11_df') if _current else None
+        constrained_team_summary = _current.get('summary') if _current else None
+        constrained_team = _current.get('team') if _current else []
+    
+    return constrained_team_df, constrained_starting_11_df, constrained_team_summary, constrained_team
+
+@app.cell
+def __(constrained_team_summary, constrained_starting_11_df, constrained_team_df, must_include_dropdown, must_exclude_dropdown, optimization_trigger, mo):
+    # Display constrained results - always show something
+    if constrained_team_summary is not None and 'error' not in constrained_team_summary:
+        # Show constraint compliance
+        must_include_count = len(must_include_dropdown.value or [])
+        must_exclude_count = len(must_exclude_dropdown.value or [])
+        
+        result_display = mo.vstack([
+            mo.md("### ✅ Constrained Team Results"),
+            mo.md(f"""
+            **Applied Constraints:**
+            - **Must include:** {must_include_count} players {'✅ Applied' if must_include_count > 0 else ''}
+            - **Must exclude:** {must_exclude_count} players {'✅ Applied' if must_exclude_count > 0 else ''}
+            
+            **Budget Analysis:**
+            - **Total cost:** £{constrained_team_summary.get('total_cost', 0):.1f}m 
+            - **Budget used:** {constrained_team_summary.get('budget_used_pct', 0):.1f}% of £100m
+            - **Budget remaining:** £{constrained_team_summary.get('remaining_budget', 0):.1f}m
+            
+            **Starting 11 Performance (5-Week Horizon):**
+            - **Weighted 5-GW xP:** {constrained_team_summary.get('starting_11_xp', 0):.2f}
+            - **Championship Benchmark:** 370 points → **{'✅ COMPETITIVE' if constrained_team_summary.get('starting_11_xp', 0) >= 60 else '⚠️ BELOW TARGET'}**
+            - **Average xP per starter:** {constrained_team_summary.get('avg_xp_per_starter', 0):.2f}
+            - **xP per £1m (starters):** {constrained_team_summary.get('xp_per_million_starters', 0):.2f}
+            - **Players at transfer risk:** {constrained_team_summary.get('transfer_risk_count', 0)}/15
+            """),
+            mo.md("**Constrained Starting 11:**")
+        ])
+    elif constrained_team_summary is not None and 'error' in constrained_team_summary:
+        result_display = mo.md(f"❌ **Error:** {constrained_team_summary['error']}")
+    elif optimization_trigger is not None:
+        result_display = mo.md("🔄 **Running optimization...** Please wait.")
+    else:
+        result_display = mo.md("**💡 Tip:** Select players to include/exclude above, then click the button to rerun optimization.")
+    
+    result_display
+
+@app.cell  
+def __(constrained_starting_11_df, mo):
+    # Display constrained starting 11 table with all rows
+    mo.ui.table(constrained_starting_11_df, page_size=15) if constrained_starting_11_df is not None and hasattr(constrained_starting_11_df, 'empty') and not constrained_starting_11_df.empty else "No constrained starting 11 available"
+
+@app.cell
+def __(mo):
+    mo.md("### Constrained Full 15-Player Squad")
+
+@app.cell
+def __(constrained_team_df, mo):
+    # Display only constrained squad table (after rerun button) with all 15 rows
+    mo.ui.table(constrained_team_df, page_size=15) if constrained_team_df is not None and hasattr(constrained_team_df, 'empty') and not constrained_team_df.empty else "Click 'Rerun Optimization with Constraints' above to see your constrained squad here."
+
+@app.cell
+def __(mo):
+    mo.md("### Constrained Transfer Risk Analysis")
+
+@app.cell
+def __(constrained_team, pd, mo):
+    # Display only constrained transfer risk analysis (after rerun button) with all rows
+    if constrained_team and len(constrained_team) > 0:
+        _df = pd.DataFrame(constrained_team)
+        _risk = _df[_df.get('transfer_risk', False) == True][
+            ['web_name', 'position', 'name', 'price_gbp', 'xP', 'transfer_risk']
+        ].sort_values('price_gbp', ascending=False).round(3)
+        mo.ui.table(_risk, page_size=15) if len(_risk) > 0 else "No players in your constrained team are flagged as high transfer risk - excellent squad stability!"
+    else:
+        "Click 'Rerun Optimization with Constraints' above to see transfer risk analysis for your constrained team."
 
 
 if __name__ == "__main__":
