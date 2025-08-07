@@ -33,10 +33,12 @@ See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
 - Simple scaling factor [0.7, 1.3] based on opponent rank
 - Skip complex attack/defense separation for MVP
 
-### 3. Minutes Expectation (Price Proxy)
-- Players >£5.0m: 75 minutes (assumed starters)
-- Players ≤£5.0m: 30 minutes (assumed bench/rotation)
-- Skip historical minute analysis
+### 3. Enhanced Minutes Model (SBP + Availability)
+- **Selected By Percentage (SBP)** based start probabilities (0.05-0.95)
+- **Availability status** integration ('i'=injured, 's'=suspended, 'd'=doubtful, 'a'=available)  
+- **Position-specific durability** (GKP: 90min avg, outfield: 70-85min based on price)
+- **Probabilistic scenarios**: Full game, partial start, substitute appearance, no show
+- **Price-based priors**: Premium players (£7m+) get higher start probability adjustments
 
 ### 4. Multi-Gameweek xP Calculation (5-week horizon)
 - **Per-minute production**: xG90 and xA90 from rates dataset
@@ -58,16 +60,42 @@ See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
 - Handle missing data with appropriate fallbacks
 - Use pandas for data manipulation and merging
 
-## Development Workflow (MVP)
+## Implementation Architecture
 
-**Single afternoon implementation:**
+**Core Components:**
 
-1. **Load core datasets** (players, xG rates, fixtures, teams)
-2. **Apply simplified team strength** using final table positions
-3. **Calculate fixture difficulty scaling** [0.7, 1.3] 
-4. **Assign minutes by price threshold** (>£5m = 75 mins, ≤£5m = 30 mins)
-5. **Calculate xP per player** using xG90/xA90 rates + scaling + FPL scoring
-6. **Team selection**: Simulated Annealing optimization for optimal squad selection
+1. **Data Loading & Processing** (`load_datasets()`)
+   - FPL players, xG/xA rates, fixtures, teams data
+   - Data validation and consistency checks
+   - Missing data handling with position-based fallbacks
+
+2. **Team Strength & Fixture Analysis** (`get_team_strength_ratings()`)
+   - 2023-24 final table position mapping to strength [0.7, 1.3]
+   - Multi-gameweek fixture difficulty matrix creation
+   - Home/away advantage incorporation
+
+3. **Minutes Prediction Model** (`calculate_expected_minutes_probabilistic()`)
+   - SBP-based start probability calculation
+   - Availability status processing (injured/suspended/doubtful)
+   - Position and price-based durability modeling
+   - Probabilistic scenario weighting
+
+4. **Expected Points Engine** (`calculate_multi_gw_xp()`)
+   - 5-gameweek temporal weighting (1.0, 0.9, 0.8, 0.7, 0.6)
+   - Fixture difficulty scaling per gameweek
+   - FPL scoring conversion (goals, assists, clean sheets, appearances)
+   - Transfer risk flagging for poor GW2-3 fixtures
+
+5. **Team Optimization** (`select_optimal_team()`)
+   - Simulated Annealing with 5,000 iterations
+   - Constraint satisfaction (budget, formation, 3-per-team rule)
+   - Starting 11 formation optimization across 8 valid formations
+   - Must-include/exclude player handling
+
+6. **Interactive Interface** (Marimo cells)
+   - Real-time optimization with user constraints
+   - Visual squad analysis and performance metrics
+   - Transfer risk assessment and stability warnings
 
 ## Simulation Methodology
 
@@ -133,20 +161,47 @@ This methodology balances solution quality with computational speed, typically f
 
 ## Common Commands
 
-Since this is a new project, common commands will be added as the codebase develops. Likely to include:
-- Python script execution for xP calculations
-- Data validation and testing commands
-- Team optimization algorithms
+**Primary Interface:**
+```bash
+# Launch the interactive Marimo notebook (main interface)
+marimo run fpl_xp_model.py
 
-## Key Assumptions (MVP Shortcuts)
+# Or run in development/edit mode
+marimo edit fpl_xp_model.py
+```
 
-- **Single-point estimates** (no uncertainty propagation)
-- **Minutes by price proxy** (>£5m starter, ≤£5m bench/rotation)
-- **Hardcoded league baselines** (μ_home=1.43, μ_away=1.15)
-- **Team strength from final table** positions instead of complex ratings
-- **No BPS/bonus, cards, saves, penalties** in v0.1
-- **Simplified clean sheet probabilities** based on team strength only
-- **One fixture difficulty factor** affects both attack and defense equally
+**Development:**
+```bash
+# Install dependencies
+uv sync
+
+# Check project structure
+ls -la
+
+# Run git operations (when needed)
+git status
+git add .
+git commit -m "Description"
+```
+
+## Technical Specifications
+
+**Dependencies:**
+- Python 3.13+
+- marimo>=0.14.16 (interactive notebook interface)
+- pandas>=2.3.1 (data manipulation)
+- numpy>=2.3.2 (numerical computations) 
+- matplotlib>=3.10.5, seaborn>=0.13.2 (visualization)
+- pyarrow>=21.0.0 (efficient data I/O)
+
+**Key Model Assumptions:**
+- **Enhanced minutes model** using SBP + availability rather than simple price proxy
+- **Team strength from 2023-24 final table** positions [0.7, 1.3] scaling
+- **Hardcoded league baselines** (μ_home=1.43, μ_away=1.15) for speed
+- **Single-point estimates** (no uncertainty propagation in v0.1)
+- **Simplified clean sheet probabilities** based on team strength and fixture difficulty
+- **No BPS/bonus, cards, saves, penalties** in v0.1 (core scoring only)
+- **Position-based xG/xA fallbacks** for players missing historical data
 
 ## FPL Rules Reference
 
@@ -158,18 +213,38 @@ Since this is a new project, common commands will be added as the codebase devel
 - Target: Our 5-week xP projections should align with ~370 points (5 × 74) for competitive squads
 - Validation: Premium players should project 8-12 xP per gameweek, budget options 4-7 xP
 
-## MVP Scope
+## Current Implementation Status
 
-**What we're building today:**
+**✅ COMPLETED (v0.1):**
 - Multi-gameweek xP calculations (GW1-5 weighted horizon)
 - Fixture difficulty adjustments across 5-week period
-- Transfer-aware team selection optimizing for squad longevity
-- Squad template approach: core spine + flexible rotation slots
-- Validation that strategy reduces forced early transfers
+- Enhanced minutes model using Selected By Percentage (SBP) and availability status
+- Simulated Annealing team optimization with constraint satisfaction
+- Interactive Marimo notebook interface
+- Formation-flexible starting 11 selection (8 valid formations)
+- Transfer risk analysis and squad stability metrics
+- Budget utilization optimization and efficiency tracking
+- Team customization with must-include/exclude player constraints
 
-**What we're skipping:**
+**✅ INTERACTIVE FEATURES:**
+- Real-time squad optimization with constraint handling
+- Starting 11 auto-selection from best formation
+- Transfer risk warnings for poor GW2-3 fixtures
+- Budget and efficiency analysis
+- Rule compliance validation
+- Multi-gameweek breakdown per player
+
+**🔄 WHAT WE BUILT TODAY:**
+- Complete functional FPL team picker with advanced xP modeling
+- Statistical player performance prediction using xG/xA rates
+- Sophisticated optimization avoiding local optima
+- User-friendly interface for team customization
+- Comprehensive validation against FPL rules and constraints
+
+**⏭️ FUTURE ENHANCEMENTS:**
 - Historical back-testing and validation
 - Complex minute modeling from game logs
 - Venue-specific attack/defense ratings
 - Injury data integration
-- Sensitivity analysis
+- Bonus points (BPS) modeling
+- Sensitivity analysis and uncertainty quantification
