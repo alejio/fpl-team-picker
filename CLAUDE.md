@@ -38,15 +38,17 @@ See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
 - Players ≤£5.0m: 30 minutes (assumed bench/rotation)
 - Skip historical minute analysis
 
-### 4. Player xP Calculation
+### 4. Multi-Gameweek xP Calculation (5-week horizon)
 - **Per-minute production**: xG90 and xA90 from rates dataset
-- **Fixture scaling**: Multiply by opponent difficulty [0.7, 1.3]
-- **Expected contributions**: Scale by expected minutes
+- **Fixture scaling**: Multiply by opponent difficulty [0.7, 1.3] for each GW
+- **Temporal weighting**: GW1 (1.0), GW2 (0.9), GW3 (0.8), GW4 (0.7), GW5 (0.6)
+- **Expected contributions**: Scale by expected minutes per gameweek
 - **FPL points conversion**:
   - Appearance: 2 pts if ≥60 mins, 1 pt if >0 mins
   - Goals: Position multipliers (GK/DEF: 6, MID: 5, FWD: 4)
   - Assists: 3 × xA_exp
   - Clean sheets: Simplified P(CS) by team strength
+- **Cumulative xP**: Sum weighted xP across GW1-5
 
 ## Data Processing Notes
 
@@ -74,11 +76,12 @@ See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
 The model uses **Simulated Annealing** to solve the complex combinatorial optimization problem of selecting the optimal 15-player FPL squad. This approach was chosen over greedy algorithms to escape local optima and find globally competitive solutions.
 
 #### Core Optimization Problem
-- **Objective**: Maximize expected points for starting 11 players
+- **Objective**: Maximize weighted 5-gameweek xP for starting 11 players
 - **Squad Constraints**: 
   - 15 players total: 2 GKP, 5 DEF, 5 MID, 3 FWD
   - £100m budget limit
   - Max 3 players per real team
+- **Transfer Planning**: Minimize "forced transfers" penalty (players with poor GW2-3 fixtures)
 - **Formation Flexibility**: Starting 11 auto-selected from best formation among 8 valid options
 
 #### Algorithm Implementation
@@ -145,13 +148,24 @@ Since this is a new project, common commands will be added as the codebase devel
 - **Simplified clean sheet probabilities** based on team strength only
 - **One fixture difficulty factor** affects both attack and defense equally
 
+## FPL Rules Reference
+
+**IMPORTANT**: All implementations must comply with official FPL rules documented in `fpl_rules.md`. Key constraints include squad composition (2-5-5-3), £100m budget, max 3 players per team, and valid formations.
+
+## Performance Benchmark
+
+**2024-25 FPL Winner**: 2,810 points (74 points per gameweek average)
+- Target: Our 5-week xP projections should align with ~370 points (5 × 74) for competitive squads
+- Validation: Premium players should project 8-12 xP per gameweek, budget options 4-7 xP
+
 ## MVP Scope
 
 **What we're building today:**
-- Core xP calculations for all players
-- GW1 fixture difficulty adjustments
-- Optimal team selection within budget/formation constraints
-- Quick validation that premium players rank highly
+- Multi-gameweek xP calculations (GW1-5 weighted horizon)
+- Fixture difficulty adjustments across 5-week period
+- Transfer-aware team selection optimizing for squad longevity
+- Squad template approach: core spine + flexible rotation slots
+- Validation that strategy reduces forced early transfers
 
 **What we're skipping:**
 - Historical back-testing and validation
