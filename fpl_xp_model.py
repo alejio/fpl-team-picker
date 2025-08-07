@@ -386,13 +386,139 @@ def __(mo):
 
 
 @app.cell
-def __(players_full, difficulty_matrix, np):
+def __(players_full, difficulty_matrix, np, pd, team_strength):
     # Multi-gameweek xP calculation with temporal weighting
     def calculate_multi_gw_xp(players_df, difficulty_matrix):
         """Calculate cumulative xP across GW1-5 with temporal weighting"""
         players_xp = players_df.copy()
         
-        # Fill missing xG/xA with conservative estimates for promoted teams
+        # Statistical model to estimate missing xG/xA rates
+        def estimate_missing_xg_xa_rates(players_df):
+            """
+            Build statistical model to estimate xG90/xA90 for players missing historical data
+            Uses price, position, team strength, and SBP as predictors
+            """
+            # Get players with valid xG/xA data for training
+            training_data = players_df[
+                (players_df['xG90'].notna()) & 
+                (players_df['xA90'].notna()) &
+                (players_df['price_gbp'].notna())
+            ].copy()
+            
+            # Get players needing estimates
+            missing_data = players_df[
+                (players_df['xG90'].isna()) | (players_df['xA90'].isna())
+            ].copy()
+            
+            print(f"Training xG/xA model on {len(training_data)} players with historical data")
+            print(f"Estimating rates for {len(missing_data)} players missing data")
+            
+            if len(training_data) == 0 or len(missing_data) == 0:
+                return players_df  # No training data or no missing data
+            
+            # Add team strength feature using existing team_strength mapping
+            def get_team_strength_safe(team_name):
+                return team_strength.get(team_name, 1.0)  # Neutral if not found
+            
+            training_data['team_strength'] = training_data['name'].apply(get_team_strength_safe)
+            missing_data['team_strength'] = missing_data['name'].apply(get_team_strength_safe)
+            
+            # Position encoding for modeling
+            position_encoding = {'GKP': 0, 'DEF': 1, 'MID': 2, 'FWD': 3}
+            training_data['position_encoded'] = training_data['position'].map(position_encoding)
+            missing_data['position_encoded'] = missing_data['position'].map(position_encoding)
+            
+            # Fill missing SBP with median by position for modeling
+            training_data['selected_by_percentage'] = training_data['selected_by_percentage'].fillna(
+                training_data.groupby('position')['selected_by_percentage'].transform('median')
+            )
+            missing_data['selected_by_percentage'] = missing_data['selected_by_percentage'].fillna(
+                missing_data.groupby('position')['selected_by_percentage'].transform('median')
+            )
+            
+            # Simple linear relationships based on FPL pricing efficiency
+            # xG90 estimation: Position-based with price and team strength adjustments
+            def estimate_xg90(row):
+                base_rates = {'GKP': 0.01, 'DEF': 0.10, 'MID': 0.25, 'FWD': 0.45}
+                base_xg = base_rates[row['position']]
+                
+                # Price adjustment: Premium players get boost, budget players get penalty
+                if row['price_gbp'] >= 8.0:  # Premium players
+                    price_multiplier = 1.4 + (row['price_gbp'] - 8.0) * 0.15  # Significant boost
+                elif row['price_gbp'] >= 6.0:  # Mid-tier players  
+                    price_multiplier = 1.1 + (row['price_gbp'] - 6.0) * 0.15  # Moderate boost
+                elif row['price_gbp'] >= 4.5:  # Budget options
+                    price_multiplier = 0.8 + (row['price_gbp'] - 4.5) * 0.2   # Slight penalty to boost
+                else:  # Very cheap players
+                    price_multiplier = 0.5 + (row['price_gbp'] - 4.0) * 0.6   # Heavy penalty
+                
+                # Team strength adjustment (better teams create more chances)
+                team_multiplier = 0.7 + (row['team_strength'] - 0.7) * 0.8  # Scale with team quality
+                
+                # SBP adjustment (higher ownership suggests better stats)
+                sbp_multiplier = 1.0 + (row['selected_by_percentage'] / 100) * 0.3
+                
+                estimated_xg = base_xg * price_multiplier * team_multiplier * sbp_multiplier
+                
+                # Apply position-specific caps to prevent unrealistic estimates
+                caps = {'GKP': 0.05, 'DEF': 0.35, 'MID': 0.70, 'FWD': 1.20}
+                return min(estimated_xg, caps[row['position']])
+            
+            # xA90 estimation: More dependent on position and team quality
+            def estimate_xa90(row):
+                base_rates = {'GKP': 0.05, 'DEF': 0.15, 'MID': 0.30, 'FWD': 0.20}
+                base_xa = base_rates[row['position']]
+                
+                # Price adjustment for creativity
+                if row['price_gbp'] >= 7.5:  # Premium creative players
+                    price_multiplier = 1.5 + (row['price_gbp'] - 7.5) * 0.2
+                elif row['price_gbp'] >= 5.5:  # Mid-tier 
+                    price_multiplier = 1.0 + (row['price_gbp'] - 5.5) * 0.25
+                else:  # Budget players
+                    price_multiplier = 0.6 + (row['price_gbp'] - 4.0) * 0.25
+                
+                # Team strength matters more for assists (better teams = more possession/creativity)
+                team_multiplier = 0.6 + (row['team_strength'] - 0.7) * 1.0
+                
+                # SBP adjustment
+                sbp_multiplier = 1.0 + (row['selected_by_percentage'] / 100) * 0.25
+                
+                estimated_xa = base_xa * price_multiplier * team_multiplier * sbp_multiplier
+                
+                # Apply caps
+                caps = {'GKP': 0.10, 'DEF': 0.40, 'MID': 0.80, 'FWD': 0.50}
+                return min(estimated_xa, caps[row['position']])
+            
+            # Generate estimates for missing players
+            estimated_xg = missing_data.apply(estimate_xg90, axis=1)
+            estimated_xa = missing_data.apply(estimate_xa90, axis=1)
+            
+            # Update the original dataframe
+            players_updated = players_df.copy()
+            
+            # Fill missing values with estimates
+            missing_indices = missing_data.index
+            for idx, est_xg, est_xa in zip(missing_indices, estimated_xg, estimated_xa):
+                if pd.isna(players_updated.loc[idx, 'xG90']):
+                    players_updated.loc[idx, 'xG90'] = est_xg
+                if pd.isna(players_updated.loc[idx, 'xA90']):
+                    players_updated.loc[idx, 'xA90'] = est_xa
+            
+            # Show examples of estimated players
+            if len(missing_data) > 0:
+                print("\nSample xG/xA estimations:")
+                sample_missing = missing_data.head(5)
+                for idx, (_, row) in enumerate(sample_missing.iterrows()):
+                    est_xg = estimated_xg.iloc[idx]
+                    est_xa = estimated_xa.iloc[idx] 
+                    print(f"  {row['web_name']} ({row['position']}, {row['name']}) £{row['price_gbp']}m: xG90={est_xg:.3f}, xA90={est_xa:.3f}")
+            
+            return players_updated
+        
+        # Apply statistical estimation model
+        players_xp = estimate_missing_xg_xa_rates(players_xp)
+        
+        # Fallback to conservative estimates for any remaining missing values
         # These values are intentionally below Premier League averages
         position_xg_defaults = {
             'GKP': 0.005,  # Minimal attacking contribution

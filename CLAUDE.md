@@ -81,10 +81,18 @@ See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
    - Probabilistic scenario weighting
 
 4. **Expected Points Engine** (`calculate_multi_gw_xp()`)
+   - **Statistical xG/xA Estimation** for players missing historical data
    - 5-gameweek temporal weighting (1.0, 0.9, 0.8, 0.7, 0.6)
    - Fixture difficulty scaling per gameweek
    - FPL scoring conversion (goals, assists, clean sheets, appearances)
    - Transfer risk flagging for poor GW2-3 fixtures
+
+   **xG/xA Estimation Model** (`estimate_missing_xg_xa_rates()`)
+   - **Multi-factor estimation**: Price, position, team strength, Selected By Percentage
+   - **Premium player boosts**: £8m+ players get significant xG/xA multipliers
+   - **Team quality adjustment**: Better teams (higher strength) create more chances
+   - **Position-specific caps**: Prevents unrealistic estimates (e.g., DEF max xG90: 0.35)
+   - **Ownership weighting**: Higher SBP suggests better underlying stats
 
 5. **Team Optimization** (`select_optimal_team()`)
    - Simulated Annealing with 5,000 iterations
@@ -195,13 +203,14 @@ git commit -m "Description"
 - pyarrow>=21.0.0 (efficient data I/O)
 
 **Key Model Assumptions:**
+- **Statistical xG/xA estimation** for new transfers using price, position, team strength, and SBP
 - **Enhanced minutes model** using SBP + availability rather than simple price proxy
 - **Team strength from 2023-24 final table** positions [0.7, 1.3] scaling
 - **Hardcoded league baselines** (μ_home=1.43, μ_away=1.15) for speed
 - **Single-point estimates** (no uncertainty propagation in v0.1)
 - **Simplified clean sheet probabilities** based on team strength and fixture difficulty
 - **No BPS/bonus, cards, saves, penalties** in v0.1 (core scoring only)
-- **Position-based xG/xA fallbacks** for players missing historical data
+- **Position-based xG/xA fallbacks** for edge cases after statistical estimation
 
 ## FPL Rules Reference
 
@@ -217,6 +226,7 @@ git commit -m "Description"
 
 **✅ COMPLETED (v0.1):**
 - Multi-gameweek xP calculations (GW1-5 weighted horizon)
+- **Statistical xG/xA estimation model** for new transfers and missing data
 - Fixture difficulty adjustments across 5-week period
 - Enhanced minutes model using Selected By Percentage (SBP) and availability status
 - Simulated Annealing team optimization with constraint satisfaction
@@ -248,3 +258,12 @@ git commit -m "Description"
 - Injury data integration
 - Bonus points (BPS) modeling
 - Sensitivity analysis and uncertainty quantification
+
+## Future Improvements
+
+### Feature Roadmap
+- **Heatmap Visualization**:
+  - Show upcoming 5 fixtures and difficulty for each team in a heatmap
+- **Transfer Window Analysis**:
+  - Investigate why new transfers like Wirtz and Ekitike aren't getting picked by the optimiser
+  - Need deeper understanding of transfer impact on expected points model
