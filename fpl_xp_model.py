@@ -1295,61 +1295,6 @@ def __(players_xp, np, pd):
 
 
 @app.cell
-def __(mo, team_summary, team_df):
-    mo.md(f"""
-    ### Your Optimal 5-Gameweek Squad (15 Players)
-    
-    **Budget Analysis:**
-    - **Total cost:** £{team_summary.get('total_cost', 0):.1f}m 
-    - **Budget used:** {team_summary.get('budget_used_pct', 0):.1f}% of £100m
-    - **Budget remaining:** £{team_summary.get('remaining_budget', 0):.1f}m
-    
-    **Starting 11 Performance (5-Week Horizon):**
-    - **Weighted 5-GW xP:** {team_summary.get('starting_11_xp', 0):.2f}
-    - **Championship Benchmark:** 370 points (74 × 5 weeks) → **{'✅ COMPETITIVE' if team_summary.get('starting_11_xp', 0) >= 60 else '⚠️ BELOW TARGET'}**
-    - **Starting 11 cost:** £{team_summary.get('starting_11_cost', 0):.1f}m
-    - **Average xP per starter:** {team_summary.get('avg_xp_per_starter', 0):.2f}
-    - **xP per £1m (starters):** {team_summary.get('xp_per_million_starters', 0):.2f}
-    
-    **Transfer Sustainability:**
-    - **Players at transfer risk:** {team_summary.get('transfer_risk_count', 0)}/15 (poor GW2-3 fixtures)
-    - **Squad longevity:** **{'✅ STABLE' if team_summary.get('transfer_risk_count', 0) <= 3 else '⚠️ HIGH TURNOVER'}**
-    
-    **Rule Compliance:**
-    - **Squad size:** {team_summary.get('total_players', 0)}/15 players
-    - **Max per team:** {team_summary.get('max_per_team', 0)}/3 allowed
-    - **Rule violations:** {team_summary.get('team_violations', 0)}
-    """)
-
-
-@app.cell
-def __(mo):
-    mo.md("### Starting 11 (Your Point-Scoring Team) - 5-Week Breakdown")
-
-@app.cell  
-def __(starting_11_df, mo):
-    # Display starting 11 with all rows visible
-    mo.ui.table(starting_11_df, page_size=15) if starting_11_df is not None and hasattr(starting_11_df, 'empty') and not starting_11_df.empty else "No starting 11 available"
-
-@app.cell
-def __(mo):
-    mo.md("### Full 15-Player Squad")
-
-@app.cell
-def __(team_df, mo):
-    # Display original unconstrained squad (before rerun button) with all 15 rows
-    mo.ui.table(team_df, page_size=15) if team_df is not None and hasattr(team_df, 'empty') and not team_df.empty else "No squad available"
-
-@app.cell
-def __(mo):
-    mo.md("### Transfer Risk Analysis")
-
-@app.cell
-def __(risky_squad_df, mo):
-    # Display original transfer risk analysis (before rerun button) with all rows
-    mo.ui.table(risky_squad_df, page_size=15) if len(risky_squad_df) > 0 else "No players in your selected team are flagged as high transfer risk - excellent squad stability!"
-
-@app.cell
 def __(mo):
     mo.md("## Interactive Team Customization")
 
