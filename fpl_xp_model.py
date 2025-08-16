@@ -360,9 +360,158 @@ def __(fixtures, teams, team_strength):
 
 
 @app.cell
-def __(mo, gw_sample_display):
-    mo.md("### GW1-5 Fixtures with Difficulty Scaling (Sample)")
-    gw_sample_display
+def __(mo, difficulty_matrix, teams, multi_gw_fixtures, pd):
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    mo.md("### Team Fixture Difficulty Heatmap (GW1-5)")
+    
+    # Create enhanced data with opponent information
+    def create_enhanced_fixture_data():
+        enhanced_data = []
+        
+        for _, team_row in teams.iterrows():
+            team_name = team_row['name']
+            team_id = team_row['team_id']
+            
+            if team_name in difficulty_matrix:
+                row_data = {'Team': team_name}
+                
+                for gw in [1, 2, 3, 4, 5]:
+                    # Get difficulty score
+                    difficulty = difficulty_matrix[team_name].get(gw, 1.0)
+                    
+                    # Find opponent for this gameweek
+                    home_fixture = multi_gw_fixtures[
+                        (multi_gw_fixtures['event'] == gw) & 
+                        (multi_gw_fixtures['home_team_id'] == team_id)
+                    ]
+                    away_fixture = multi_gw_fixtures[
+                        (multi_gw_fixtures['event'] == gw) & 
+                        (multi_gw_fixtures['away_team_id'] == team_id)
+                    ]
+                    
+                    opponent = "No fixture"
+                    venue = ""
+                    
+                    if len(home_fixture) > 0:
+                        opponent = home_fixture.iloc[0]['away_team']
+                        venue = "(H)"
+                    elif len(away_fixture) > 0:
+                        opponent = away_fixture.iloc[0]['home_team'] 
+                        venue = "(A)"
+                    
+                    # Store both difficulty and opponent info
+                    row_data[f'GW{gw}'] = difficulty
+                    row_data[f'GW{gw}_opponent'] = f"{opponent} {venue}".strip()
+                    
+                enhanced_data.append(row_data)
+        
+        return pd.DataFrame(enhanced_data)
+    
+    enhanced_df = create_enhanced_fixture_data()
+    
+    # Create heatmap data (just difficulty values)
+    heatmap_df = enhanced_df[['Team', 'GW1', 'GW2', 'GW3', 'GW4', 'GW5']].set_index('Team')
+    
+    # Create the heatmap
+    plt.figure(figsize=(8, 12))
+    sns.heatmap(
+        heatmap_df, 
+        annot=True, 
+        fmt='.2f', 
+        cmap='RdYlGn',  # Red = difficult (low values), Green = easy (high values)
+        center=1.0,     # Center colormap at neutral difficulty
+        cbar_kws={'label': 'Fixture Difficulty (higher = easier)'},
+        linewidths=0.5,
+        annot_kws={'size': 8}
+    )
+    
+    plt.title('Team Fixture Difficulty - Next 5 Gameweeks\n(Green = Easier, Red = Harder)', 
+              fontsize=14, fontweight='bold')
+    plt.xlabel('Gameweek', fontweight='bold')
+    plt.ylabel('Team', fontweight='bold')
+    plt.xticks(rotation=0)
+    plt.yticks(rotation=0)
+    plt.tight_layout()
+    
+    # Show the plot
+    plt.show()
+    
+    # Create enhanced display table with opponent info and conditional formatting
+    display_data = []
+    for _, row in enhanced_df.iterrows():
+        display_row = {'Team': row['Team']}
+        for gw in [1, 2, 3, 4, 5]:
+            # Combine difficulty and opponent in a readable format
+            difficulty = row[f'GW{gw}']
+            opponent = row[f'GW{gw}_opponent']
+            
+            # Format: "Opponent (H/A) [difficulty]"
+            if opponent != "No fixture":
+                display_row[f'GW{gw}'] = f"{opponent} [{difficulty:.3f}]"
+            else:
+                display_row[f'GW{gw}'] = f"No fixture [{difficulty:.3f}]"
+            
+            # Store raw difficulty for sorting
+            display_row[f'GW{gw}_sort'] = difficulty
+        
+        display_data.append(display_row)
+    
+    display_df = pd.DataFrame(display_data)
+    
+    # Sort by GW1 difficulty (descending = easier fixtures first)
+    display_df_sorted = display_df.sort_values('GW1_sort', ascending=False)
+    
+    # Remove sort columns from display
+    display_columns = ['Team', 'GW1', 'GW2', 'GW3', 'GW4', 'GW5']
+    display_df_final = display_df_sorted[display_columns].reset_index(drop=True)
+    
+    # Create enhanced table with visual difficulty indicators
+    def add_difficulty_indicators(df):
+        """Add visual difficulty indicators to the fixture data"""
+        enhanced_df = df.copy()
+        
+        for gw in ['GW1', 'GW2', 'GW3', 'GW4', 'GW5']:
+            enhanced_df[gw] = enhanced_df[gw].apply(lambda x: format_fixture_with_indicator(x))
+        
+        return enhanced_df
+    
+    def format_fixture_with_indicator(val):
+        """Add emoji indicators based on difficulty"""
+        if isinstance(val, str) and '[' in val:
+            try:
+                difficulty = float(val.split('[')[1].split(']')[0])
+                
+                # Add emoji indicators based on difficulty
+                if difficulty < 0.85:
+                    indicator = "🔴"  # Red for hard
+                elif difficulty < 1.15:
+                    indicator = "🟡"  # Yellow for medium
+                else:
+                    indicator = "🟢"  # Green for easy
+                
+                # Format: "🟢 Chelsea (A) [0.826]"
+                return f"{indicator} {val}"
+            except:
+                return val
+        return val
+    
+    # Apply visual indicators
+    final_display_df = add_difficulty_indicators(display_df_final)
+    
+    mo.vstack([
+        mo.md("""
+        **Enhanced Fixture Analysis:** Teams with opponents and difficulty scores
+        - 🟢 **Easy fixtures** (>1.15) - Favorable matchups
+        - 🟡 **Medium fixtures** (0.85-1.15) - Neutral difficulty  
+        - 🔴 **Hard fixtures** (<0.85) - Challenging opponents
+        - **(H)** = Home fixture, **(A)** = Away fixture
+        """),
+        mo.ui.table(final_display_df, page_size=20)
+    ])
+    
+    return enhanced_df
 
 
 @app.cell
