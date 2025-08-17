@@ -32,7 +32,11 @@ def __():
     
     # Data paths
     DATA_DIR = Path("../fpl-dataset-builder/data/")
-    return DATA_DIR, Path, np, pd
+    
+    # Import prediction storage system
+    from prediction_storage import save_predictions_from_model, PredictionStorage
+    
+    return DATA_DIR, Path, np, pd, save_predictions_from_model, PredictionStorage
 
 
 @app.cell
@@ -1723,6 +1727,108 @@ def __(constrained_team, pd, mo):
         mo.ui.table(_risk, page_size=15) if len(_risk) > 0 else "No players in your constrained team are flagged as high transfer risk - excellent squad stability!"
     else:
         "Click 'Rerun Optimization with Constraints' above to see transfer risk analysis for your constrained team."
+
+
+@app.cell
+def __(mo):
+    mo.md("## Save Predictions for Retro Analysis")
+
+
+@app.cell
+def __(mo, players_xp, optimal_team, save_predictions_from_model):
+    # Create gameweek input and save button
+    gameweek_input = mo.ui.number(
+        value=1,
+        start=1,
+        stop=38,
+        step=1,
+        label="Current Gameweek"
+    )
+    
+    save_predictions_button = mo.ui.run_button(
+        label="💾 Save Current Predictions"
+    )
+    
+    mo.vstack([
+        mo.md("""
+        **Save your predictions before the gameweek starts!**
+        
+        This will store your xP model predictions and optimal team for later comparison 
+        with actual results in the retro analysis tool.
+        """),
+        gameweek_input,
+        save_predictions_button
+    ])
+
+
+@app.cell
+def __(save_predictions_button, gameweek_input, players_xp, optimal_team, save_predictions_from_model, mo):
+    # Save predictions when button is clicked
+    if save_predictions_button.value and gameweek_input.value:
+        try:
+            # Prepare model parameters for metadata
+            model_params = {
+                'model_type': 'mvp_simulated_annealing',
+                'temporal_weights': {1: 1.0, 2: 0.9, 3: 0.8, 4: 0.7, 5: 0.6},
+                'team_strength_source': '2023_24_final_table',
+                'minutes_model': 'sbp_plus_availability',
+                'optimization_algorithm': 'simulated_annealing',
+                'optimization_iterations': 5000
+            }
+            
+            # Save predictions
+            result = save_predictions_from_model(
+                players_xp_df=players_xp,
+                optimal_team=optimal_team,
+                gameweek=gameweek_input.value,
+                model_params=model_params
+            )
+            
+            save_status = mo.md(f"""
+            ✅ **Successfully saved predictions for GW{gameweek_input.value}!**
+            
+            - **Predictions file:** `{result['predictions_file']}`
+            - **Team file:** `{result['team_file']}`
+            - **Metadata file:** `{result['metadata_file']}`
+            - **Timestamp:** {result['timestamp']}
+            
+            You can now use the retro analysis tool to compare these predictions 
+            with actual results after GW{gameweek_input.value} completes.
+            """)
+            
+        except Exception as e:
+            save_status = mo.md(f"❌ **Error saving predictions:** {str(e)}")
+    else:
+        save_status = mo.md("Enter a gameweek number and click 'Save Current Predictions' to store your predictions.")
+    
+    save_status
+
+
+@app.cell  
+def __(mo):
+    mo.md("""
+    ## Next Steps
+    
+    **Using the Retro Analysis Tool:**
+    
+    1. **Save your predictions** using the tool above before each gameweek starts
+    2. **Run the retro analysis** after gameweek completion:
+       ```bash
+       marimo run fpl_retro_analysis.py
+       ```
+    3. **Compare predictions vs actual results** to improve your model
+    4. **Identify patterns** in prediction accuracy by position, team, and player type
+    5. **Refine your model** based on systematic biases discovered
+    
+    **Available Analysis Types:**
+    - Prediction accuracy overview with error metrics
+    - Model component validation (xG, xA, minutes, fixtures)  
+    - Top performers vs predictions comparison
+    - Position-based accuracy analysis
+    - Transfer risk validation
+    
+    This creates a feedback loop for continuous model improvement!
+    """)
 
 
 if __name__ == "__main__":
