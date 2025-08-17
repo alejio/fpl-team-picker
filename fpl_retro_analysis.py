@@ -14,12 +14,12 @@ def __():
 def __():
     mo.md(
         r"""
-        # FPL Gameweek Retro Analysis
+        # FPL 2025-26 Season Retro Analysis
 
-        **Comprehensive performance evaluation and model validation**
+        **Current season performance evaluation and model validation**
         
-        Analyze prediction accuracy, validate model components, and generate actionable insights 
-        for improving your FPL team picker over time.
+        Analyze how your predictions performed against actual 2025-26 season results. 
+        Currently analyzing gameweek 1 data with live FPL performance metrics.
         """
     )
     return
@@ -57,13 +57,20 @@ def __():
 @app.cell
 def __(DATA_DIR, pd):
     def load_retro_datasets():
-        """Load datasets needed for retrospective analysis"""
-        print("Loading datasets for retro analysis...")
+        """Load datasets for 2025-26 season retrospective analysis"""
+        print("Loading 2025-26 season datasets for retro analysis...")
         
-        # Historical gameweek data (actual results)
-        historical_data = pd.read_csv(DATA_DIR / "fpl_historical_gameweek_data.csv")
+        # Load current season live gameweek data (2025-26)
+        try:
+            gameweek_data = pd.read_csv(DATA_DIR / "fpl_live_gameweek_1.csv")
+            # Add GW column for consistency
+            gameweek_data['GW'] = gameweek_data['event']
+            print(f"Loaded current season GW1 data: {len(gameweek_data)} player records")
+        except Exception as e:
+            print(f"Error loading live gameweek data: {e}")
+            gameweek_data = pd.DataFrame()
         
-        # Current players for mapping
+        # Current players for mapping names and positions
         players_current = pd.read_csv(DATA_DIR / "fpl_players_current.csv")
         
         # Teams for reference
@@ -72,12 +79,20 @@ def __(DATA_DIR, pd):
         # xG/xA rates for model validation
         xg_rates = pd.read_csv(DATA_DIR / "fpl_player_xg_xa_rates.csv")
         
-        print(f"Loaded: {len(historical_data)} historical records, {len(players_current)} current players")
+        # Load player deltas for recent performance trends
+        try:
+            player_deltas = pd.read_csv(DATA_DIR / "fpl_player_deltas_current.csv")
+            print(f"Loaded player deltas: {len(player_deltas)} records")
+        except Exception as e:
+            print(f"Player deltas not available: {e}")
+            player_deltas = pd.DataFrame()
         
-        return historical_data, players_current, teams, xg_rates
+        print(f"Ready for retro analysis: {len(gameweek_data)} GW records, {len(players_current)} current players")
+        
+        return gameweek_data, players_current, teams, xg_rates, player_deltas
     
-    historical_data, players_current, teams, xg_rates = load_retro_datasets()
-    return historical_data, load_retro_datasets, players_current, teams, xg_rates
+    gameweek_data, players_current, teams, xg_rates, player_deltas = load_retro_datasets()
+    return gameweek_data, load_retro_datasets, players_current, teams, xg_rates, player_deltas
 
 
 @app.cell
@@ -87,20 +102,84 @@ def __(mo):
 
 
 @app.cell
-def __(historical_data, mo):
-    # Check available gameweeks in the data
-    available_gws = sorted(historical_data['GW'].unique())
-    print(f"Available gameweeks: {available_gws}")
+def __(gameweek_data, players_current, mo, pd):
+    # Check available gameweeks in current season data
+    if 'GW' in gameweek_data.columns:
+        available_gws = sorted([int(gw) for gw in gameweek_data['GW'].unique() if pd.notna(gw)])
+    else:
+        # Fallback if no GW column
+        available_gws = [1]
+    print(f"Available gameweeks in 2025-26 season: {available_gws}")
     
-    # Show sample of historical data structure
-    sample_data = historical_data[['name', 'position', 'team', 'GW', 'total_points', 'xP', 'minutes', 'goals_scored', 'assists']].head(10)
+    # Create full player performance report with names
+    if len(gameweek_data) > 0:
+        # Merge with player names and details
+        performance_report = gameweek_data.merge(
+            players_current[['player_id', 'web_name', 'position', 'team_id', 'price_gbp']], 
+            on='player_id', 
+            how='left'
+        )
+        
+        # Calculate season totals (cumulative across all gameweeks)
+        season_totals = performance_report.groupby(['player_id', 'web_name', 'position', 'price_gbp']).agg({
+            'total_points': 'sum',
+            'minutes': 'sum', 
+            'goals_scored': 'sum',
+            'assists': 'sum',
+            'expected_goals': 'sum',
+            'expected_assists': 'sum',
+            'event': 'count'  # Number of gameweeks played
+        }).reset_index()
+        
+        # Rename event count to games_played
+        season_totals = season_totals.rename(columns={'event': 'games_played'})
+        
+        # Select key columns for the report
+        report_cols = ['web_name', 'position', 'total_points', 'games_played', 'minutes', 'goals_scored', 'assists', 
+                      'expected_goals', 'expected_assists', 'price_gbp']
+        available_report_cols = [col for col in report_cols if col in season_totals.columns]
+        
+        # Sort by total points descending
+        if 'total_points' in season_totals.columns:
+            full_report = season_totals[available_report_cols].sort_values('total_points', ascending=False)
+        else:
+            full_report = season_totals[available_report_cols]
+        
+        # Round numerical columns
+        numeric_cols = ['total_points', 'minutes', 'goals_scored', 'assists', 'expected_goals', 'expected_assists', 'price_gbp']
+        for col in numeric_cols:
+            if col in full_report.columns:
+                full_report[col] = full_report[col].round(2)
+    else:
+        full_report = pd.DataFrame()
     
-    mo.vstack([
+    # Check for data quality issues
+    data_quality_warning = ""
+    if len(full_report) > 0:
+        total_points_sum = full_report['total_points'].sum() if 'total_points' in full_report.columns else 0
+        players_with_points = (full_report['total_points'] > 0).sum() if 'total_points' in full_report.columns else 0
+        
+        # If very few players have points or total is suspiciously low, show warning
+        if total_points_sum < 1000 or players_with_points < 100:
+            data_quality_warning = mo.md("""
+            ⚠️ **Data Quality Warning**: The performance data appears incomplete or outdated. 
+            Some players may show 0 points despite actual performance (e.g., known goalscorers showing 0 goals).
+            This suggests the live data needs to be refreshed with post-match results.
+            """)
+    
+    display_components = [
         mo.md(f"**Available Gameweeks:** {', '.join(map(str, available_gws))}"),
-        mo.md("**Sample Historical Data:**"),
-        mo.ui.table(sample_data, page_size=10)
-    ])
-    return available_gws, sample_data
+        mo.md("**2025-26 Season Running Totals Report:**"),
+        mo.md(f"*All {len(full_report)} players with cumulative season performance - sorted by total points*")
+    ]
+    
+    if data_quality_warning:
+        display_components.insert(1, data_quality_warning)
+    
+    display_components.append(mo.ui.table(full_report, page_size=25))
+    
+    mo.vstack(display_components)
+    return available_gws, full_report
 
 
 @app.cell
@@ -111,24 +190,24 @@ def __(mo):
 
 @app.cell
 def __(available_gws, mo):
-    # Create gameweek selector
+    # Create gameweek selector (use simple format)
+    gw_options = {f"GW {gw}": int(gw) for gw in available_gws}
     gw_selector = mo.ui.dropdown(
-        options=[{"label": f"GW {gw}", "value": gw} for gw in available_gws],
-        value=available_gws[0] if available_gws else 1,
+        options=gw_options,
         label="Select Gameweek for Analysis"
     )
     
     # Analysis type selector
+    analysis_options = {
+        "Prediction Accuracy Overview": "accuracy",
+        "Model Component Validation": "components", 
+        "Top Performers vs Predictions": "performers",
+        "Position-Based Analysis": "positions",
+        "Team Selection Analysis": "team_selection",
+        "Transfer Risk Validation": "transfers"
+    }
     analysis_type = mo.ui.dropdown(
-        options=[
-            {"label": "Prediction Accuracy Overview", "value": "accuracy"},
-            {"label": "Model Component Validation", "value": "components"},
-            {"label": "Top Performers vs Predictions", "value": "performers"},
-            {"label": "Position-Based Analysis", "value": "positions"},
-            {"label": "Team Selection Analysis", "value": "team_selection"},
-            {"label": "Transfer Risk Validation", "value": "transfers"}
-        ],
-        value="accuracy",
+        options=analysis_options,
         label="Analysis Type"
     )
     
@@ -141,11 +220,15 @@ def __(available_gws, mo):
 
 
 @app.cell
-def __(gw_selector, historical_data):
-    # Filter data for selected gameweek
-    if gw_selector.value is not None:
-        gw_data = historical_data[historical_data['GW'] == gw_selector.value].copy()
-        print(f"Analyzing GW {gw_selector.value}: {len(gw_data)} player records")
+def __(gw_selector, gameweek_data, pd):
+    # Filter current season data for selected gameweek
+    if gw_selector.value is not None and 'GW' in gameweek_data.columns:
+        gw_data = gameweek_data[gameweek_data['GW'] == gw_selector.value].copy()
+        print(f"Analyzing 2025-26 GW {gw_selector.value}: {len(gw_data)} player records")
+    elif gw_selector.value is not None:
+        # Use all data if no GW column
+        gw_data = gameweek_data.copy()
+        print(f"Using all available 2025-26 data: {len(gw_data)} player records")
     else:
         gw_data = pd.DataFrame()
         print("No gameweek selected")
@@ -155,41 +238,36 @@ def __(gw_selector, historical_data):
 
 @app.cell
 def __(mo):
-    mo.md("## Prediction Accuracy Analysis")
+    mo.md("## GW1 2025-26 Performance Analysis")
     return
 
 
 @app.cell
-def __(gw_data, analysis_type, pd, np, plt, sns, mo):
-    def analyze_prediction_accuracy(gw_df):
-        """Analyze how well xP predictions matched actual points"""
+def __(gw_data, analysis_type, players_current, pd, np, plt, sns, mo):
+    def analyze_current_season_performance(gw_df):
+        """Analyze 2025-26 season gameweek 1 performance"""
         if len(gw_df) == 0:
             return pd.DataFrame(), {}
         
-        # Clean data - ensure we have both predictions and actuals
-        valid_data = gw_df.dropna(subset=['xP', 'total_points']).copy()
+        # For current season analysis, focus on actual performance metrics
+        # Include player_id for merging with names later
+        performance_cols = ['player_id', 'total_points', 'minutes', 'goals_scored', 'assists', 'expected_goals', 'expected_assists']
+        available_cols = [col for col in performance_cols if col in gw_df.columns]
         
-        if len(valid_data) == 0:
-            return pd.DataFrame(), {"error": "No valid prediction/actual pairs found"}
+        if len(available_cols) == 0:
+            return pd.DataFrame(), {"error": "No performance data available"}
         
-        # Calculate prediction accuracy metrics
-        valid_data['prediction_error'] = valid_data['total_points'] - valid_data['xP']
-        valid_data['absolute_error'] = abs(valid_data['prediction_error'])
-        valid_data['percentage_error'] = np.where(
-            valid_data['total_points'] != 0,
-            (valid_data['prediction_error'] / valid_data['total_points']) * 100,
-            0
-        )
+        valid_data = gw_df[available_cols].copy()
         
-        # Summary statistics
+        # Summary statistics for current season performance
         metrics = {
             'total_players': len(valid_data),
-            'mean_absolute_error': valid_data['absolute_error'].mean(),
-            'rmse': np.sqrt((valid_data['prediction_error'] ** 2).mean()),
-            'correlation': valid_data['xP'].corr(valid_data['total_points']),
-            'mean_predicted': valid_data['xP'].mean(),
-            'mean_actual': valid_data['total_points'].mean(),
-            'prediction_bias': valid_data['prediction_error'].mean()  # Positive = under-predicted
+            'points_scored': valid_data['total_points'].sum() if 'total_points' in valid_data.columns else 0,
+            'average_points': valid_data['total_points'].mean() if 'total_points' in valid_data.columns else 0,
+            'players_with_points': (valid_data['total_points'] > 0).sum() if 'total_points' in valid_data.columns else 0,
+            'total_goals': valid_data['goals_scored'].sum() if 'goals_scored' in valid_data.columns else 0,
+            'total_assists': valid_data['assists'].sum() if 'assists' in valid_data.columns else 0,
+            'minutes_played': valid_data['minutes'].sum() if 'minutes' in valid_data.columns else 0
         }
         
         return valid_data, metrics
@@ -237,42 +315,48 @@ def __(gw_data, analysis_type, pd, np, plt, sns, mo):
         return fig
     
     if analysis_type.value == "accuracy" and len(gw_data) > 0:
-        accuracy_data, accuracy_metrics = analyze_prediction_accuracy(gw_data)
+        performance_data, performance_metrics = analyze_current_season_performance(gw_data)
         
-        if 'error' not in accuracy_metrics:
-            # Create visualization
-            fig = create_accuracy_visualization(accuracy_data, accuracy_metrics)
-            
+        if 'error' not in performance_metrics:
             # Show metrics
             metrics_display = mo.md(f"""
-            ### Prediction Accuracy Metrics (GW {gw_selector.value})
+            ### GW1 2025-26 Performance Metrics
             
-            - **Players Analyzed:** {accuracy_metrics['total_players']}
-            - **Mean Absolute Error:** {accuracy_metrics['mean_absolute_error']:.2f} points
-            - **RMSE:** {accuracy_metrics['rmse']:.2f} points  
-            - **Correlation:** {accuracy_metrics['correlation']:.3f}
-            - **Prediction Bias:** {accuracy_metrics['prediction_bias']:.2f} points {'(Over-predicting)' if accuracy_metrics['prediction_bias'] < 0 else '(Under-predicting)' if accuracy_metrics['prediction_bias'] > 0 else '(Unbiased)'}
-            - **Mean Predicted:** {accuracy_metrics['mean_predicted']:.2f} xP
-            - **Mean Actual:** {accuracy_metrics['mean_actual']:.2f} points
+            - **Total Players:** {performance_metrics['total_players']}
+            - **Points Scored:** {performance_metrics['points_scored']} total points
+            - **Average Points:** {performance_metrics['average_points']:.2f} points per player
+            - **Players with Points:** {performance_metrics['players_with_points']} ({performance_metrics['players_with_points']/performance_metrics['total_players']*100:.1f}%)
+            - **Total Goals:** {performance_metrics['total_goals']} goals
+            - **Total Assists:** {performance_metrics['total_assists']} assists
+            - **Minutes Played:** {performance_metrics['minutes_played']} total minutes
             """)
             
-            # Show plot
-            plt.show()
-            
-            accuracy_display = mo.vstack([
-                metrics_display,
-                mo.md("### Top Prediction Errors"),
-                mo.ui.table(accuracy_data.nlargest(15, 'absolute_error')[
-                    ['name', 'position', 'team', 'xP', 'total_points', 'prediction_error', 'absolute_error']
-                ].round(2), page_size=15)
-            ])
+            # Show top performers with names
+            if 'total_points' in performance_data.columns:
+                # Merge with player names for top performers display
+                top_performers_with_names = performance_data.merge(
+                    players_current[['player_id', 'web_name', 'position']], 
+                    on='player_id', 
+                    how='left'
+                ).nlargest(15, 'total_points')
+                
+                display_cols = [col for col in ['web_name', 'position', 'total_points', 'minutes', 'goals_scored', 'assists'] if col in top_performers_with_names.columns]
+                
+                performance_display = mo.vstack([
+                    metrics_display,
+                    mo.md("### Top Performers GW1"),
+                    mo.ui.table(top_performers_with_names[display_cols], page_size=15)
+                ])
+            else:
+                performance_display = metrics_display
         else:
-            accuracy_display = mo.md(f"**Error:** {accuracy_metrics['error']}")
+            performance_display = mo.md(f"**Error:** {performance_metrics['error']}")
     else:
-        accuracy_display = mo.md("Select 'Prediction Accuracy Overview' to see accuracy analysis.")
+        performance_display = mo.md("Select 'Prediction Accuracy Overview' to see GW1 performance analysis.")
+        performance_data, performance_metrics = pd.DataFrame(), {}
     
-    accuracy_display
-    return accuracy_data, accuracy_metrics, analyze_prediction_accuracy
+    performance_display
+    return performance_data, performance_metrics, analyze_current_season_performance
 
 
 @app.cell
@@ -282,14 +366,21 @@ def __(mo):
 
 
 @app.cell
-def __(gw_data, analysis_type, gw_selector, pd, np, plt, mo):
+def __(gw_data, analysis_type, gw_selector, players_current, pd, np, plt, mo):
     def analyze_model_components(gw_df):
         """Analyze individual model components vs actual results"""
         if len(gw_df) == 0:
             return {}, {}
         
+        # Merge with player data to get position information
+        merged_data = gw_df.merge(
+            players_current[['player_id', 'web_name', 'position']], 
+            on='player_id', 
+            how='left'
+        )
+        
         # Filter for players who actually played
-        played_data = gw_df[gw_df['minutes'] > 0].copy()
+        played_data = merged_data[merged_data['minutes'] > 0].copy()
         
         if len(played_data) == 0:
             return {}, {"error": "No players with minutes found"}
@@ -341,11 +432,11 @@ def __(gw_data, analysis_type, gw_selector, pd, np, plt, mo):
         )
         
         performance_analysis = played_data.groupby('performance_category').agg({
-            'xP': 'mean',
             'total_points': 'mean',
-            'name': 'count'
+            'web_name': 'count',
+            'minutes': 'mean'
         }).round(2)
-        performance_analysis.columns = ['Mean xP', 'Mean Actual', 'Players']
+        performance_analysis.columns = ['Mean Points', 'Players', 'Mean Minutes']
         
         return analysis, {'performance_by_category': performance_analysis}
     
@@ -402,50 +493,55 @@ def __(mo):
 
 
 @app.cell
-def __(gw_data, analysis_type, gw_selector, mo):
+def __(gw_data, analysis_type, gw_selector, players_current, mo):
     def analyze_top_performers(gw_df):
         """Analyze top performers vs model predictions"""
         if len(gw_df) == 0:
             return pd.DataFrame(), pd.DataFrame()
         
+        # Merge with player data to get names and positions
+        merged_data = gw_df.merge(
+            players_current[['player_id', 'web_name', 'position']], 
+            on='player_id', 
+            how='left'
+        )
+        
         # Get players who actually played
-        played_data = gw_df[gw_df['minutes'] > 0].copy()
+        played_data = merged_data[merged_data['minutes'] > 0].copy()
         
         if len(played_data) == 0:
             return pd.DataFrame(), pd.DataFrame()
         
-        # Top actual performers
+        # Top actual performers  
         top_actual = played_data.nlargest(15, 'total_points')[
-            ['name', 'position', 'team', 'total_points', 'xP', 'minutes', 'goals_scored', 'assists']
+            ['web_name', 'position', 'total_points', 'minutes', 'goals_scored', 'assists']
         ].copy()
-        top_actual['prediction_accuracy'] = top_actual['total_points'] - top_actual['xP']
         
-        # Top predicted performers (high xP)
-        top_predicted = played_data.nlargest(15, 'xP')[
-            ['name', 'position', 'team', 'total_points', 'xP', 'minutes', 'goals_scored', 'assists']  
+        # For current season analysis without stored predictions, show top performers by different metrics
+        top_by_goals = played_data.nlargest(10, 'goals_scored')[
+            ['web_name', 'position', 'total_points', 'goals_scored', 'minutes']
         ].copy()
-        top_predicted['prediction_accuracy'] = top_predicted['total_points'] - top_predicted['xP']
         
-        return top_actual, top_predicted
+        return top_actual, top_by_goals
     
     if analysis_type.value == "performers" and len(gw_data) > 0:
-        top_actual, top_predicted = analyze_top_performers(gw_data)
+        top_actual, top_by_goals = analyze_top_performers(gw_data)
         
         if len(top_actual) > 0:
             performers_display = mo.vstack([
                 mo.md(f"### Top Performers Analysis (GW {gw_selector.value})"),
                 
-                mo.md("**Highest Point Scorers (Actual):**"),
+                mo.md("**Highest Point Scorers (GW1):**"),
                 mo.ui.table(top_actual.round(2), page_size=15),
                 
-                mo.md("**Highest xP Players (Predicted):**"),  
-                mo.ui.table(top_predicted.round(2), page_size=15),
+                mo.md("**Top Goal Scorers:**"),  
+                mo.ui.table(top_by_goals.round(2), page_size=10),
                 
                 mo.md("""
                 **Key Insights:**
-                - *Prediction Accuracy* = Actual Points - xP (positive = under-predicted, negative = over-predicted)
-                - Compare top actual performers vs top predicted to identify model blind spots
-                - Look for patterns in over/under-predictions by position or team
+                - Compare top point scorers vs top goal scorers to identify value picks
+                - Look for players with high minutes but low points (potential future targets)
+                - Analyze position distribution of top performers for formation insights
                 """)
             ])
         else:
@@ -464,50 +560,37 @@ def __(mo):
 
 
 @app.cell
-def __(gw_data, analysis_type, gw_selector, pd, mo):
+def __(gw_data, analysis_type, gw_selector, players_current, pd, mo):
     def analyze_by_position(gw_df):
         """Analyze prediction accuracy by position"""
         if len(gw_df) == 0:
             return pd.DataFrame()
         
+        # Merge with player data to get position information
+        merged_data = gw_df.merge(
+            players_current[['player_id', 'web_name', 'position']], 
+            on='player_id', 
+            how='left'
+        )
+        
         # Filter for players with valid data
-        valid_data = gw_df.dropna(subset=['xP', 'total_points']).copy()
+        valid_data = merged_data.dropna(subset=['total_points']).copy()
         
         if len(valid_data) == 0:
             return pd.DataFrame()
         
         # Calculate prediction metrics by position
         position_analysis = valid_data.groupby('position').agg({
-            'name': 'count',
-            'xP': 'mean',
-            'total_points': 'mean',
-            'minutes': 'mean'
+            'web_name': 'count',
+            'total_points': ['mean', 'sum'],
+            'minutes': 'mean',
+            'goals_scored': 'sum',
+            'assists': 'sum'
         }).round(2)
         
-        # Calculate prediction errors by position
-        valid_data['prediction_error'] = valid_data['total_points'] - valid_data['xP'] 
-        valid_data['absolute_error'] = abs(valid_data['prediction_error'])
-        
-        error_analysis = valid_data.groupby('position').agg({
-            'prediction_error': 'mean',
-            'absolute_error': 'mean'
-        }).round(2)
-        
-        # Combine analyses
-        position_stats = position_analysis.join(error_analysis)
-        position_stats.columns = ['Players', 'Mean xP', 'Mean Actual', 'Mean Minutes', 'Prediction Bias', 'Mean Abs Error']
-        
-        # Add correlation by position (if enough players)
-        correlations = []
-        for pos in position_stats.index:
-            pos_data = valid_data[valid_data['position'] == pos]
-            if len(pos_data) >= 3:  # Need at least 3 players for meaningful correlation
-                corr = pos_data['xP'].corr(pos_data['total_points'])
-                correlations.append(corr)
-            else:
-                correlations.append(np.nan)
-        
-        position_stats['Correlation'] = correlations
+        # Flatten multi-level column names from aggregation
+        position_analysis.columns = ['Players', 'Avg Points', 'Total Points', 'Avg Minutes', 'Total Goals', 'Total Assists']
+        position_stats = position_analysis
         
         return position_stats.round(3)
     
@@ -541,7 +624,7 @@ def __(mo):
 
 
 @app.cell
-def __(gw_data, analysis_type, gw_selector, mo, pd, PredictionStorage):
+def __(gw_data, analysis_type, gw_selector, players_current, mo, pd, PredictionStorage):
     def analyze_optimal_team_performance(gw_df, gameweek):
         """Analyze how the optimal team performed vs alternatives"""
         storage = PredictionStorage()
@@ -554,11 +637,18 @@ def __(gw_data, analysis_type, gw_selector, mo, pd, PredictionStorage):
         
         optimal_team_data = prediction_data['team_selections']['optimal_15']
         
+        # Merge gameweek data with player information
+        merged_data = gw_df.merge(
+            players_current[['player_id', 'web_name', 'position']], 
+            on='player_id', 
+            how='left'
+        )
+        
         # Get actual performance for optimal team players
         optimal_player_ids = [p['player_id'] for p in optimal_team_data]
         
-        # Filter gameweek data for optimal team players
-        optimal_performance = gw_df[gw_df['element'].isin(optimal_player_ids)].copy()
+        # Filter merged data for optimal team players  
+        optimal_performance = merged_data[merged_data['player_id'].isin(optimal_player_ids)].copy()
         
         if len(optimal_performance) == 0:
             return None, "Could not match optimal team players with actual results"
@@ -589,7 +679,7 @@ def __(gw_data, analysis_type, gw_selector, mo, pd, PredictionStorage):
             ].nlargest(position_counts.get(position, 0), 'total_points')
             
             best_11_points += pos_players['total_points'].sum()
-            best_11_players.extend(pos_players['name'].tolist())
+            best_11_players.extend(pos_players['web_name'].tolist())
         
         team_analysis['best_11_points'] = best_11_points
         team_analysis['best_11_players'] = best_11_players
@@ -656,8 +746,7 @@ def __(gw_data, analysis_type, gw_selector, mo, pd, PredictionStorage):
         # Merge with actual results
         merged = predictions_df.merge(
             gw_df,
-            left_on='player_id',
-            right_on='element',
+            on='player_id',
             how='inner',
             suffixes=('_pred', '_actual')
         )
