@@ -160,13 +160,29 @@ def __(fetch_manager_team, manager_id_input, players, teams, mo, pd):
                 lambda x: '(C)' if x == captain_id else '(VC)' if x == vice_captain_id else ''
             )
             
+            # Add more stats to display
+            display_cols = [
+                'web_name', 'position', 'name', 'price', 'role',
+                'total_points', 'points_per_game', 'form', 'selected_by_percent',
+                'goals_scored', 'assists', 'clean_sheets', 'goals_conceded',
+                'own_goals', 'penalties_saved', 'penalties_missed', 'yellow_cards', 
+                'red_cards', 'saves', 'bonus', 'bps', 'influence', 'creativity', 'threat',
+                'ict_index', 'expected_goals', 'expected_assists', 'expected_goal_involvements',
+                'expected_goals_conceded', 'minutes', 'status'
+            ]
+            
+            # Only include columns that exist in the dataframe
+            available_cols = [col for col in display_cols if col in current_squad.columns]
+            
             team_display = mo.vstack([
                 mo.md(f"### ✅ {team_data['entry_name']}"),
                 mo.md(f"**Points:** {team_data['total_points']:,} | **Bank:** £{team_data['bank']:.1f}m | **Value:** £{team_data['team_value']:.1f}m"),
+                mo.md("**Current Squad (All Available Stats):**"),
                 mo.ui.table(
-                    current_squad[['web_name', 'position', 'name', 'price', 'role']].round(1),
+                    current_squad[available_cols].round(2),
                     page_size=15
-                )
+                ),
+                mo.md(f"**Available columns:** {', '.join(available_cols)}")
             ])
         else:
             team_display = mo.md("❌ Could not load team data")
@@ -313,16 +329,30 @@ def __(current_squad, mo, pd):
             # Bench (remaining players)
             bench = squad[~squad['player_id'].isin(best_11['player_id'])].nlargest(4, 'score')
             
+            # Enhanced display for starting 11
+            starting_11_cols = [
+                'web_name', 'position', 'name', 'price', 'score',
+                'total_points', 'points_per_game', 'form', 'selected_by_percent',
+                'goals_scored', 'assists', 'minutes', 'status'
+            ]
+            available_starting_cols = [col for col in starting_11_cols if col in best_11.columns]
+            
+            bench_cols = [
+                'web_name', 'position', 'name', 'price',
+                'total_points', 'points_per_game', 'form', 'minutes'
+            ]
+            available_bench_cols = [col for col in bench_cols if col in bench.columns]
+            
             return mo.vstack([
                 mo.md(f"### ⚽ Best Formation: {best_formation['name']}"),
                 mo.md("**Starting 11:**"),
                 mo.ui.table(
-                    best_11[['web_name', 'position', 'name', 'price', 'score']].round(2),
+                    best_11[available_starting_cols].round(2),
                     page_size=11
                 ),
                 mo.md("**Bench:**"),
                 mo.ui.table(
-                    bench[['web_name', 'position', 'name', 'price']].round(1),
+                    bench[available_bench_cols].round(2),
                     page_size=4
                 )
             ]), best_11
@@ -365,12 +395,20 @@ def __(starting_11, mo):
         captain = captain_options.iloc[0]
         vice_captain = captain_options.iloc[1] if len(captain_options) > 1 else captain
         
+        # Enhanced captain options display
+        captain_display_cols = [
+            'web_name', 'position', 'name', 'price', 'captain_score',
+            'total_points', 'points_per_game', 'form', 'selected_by_percent',
+            'goals_scored', 'assists', 'expected_goals', 'expected_assists'
+        ]
+        available_captain_cols = [col for col in captain_display_cols if col in captain_options.columns]
+        
         return mo.vstack([
             mo.md(f"### 👑 **Captain:** {captain['web_name']}"),
             mo.md(f"### ⚪ **Vice-Captain:** {vice_captain['web_name']}"),
             mo.md("**Top Captain Options:**"),
             mo.ui.table(
-                captain_options[['web_name', 'position', 'name', 'price', 'captain_score']].round(2),
+                captain_options[available_captain_cols].round(2),
                 page_size=3
             )
         ])
