@@ -6,25 +6,72 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This is a Fantasy Premier League (FPL) analysis suite that provides both season-start team building and weekly gameweek management. The project implements a comprehensive mathematical framework combining Poisson distributions, team ratings, player performance metrics, fixture analysis, and live data integration for optimal FPL decision making.
 
-## Dataset Location
+## Data Loading
 
-The project relies on datasets located in `../fpl-dataset-builder/data/`. Key files include:
+This project now uses the fpl-dataset-builder database client library instead of CSV files.
 
-- **fpl_players_current.csv**: Current season player data (prices, positions, teams)
-- **vaastav_full_player_history_2024_2025.csv**: Comprehensive historical player statistics including form, ICT index, points per game
-- **fpl_player_xg_xa_rates.csv**: Expected goals (xG90) and expected assists (xA90) rates per 90 minutes
-- **fpl_fixtures_normalized.csv**: Normalized fixture data with team IDs and kickoff times
-- **match_results_previous_season.csv**: Historical match results for Poisson baseline calculations
-- **fpl_teams_current.csv**: Team reference data for ID lookups
-- **injury_tracking_template.csv**: Player availability tracking
+### Usage
+```python
+# Load datasets from database
+from client import (
+    get_current_players,
+    get_current_teams,
+    get_fixtures_normalized,
+    get_player_xg_xa_rates,
+    get_gameweek_live_data
+)
 
-### Live Data Files (NEW)
-- **fpl_live_gameweek_{n}.csv**: Real-time player performance data for active/completed gameweeks
-- **fpl_player_deltas_current.csv**: Week-over-week performance and market movement tracking
-- **fpl_manager_summary.csv**: Manager team performance and rankings (optional)
-- **fpl_league_standings_current.csv**: Multi-league position tracking (optional)
+players = get_current_players()
+teams = get_current_teams()
+fixtures = get_fixtures_normalized()
+```
 
-See `../fpl-dataset-builder/data/DATASET.md` for complete dataset documentation.
+### Available Data Functions
+- `get_current_players()` - Current season player data (prices, positions, teams)
+- `get_current_teams()` - Team reference data for ID lookups
+- `get_fixtures_normalized()` - Normalized fixture data with team IDs and kickoff times
+- `get_player_xg_xa_rates()` - Expected goals (xG90) and expected assists (xA90) rates per 90 minutes
+- `get_gameweek_live_data(gw)` - Real-time player performance data for active/completed gameweeks
+- `get_player_deltas_current()` - Week-over-week performance and market movement tracking
+- `get_database_summary()` - Database status and table information
+
+### Benefits
+- Always fresh data from centralized database
+- No CSV file dependencies or path management
+- Better performance than file I/O
+- Single source of truth shared with dataset builder
+- Consistent DataFrame structure maintained
+
+### Installation
+The fpl-dataset-builder is configured as a local dependency. Simply run:
+
+```bash
+uv sync
+```
+
+This will automatically install fpl-dataset-builder from the local path along with all its dependencies.
+
+**Configuration in pyproject.toml:**
+```toml
+dependencies = [
+    # ... other dependencies  
+    "fpl-dataset-builder",
+]
+
+[tool.uv.sources]
+fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
+```
+
+### Data Coverage
+The database includes all the data previously available in CSV files:
+- Current season player data with prices, positions, teams
+- Historical player statistics including form, ICT index, points per game
+- Expected goals (xG90) and expected assists (xA90) rates per 90 minutes
+- Normalized fixture data with team IDs and kickoff times
+- Historical match results for Poisson baseline calculations
+- Player availability tracking and injury status
+- Live gameweek performance data
+- Week-over-week performance and market movement tracking
 
 ## Expected Points Models
 
@@ -152,9 +199,11 @@ The suite includes two complementary xP calculation approaches:
    - Dynamic form multipliers based on recent point trends
    - Enhanced minutes prediction using live start/substitute data
 
-9. **Gameweek Optimization Suite**
-   - **Starting 11 Optimizer**: Formation-flexible lineup selection
-   - **Transfer Analysis Engine**: Hit calculations and opportunity cost analysis
+9. **Smart Gameweek Optimization Suite**
+   - **Constraint-Based Optimization**: Pre-optimization player inclusion/exclusion controls
+   - **Smart Transfer Decision Engine**: Auto-selects optimal number of transfers (0-3) based on net XP after penalties
+   - **Formation-Flexible Starting 11**: Automatically finds best lineup from optimal squad
+   - **Transfer Analysis Engine**: Hit calculations and opportunity cost analysis with scenario comparison
    - **Captain Selection Tool**: Risk-adjusted captaincy recommendations
    - **Squad Management**: Budget tracking and constraint validation
 
@@ -311,13 +360,16 @@ git commit -m "Description"
 - Budget utilization optimization and efficiency tracking
 - Team customization with must-include/exclude player constraints
 
-**✅ COMPLETED - Gameweek Manager (v1.0):**
+**✅ COMPLETED - Gameweek Manager (v1.1):**
 - **Live data integration** with real-time gameweek performance tracking
 - **Form-weighted xP calculations** blending recent performance (70%) with season baseline (30%)
 - **Performance delta analysis** for week-over-week trend identification
 - **Momentum indicators** with visual form tracking (🔥📈➡️📉❄️)
 - **Enhanced minutes prediction** using live start/substitute data
-- **Single gameweek optimization** for weekly lineup decisions
+- **Smart transfer optimization** with automatic 0-3 transfer decision based on net XP after penalties
+- **Constraint-based optimization** with pre-optimization player inclusion/exclusion controls
+- **Comprehensive scenario analysis** comparing all transfer options with XP gain calculations
+- **Paginated player display** showing all players ranked by expected points
 - **Transfer analysis engine** with hit calculations and opportunity cost analysis
 - **Captain selection tools** with risk-adjusted recommendations
 - **Squad management suite** with budget tracking and constraint validation

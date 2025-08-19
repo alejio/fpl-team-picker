@@ -16,10 +16,12 @@ This suite provides two specialized tools for different FPL decision points:
 - **Transfer risk analysis** - Identifies players with poor upcoming fixtures
 
 ### ⚡ Weekly Gameweek Manager (`fpl_gameweek_manager.py`)
-**Form-weighted predictions with live data for weekly decisions**
+**Form-weighted predictions with smart optimization for weekly decisions**
 - **Live data integration** - Real-time performance tracking and market movements
 - **Form-weighted xP** - Blends recent performance (70%) with season baseline (30%)
-- **Transfer analysis** - Hit calculations and opportunity cost assessment
+- **Smart transfer optimization** - Auto-selects optimal 0-3 transfers based on net XP after penalties
+- **Constraint-based optimization** - Pre-optimization player inclusion/exclusion controls
+- **Comprehensive scenario analysis** - All transfer options compared with XP gain calculations
 - **Captain selection** - Risk-adjusted captaincy recommendations
 - **Retro analysis** - Post-gameweek validation and model improvement
 
@@ -27,22 +29,22 @@ This suite provides two specialized tools for different FPL decision points:
 
 ### Prerequisites
 - Python 3.13+
-- Access to FPL datasets (see [Dataset Requirements](#dataset-requirements))
+- Access to fpl-dataset-builder (database client for FPL data)
 
 ### Installation
 ```bash
-# Clone the repository
-git clone <repository-url>
+# Clone both repositories
+git clone <fpl-team-picker-url>
+git clone <fpl-dataset-builder-url>
+
+# Install team picker with database dependency
 cd fpl-team-picker
-
-# Install dependencies using uv (recommended)
-uv sync
-
-# Or using pip
-pip install -e .
+uv sync  # Automatically installs fpl-dataset-builder from local path
 ```
 
 ### Basic Usage
+
+> **Prerequisites:** Ensure fpl-dataset-builder database is populated with current FPL data before running analysis tools.
 
 **Season Start - Initial Squad Building:**
 ```bash
@@ -79,9 +81,10 @@ marimo edit fpl_gameweek_manager.py  # Weekly management tool
 2. Track momentum indicators and form changes
 
 The interfaces provide interactive controls for:
-- Constraint customization (budget, must-include/exclude players)
-- Real-time optimization with live data
-- Transfer analysis with hit calculations
+- Pre-optimization constraint customization (must-include/exclude players)
+- Smart transfer optimization with automatic 0-3 transfer selection
+- Real-time optimization with live data and comprehensive scenario analysis
+- Transfer analysis with hit calculations and XP gain comparisons
 - Formation flexibility and lineup optimization
 
 ## 📊 How It Works
@@ -142,28 +145,38 @@ The model provides:
 - Formation flexibility analysis
 - Bench vs starter value distribution
 
-## 📁 Dataset Requirements
+## 🗄️ Data Architecture
 
-This project requires FPL datasets located in `../fpl-dataset-builder/data/`:
+This project uses the **fpl-dataset-builder** database client for all data access:
 
-**Core Files (Required):**
-- `fpl_players_current.csv` - Current season player data (prices, positions, teams)
-- `fpl_player_xg_xa_rates.csv` - xG90/xA90 rates per player
-- `fpl_fixtures_normalized.csv` - Fixture data with team IDs
-- `fpl_teams_current.csv` - Team reference data
+### Database Integration
+- **Centralized SQLite database** - Single source of truth for all FPL data
+- **Real-time updates** - Always fresh data with no stale CSV files
+- **Better performance** - Database queries faster than file I/O
+- **Automatic management** - No manual file handling required
 
-**Live Data Files (Enhanced Features):**
-- `fpl_live_gameweek_{n}.csv` - Real-time gameweek performance data
-- `fpl_player_deltas_current.csv` - Week-over-week performance tracking
-- `fpl_manager_summary.csv` - Manager team performance (optional)
-- `fpl_league_standings_current.csv` - League position tracking (optional)
+### Data Access
+```python
+# Load data from database
+from client import (
+    get_current_players,    # Current season player data
+    get_current_teams,      # Team reference data  
+    get_fixtures_normalized, # Fixture data with team IDs
+    get_player_xg_xa_rates, # xG90/xA90 rates per player
+    get_gameweek_live_data, # Real-time gameweek performance
+    get_player_deltas_current # Week-over-week tracking
+)
+```
 
-**Historical Enhancement Files:**
-- `vaastav_full_player_history_2024_2025.csv` - Comprehensive historical statistics
-- `match_results_previous_season.csv` - Historical match results
-- `injury_tracking_template.csv` - Player availability tracking
+### Available Data
+- **Current season players** - Prices, positions, teams, availability status
+- **xG/xA rates** - Expected goals and assists per 90 minutes
+- **Fixtures** - Normalized with team IDs and difficulty ratings
+- **Live gameweek data** - Real-time performance tracking
+- **Performance deltas** - Week-over-week trends and market movements
+- **Historical statistics** - Comprehensive player performance history
 
-> **Note:** The FPL dataset builder is a separate project. Core files enable basic functionality; live data files unlock enhanced gameweek management features.
+> **Note:** The fpl-dataset-builder handles all data fetching, processing, and storage. This project focuses purely on analysis and optimization.
 
 ## ⚡ Implementation Status
 
@@ -177,10 +190,14 @@ This project requires FPL datasets located in `../fpl-dataset-builder/data/`:
 - Formation-flexible starting 11 selection (8 valid formations)
 - Transfer risk analysis and fixture difficulty assessment
 
-**Weekly Gameweek Manager (v1.0):**
+**Weekly Gameweek Manager (v1.1):**
 - Live data integration with real-time performance tracking
 - Form-weighted xP calculations blending recent performance with baseline
 - Performance delta analysis and momentum tracking
+- Smart transfer optimization with automatic 0-3 transfer decision based on net XP
+- Constraint-based optimization with pre-optimization player inclusion/exclusion controls
+- Comprehensive scenario analysis comparing all transfer options with XP gain calculations
+- Paginated player display showing all players ranked by expected points
 - Transfer analysis engine with hit calculations
 - Captain selection tools with risk assessment
 - Retro analysis framework for model validation
