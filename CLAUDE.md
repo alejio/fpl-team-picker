@@ -199,9 +199,11 @@ The suite includes two complementary xP calculation approaches:
    - Dynamic form multipliers based on recent point trends
    - Enhanced minutes prediction using live start/substitute data
 
-9. **Gameweek Optimization Suite**
-   - **Starting 11 Optimizer**: Formation-flexible lineup selection
-   - **Transfer Analysis Engine**: Hit calculations and opportunity cost analysis
+9. **Smart Gameweek Optimization Suite**
+   - **Constraint-Based Optimization**: Pre-optimization player inclusion/exclusion controls
+   - **Smart Transfer Decision Engine**: Auto-selects optimal number of transfers (0-3) based on net XP after penalties
+   - **Formation-Flexible Starting 11**: Automatically finds best lineup from optimal squad
+   - **Transfer Analysis Engine**: Hit calculations and opportunity cost analysis with scenario comparison
    - **Captain Selection Tool**: Risk-adjusted captaincy recommendations
    - **Squad Management**: Budget tracking and constraint validation
 
@@ -358,13 +360,16 @@ git commit -m "Description"
 - Budget utilization optimization and efficiency tracking
 - Team customization with must-include/exclude player constraints
 
-**✅ COMPLETED - Gameweek Manager (v1.0):**
+**✅ COMPLETED - Gameweek Manager (v1.1):**
 - **Live data integration** with real-time gameweek performance tracking
 - **Form-weighted xP calculations** blending recent performance (70%) with season baseline (30%)
 - **Performance delta analysis** for week-over-week trend identification
 - **Momentum indicators** with visual form tracking (🔥📈➡️📉❄️)
 - **Enhanced minutes prediction** using live start/substitute data
-- **Single gameweek optimization** for weekly lineup decisions
+- **Smart transfer optimization** with automatic 0-3 transfer decision based on net XP after penalties
+- **Constraint-based optimization** with pre-optimization player inclusion/exclusion controls
+- **Comprehensive scenario analysis** comparing all transfer options with XP gain calculations
+- **Paginated player display** showing all players ranked by expected points
 - **Transfer analysis engine** with hit calculations and opportunity cost analysis
 - **Captain selection tools** with risk-adjusted recommendations
 - **Squad management suite** with budget tracking and constraint validation

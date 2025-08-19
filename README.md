@@ -16,10 +16,12 @@ This suite provides two specialized tools for different FPL decision points:
 - **Transfer risk analysis** - Identifies players with poor upcoming fixtures
 
 ### ⚡ Weekly Gameweek Manager (`fpl_gameweek_manager.py`)
-**Form-weighted predictions with live data for weekly decisions**
+**Form-weighted predictions with smart optimization for weekly decisions**
 - **Live data integration** - Real-time performance tracking and market movements
 - **Form-weighted xP** - Blends recent performance (70%) with season baseline (30%)
-- **Transfer analysis** - Hit calculations and opportunity cost assessment
+- **Smart transfer optimization** - Auto-selects optimal 0-3 transfers based on net XP after penalties
+- **Constraint-based optimization** - Pre-optimization player inclusion/exclusion controls
+- **Comprehensive scenario analysis** - All transfer options compared with XP gain calculations
 - **Captain selection** - Risk-adjusted captaincy recommendations
 - **Retro analysis** - Post-gameweek validation and model improvement
 
@@ -79,9 +81,10 @@ marimo edit fpl_gameweek_manager.py  # Weekly management tool
 2. Track momentum indicators and form changes
 
 The interfaces provide interactive controls for:
-- Constraint customization (budget, must-include/exclude players)
-- Real-time optimization with live data
-- Transfer analysis with hit calculations
+- Pre-optimization constraint customization (must-include/exclude players)
+- Smart transfer optimization with automatic 0-3 transfer selection
+- Real-time optimization with live data and comprehensive scenario analysis
+- Transfer analysis with hit calculations and XP gain comparisons
 - Formation flexibility and lineup optimization
 
 ## 📊 How It Works
@@ -187,10 +190,14 @@ from client import (
 - Formation-flexible starting 11 selection (8 valid formations)
 - Transfer risk analysis and fixture difficulty assessment
 
-**Weekly Gameweek Manager (v1.0):**
+**Weekly Gameweek Manager (v1.1):**
 - Live data integration with real-time performance tracking
 - Form-weighted xP calculations blending recent performance with baseline
 - Performance delta analysis and momentum tracking
+- Smart transfer optimization with automatic 0-3 transfer decision based on net XP
+- Constraint-based optimization with pre-optimization player inclusion/exclusion controls
+- Comprehensive scenario analysis comparing all transfer options with XP gain calculations
+- Paginated player display showing all players ranked by expected points
 - Transfer analysis engine with hit calculations
 - Captain selection tools with risk assessment
 - Retro analysis framework for model validation
