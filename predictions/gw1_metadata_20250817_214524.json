@@ -1,0 +1,21 @@
+{
+  "gameweek": 1,
+  "model_version": "v0.1_mvp",
+  "prediction_date": "2025-08-17T21:45:24.319722",
+  "model_params": {
+    "model_type": "mvp_simulated_annealing",
+    "temporal_weights": {
+      "1": 1.0,
+      "2": 0.9,
+      "3": 0.8,
+      "4": 0.7,
+      "5": 0.6
+    },
+    "team_strength_source": "2023_24_final_table",
+    "minutes_model": "sbp_plus_availability",
+    "optimization_algorithm": "simulated_annealing",
+    "optimization_iterations": 5000
+  },
+  "player_count": 687,
+  "valid_xp_count": "687"
+}
