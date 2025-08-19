@@ -36,7 +36,6 @@ def __():
     warnings.filterwarnings('ignore')
     
     # Data paths
-    DATA_DIR = Path("../fpl-dataset-builder/data/")
     PREDICTIONS_DIR = Path("predictions/")  # For storing historical predictions
     
     # Create predictions directory if it doesn't exist
@@ -45,7 +44,7 @@ def __():
     # Import prediction storage system
     from prediction_storage import PredictionStorage
     
-    return DATA_DIR, PREDICTIONS_DIR, Path, np, pd, plt, sns, warnings, PredictionStorage
+    return PREDICTIONS_DIR, Path, np, pd, plt, sns, warnings, PredictionStorage
 
 
 @app.cell
@@ -55,14 +54,15 @@ def __():
 
 
 @app.cell
-def __(DATA_DIR, pd):
+def __(pd):
     def load_retro_datasets():
         """Load datasets for 2025-26 season retrospective analysis"""
         print("Loading 2025-26 season datasets for retro analysis...")
         
         # Load current season live gameweek data (2025-26)
         try:
-            gameweek_data = pd.read_csv(DATA_DIR / "fpl_live_gameweek_1.csv")
+            from client import get_gameweek_live_data
+            gameweek_data = get_gameweek_live_data(1)
             # Add GW column for consistency
             gameweek_data['GW'] = gameweek_data['event']
             print(f"Loaded current season GW1 data: {len(gameweek_data)} player records")
@@ -71,17 +71,19 @@ def __(DATA_DIR, pd):
             gameweek_data = pd.DataFrame()
         
         # Current players for mapping names and positions
-        players_current = pd.read_csv(DATA_DIR / "fpl_players_current.csv")
+        from client import get_current_players, get_current_teams, get_player_xg_xa_rates
+        players_current = get_current_players()
         
         # Teams for reference
-        teams = pd.read_csv(DATA_DIR / "fpl_teams_current.csv")
+        teams = get_current_teams()
         
         # xG/xA rates for model validation
-        xg_rates = pd.read_csv(DATA_DIR / "fpl_player_xg_xa_rates.csv")
+        xg_rates = get_player_xg_xa_rates()
         
         # Load player deltas for recent performance trends
         try:
-            player_deltas = pd.read_csv(DATA_DIR / "fpl_player_deltas_current.csv")
+            from client import get_player_deltas_current
+            player_deltas = get_player_deltas_current()
             print(f"Loaded player deltas: {len(player_deltas)} records")
         except Exception as e:
             print(f"Player deltas not available: {e}")

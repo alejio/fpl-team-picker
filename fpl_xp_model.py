@@ -28,28 +28,31 @@ def __():
 def __():
     import pandas as pd
     import numpy as np
-    from pathlib import Path
-    
-    # Data paths
-    DATA_DIR = Path("../fpl-dataset-builder/data/")
     
     # Import prediction storage system
     from prediction_storage import save_predictions_from_model, PredictionStorage
     
-    return DATA_DIR, Path, np, pd, save_predictions_from_model, PredictionStorage
+    return np, pd, save_predictions_from_model, PredictionStorage
 
 
 @app.cell
-def __(DATA_DIR, pd):
+def __(pd):
     # Load core FPL datasets
     def load_datasets():
-        """Load core FPL datasets"""
-        print("Loading datasets...")
+        """Load core FPL datasets from database"""
+        from client import (
+            get_current_players,
+            get_player_xg_xa_rates,
+            get_fixtures_normalized,
+            get_current_teams
+        )
         
-        players = pd.read_csv(DATA_DIR / "fpl_players_current.csv")
-        xg_rates = pd.read_csv(DATA_DIR / "fpl_player_xg_xa_rates.csv")
-        fixtures = pd.read_csv(DATA_DIR / "fpl_fixtures_normalized.csv")
-        teams = pd.read_csv(DATA_DIR / "fpl_teams_current.csv")
+        print("Loading datasets from database...")
+        
+        players = get_current_players()
+        xg_rates = get_player_xg_xa_rates()
+        fixtures = get_fixtures_normalized()
+        teams = get_current_teams()
         
         print(f"Loaded: {len(players)} players, {len(fixtures)} fixtures, {len(teams)} teams")
         print(f"xG rates for {len(xg_rates)} players")

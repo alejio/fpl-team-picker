@@ -12,4 +12,11 @@ dependencies = [
     "pyarrow>=21.0.0",
     "requests>=2.31.0",
     "seaborn>=0.13.2",
+    "fpl-dataset-builder",
 ]
+
+[dependency-groups]
+dev = []
+
+[tool.uv.sources]
+fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }

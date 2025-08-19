@@ -14,14 +14,16 @@ def __():
 def __(mo):
     mo.md(
         r"""
-        # FPL Gameweek Manager (Simplified)
+        # FPL Gameweek Manager (Database-Driven)
 
         **Weekly Decision Making Tool**
         
-        1. Load your team from FPL API
+        1. Load your team from database
         2. Identify needed transfers
         3. Pick optimal lineup 
         4. Select captain and vice-captain
+        
+        *Now fully database-driven with no external API dependencies!*
         """
     )
     return
@@ -31,91 +33,110 @@ def __(mo):
 def __():
     import pandas as pd
     import numpy as np
-    import requests
     from datetime import datetime
     import warnings
     warnings.filterwarnings('ignore')
     
-    return pd, np, requests, datetime, warnings
+    return pd, np, datetime, warnings
 
 
 @app.cell
 def __(mo):
-    mo.md("## 1. Load Team from FPL API")
+    mo.md("## 1. Load Team from Database")
     return
 
 
 @app.cell
-def __(requests, pd):
+def __(pd):
     def fetch_fpl_data():
-        """Fetch FPL data from API"""
-        print("🔄 Fetching FPL data...")
+        """Fetch FPL data from database with live gameweek stats"""
+        from client import get_current_players, get_current_teams, get_gameweek_live_data
         
-        try:
-            # Get bootstrap data
-            bootstrap_url = "https://fantasy.premierleague.com/api/bootstrap-static/"
-            response = requests.get(bootstrap_url)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Create DataFrames
-            players = pd.DataFrame(data['elements'])
-            teams = pd.DataFrame(data['teams'])
-            events = pd.DataFrame(data['events'])
-            
-            # Clean players data
-            players['player_id'] = players['id']
-            players['price'] = players['now_cost'] / 10
-            players['position'] = players['element_type'].map({1: 'GKP', 2: 'DEF', 3: 'MID', 4: 'FWD'})
-            
-            # Get current gameweek
-            current_gw = None
-            for event in data['events']:
-                if event['is_current']:
-                    current_gw = event['id']
-                    break
-            
-            print(f"✅ Loaded {len(players)} players, {len(teams)} teams")
-            print(f"📅 Current GW: {current_gw}")
-            
-            return players, teams, events, current_gw
-            
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            return None, None, None, None
+        print("🔄 Loading FPL data from database...")
+        
+        # Get base data from database
+        players_base = get_current_players()
+        teams_df = get_current_teams()
+        live_data = get_gameweek_live_data(1)  # Current gameweek
+        
+        # Merge players with live gameweek stats
+        players = players_base.merge(
+            live_data, 
+            on='player_id', 
+            how='left'
+        )
+        
+        # Standardize column names for compatibility
+        players = players.rename(columns={
+            'price_gbp': 'price',
+            'team_id': 'team', 
+            'selected_by_percentage': 'selected_by_percent',
+            'availability_status': 'status'
+        })
+        
+        # Add calculated fields
+        players['points_per_game'] = players['total_points'] / players['event'].fillna(1)
+        players['form'] = players['total_points'].fillna(0).astype(float)  # Simplified form
+        
+        teams = teams_df.rename(columns={'team_id': 'id'})
+        
+        # Create events data
+        events = pd.DataFrame([{"id": 1, "is_current": True}])
+        current_gw = 1
+        
+        print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
+        print(f"📅 Current GW: {current_gw}")
+        
+        return players, teams, events, current_gw
 
     def fetch_manager_team(manager_id):
-        """Fetch manager's current team"""
-        print(f"🔄 Fetching team for manager {manager_id}...")
+        """Fetch manager's current team from database"""
+        print(f"🔄 Fetching team for manager {manager_id} from database...")
         
         try:
+            from client import FPLDataClient
+            client = FPLDataClient()
+            
             # Get manager data
-            url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/"
-            response = requests.get(url)
-            response.raise_for_status()
-            manager_data = response.json()
+            manager_data = client.get_my_manager_data()
+            if manager_data.empty:
+                print("❌ No manager data found in database")
+                return None
             
             # Get current picks
-            current_event = manager_data.get("current_event", 1)
-            picks_url = f"https://fantasy.premierleague.com/api/entry/{manager_id}/event/{current_event}/picks/"
-            picks_response = requests.get(picks_url)
-            picks_response.raise_for_status()
-            picks_data = picks_response.json()
+            current_picks = client.get_my_current_picks()
+            if current_picks.empty:
+                print("❌ No current picks found in database")
+                return None
+            
+            # Convert picks to the expected format
+            picks = []
+            for _, pick in current_picks.iterrows():
+                picks.append({
+                    'element': pick['player_id'],
+                    'is_captain': pick.get('is_captain', False),
+                    'is_vice_captain': pick.get('is_vice_captain', False),
+                    'multiplier': pick.get('multiplier', 1)
+                })
+            
+            # Get manager info from first row
+            manager_info = manager_data.iloc[0]
             
             team_info = {
-                "manager_id": manager_id,
-                "entry_name": manager_data.get("name", ""),
-                "total_points": manager_data.get("summary_overall_points", 0),
-                "bank": picks_data.get("entry_history", {}).get("bank", 0) / 10,
-                "team_value": picks_data.get("entry_history", {}).get("value", 0) / 10,
-                "picks": picks_data.get("picks", [])
+                "manager_id": manager_info.get('manager_id', manager_id),
+                "entry_name": manager_info.get('entry_name', 'Unknown Team'),
+                "total_points": manager_info.get('summary_overall_points', 0),
+                "bank": manager_info.get('bank', 0),
+                "team_value": manager_info.get('value', 100.0),
+                "picks": picks
             }
             
-            print(f"✅ Loaded team: {team_info['entry_name']}")
+            print(f"✅ Loaded team from database: {team_info['entry_name']}")
             return team_info
             
         except Exception as e:
-            print(f"❌ Error fetching team: {e}")
+            print(f"❌ Error fetching team from database: {e}")
+            print("💡 Make sure manager data is available in the database")
             return None
     
     # Load data

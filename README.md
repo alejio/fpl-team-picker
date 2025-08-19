@@ -27,22 +27,22 @@ This suite provides two specialized tools for different FPL decision points:
 
 ### Prerequisites
 - Python 3.13+
-- Access to FPL datasets (see [Dataset Requirements](#dataset-requirements))
+- Access to fpl-dataset-builder (database client for FPL data)
 
 ### Installation
 ```bash
-# Clone the repository
-git clone <repository-url>
+# Clone both repositories
+git clone <fpl-team-picker-url>
+git clone <fpl-dataset-builder-url>
+
+# Install team picker with database dependency
 cd fpl-team-picker
-
-# Install dependencies using uv (recommended)
-uv sync
-
-# Or using pip
-pip install -e .
+uv sync  # Automatically installs fpl-dataset-builder from local path
 ```
 
 ### Basic Usage
+
+> **Prerequisites:** Ensure fpl-dataset-builder database is populated with current FPL data before running analysis tools.
 
 **Season Start - Initial Squad Building:**
 ```bash
@@ -142,28 +142,38 @@ The model provides:
 - Formation flexibility analysis
 - Bench vs starter value distribution
 
-## 📁 Dataset Requirements
+## 🗄️ Data Architecture
 
-This project requires FPL datasets located in `../fpl-dataset-builder/data/`:
+This project uses the **fpl-dataset-builder** database client for all data access:
 
-**Core Files (Required):**
-- `fpl_players_current.csv` - Current season player data (prices, positions, teams)
-- `fpl_player_xg_xa_rates.csv` - xG90/xA90 rates per player
-- `fpl_fixtures_normalized.csv` - Fixture data with team IDs
-- `fpl_teams_current.csv` - Team reference data
+### Database Integration
+- **Centralized SQLite database** - Single source of truth for all FPL data
+- **Real-time updates** - Always fresh data with no stale CSV files
+- **Better performance** - Database queries faster than file I/O
+- **Automatic management** - No manual file handling required
 
-**Live Data Files (Enhanced Features):**
-- `fpl_live_gameweek_{n}.csv` - Real-time gameweek performance data
-- `fpl_player_deltas_current.csv` - Week-over-week performance tracking
-- `fpl_manager_summary.csv` - Manager team performance (optional)
-- `fpl_league_standings_current.csv` - League position tracking (optional)
+### Data Access
+```python
+# Load data from database
+from client import (
+    get_current_players,    # Current season player data
+    get_current_teams,      # Team reference data  
+    get_fixtures_normalized, # Fixture data with team IDs
+    get_player_xg_xa_rates, # xG90/xA90 rates per player
+    get_gameweek_live_data, # Real-time gameweek performance
+    get_player_deltas_current # Week-over-week tracking
+)
+```
 
-**Historical Enhancement Files:**
-- `vaastav_full_player_history_2024_2025.csv` - Comprehensive historical statistics
-- `match_results_previous_season.csv` - Historical match results
-- `injury_tracking_template.csv` - Player availability tracking
+### Available Data
+- **Current season players** - Prices, positions, teams, availability status
+- **xG/xA rates** - Expected goals and assists per 90 minutes
+- **Fixtures** - Normalized with team IDs and difficulty ratings
+- **Live gameweek data** - Real-time performance tracking
+- **Performance deltas** - Week-over-week trends and market movements
+- **Historical statistics** - Comprehensive player performance history
 
-> **Note:** The FPL dataset builder is a separate project. Core files enable basic functionality; live data files unlock enhanced gameweek management features.
+> **Note:** The fpl-dataset-builder handles all data fetching, processing, and storage. This project focuses purely on analysis and optimization.
 
 ## ⚡ Implementation Status
 
