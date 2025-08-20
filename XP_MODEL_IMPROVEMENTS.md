@@ -30,7 +30,7 @@ Successfully implemented Phase 1 improvements to the FPL Expected Points model, 
 
 ## 📊 Validation Results
 
-**Test Results from `test_xp_improvements.py`:**
+**Validation Results:**
 
 - ✅ **Basic functionality**: Successfully calculates XP for all players
 - ✅ **Form integration**: Identifies hot (🔥) and cold (❄️) players accurately  

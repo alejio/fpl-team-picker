@@ -207,13 +207,7 @@ The suite includes two complementary xP calculation approaches:
    - **Captain Selection Tool**: Risk-adjusted captaincy recommendations
    - **Squad Management**: Budget tracking and constraint validation
 
-10. **Interactive Fixture Difficulty Visualization** (`fixture_difficulty_viz.py`)
-    - Dynamic team strength calculation with GW8+ transition logic
-    - Interactive plotly heatmap showing 5-gameweek fixture difficulty
-    - Home/away advantage modeling with opponent strength scaling
-    - Visual transfer strategy guidance with color-coded difficulty ratings
-
-11. **Retro Analysis Framework** (`retro_analysis_section`)
+10. **Retro Analysis Framework** (`retro_analysis_section`)
     - Post-gameweek performance validation against predictions
     - Top performers vs model predictions comparison
     - Template vs differential analysis for learning
