@@ -13,6 +13,7 @@ dependencies = [
     "requests>=2.31.0",
     "seaborn>=0.13.2",
     "fpl-dataset-builder",
+    "plotly>=6.3.0",
 ]
 
 [dependency-groups]

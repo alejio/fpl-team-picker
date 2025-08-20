@@ -193,6 +193,7 @@ from client import (
 **Weekly Gameweek Manager (v1.1):**
 - Live data integration with real-time performance tracking
 - Form-weighted xP calculations blending recent performance with baseline
+- Interactive fixture difficulty visualization with dynamic team strength ratings
 - Performance delta analysis and momentum tracking
 - Smart transfer optimization with automatic 0-3 transfer decision based on net XP
 - Constraint-based optimization with pre-optimization player inclusion/exclusion controls

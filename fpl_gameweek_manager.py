@@ -16,14 +16,18 @@ def __(mo):
         r"""
         # FPL Gameweek Manager (XP-Optimized)
 
-        **Advanced Weekly Decision Making Tool**
+        **Advanced Weekly Decision Making Tool with Form Analytics**
         
         1. Load team for previous gameweek from database
-        2. Calculate expected XP for all players
-        3. Set constraints and run smart optimization (auto-selects 0-3 transfers)
-        4. Analyze captain and vice-captain options
+        2. Calculate form-weighted expected XP for all players
+        3. **NEW**: Form analytics dashboard with hot/cold player insights
+        4. **NEW**: Current squad form analysis and transfer recommendations
+        5. Set constraints and run smart optimization (auto-selects 0-3 transfers)
+        6. Analyze captain and vice-captain options
         
-        *Built with XP modeling and optimization algorithms for competitive advantage!*
+        *Built with advanced XP modeling, form weighting, and optimization algorithms for competitive advantage!*
+        
+        **🔥 New Features:** Hot/Cold player detection, form multipliers, transfer risk analysis
         """
     )
     return
@@ -49,7 +53,7 @@ def __(mo):
 @app.cell
 def __(pd):
     def fetch_fpl_data(target_gameweek):
-        """Fetch FPL data from database for specified gameweek"""
+        """Fetch FPL data from database for specified gameweek with historical form data"""
         from client import (
             get_current_players, 
             get_current_teams, 
@@ -64,19 +68,40 @@ def __(pd):
         players_base = get_current_players()
         teams_df = get_current_teams()
         
-        # Try to get live data for the target gameweek
-        try:
-            live_data = get_gameweek_live_data(target_gameweek)
-            print(f"✅ Found live data for GW{target_gameweek}")
-        except:
-            # Fallback: use latest available gameweek data
-            print(f"⚠️  No live data for GW{target_gameweek}, using current season baseline")
-            live_data = pd.DataFrame()  # Empty for fallback
+        # Get historical live data for form calculation (last 5 gameweeks)
+        form_window = 5
+        historical_data = []
         
-        # Merge players with live gameweek stats if available
-        if not live_data.empty:
+        for gw in range(max(1, target_gameweek - form_window), target_gameweek):
+            try:
+                gw_data = get_gameweek_live_data(gw)
+                if not gw_data.empty:
+                    historical_data.append(gw_data)
+                    print(f"✅ Loaded form data for GW{gw}")
+            except:
+                print(f"⚠️  No form data for GW{gw}")
+                continue
+        
+        # Combine historical data for form analysis
+        if historical_data:
+            live_data_historical = pd.concat(historical_data, ignore_index=True)
+            print(f"📊 Combined form data from {len(historical_data)} gameweeks")
+        else:
+            live_data_historical = pd.DataFrame()
+            print("⚠️  No historical form data available")
+        
+        # Try to get current gameweek live data
+        try:
+            current_live_data = get_gameweek_live_data(target_gameweek)
+            print(f"✅ Found current live data for GW{target_gameweek}")
+        except:
+            print(f"⚠️  No current live data for GW{target_gameweek}")
+            current_live_data = pd.DataFrame()
+        
+        # Merge players with current gameweek stats if available
+        if not current_live_data.empty:
             players = players_base.merge(
-                live_data, 
+                current_live_data, 
                 on='player_id', 
                 how='left'
             )
@@ -107,7 +132,7 @@ def __(pd):
         print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
         print(f"📅 Target GW: {target_gameweek}")
         
-        return players, teams, xg_rates, fixtures, target_gameweek
+        return players, teams, xg_rates, fixtures, target_gameweek, live_data_historical
 
     return fetch_fpl_data
 
@@ -139,7 +164,7 @@ def __(fetch_fpl_data, gameweek_input, mo, pd):
         previous_gw = target_gw - 1
         
         # Get FPL data and calculate XP for target gameweek
-        players, teams, xg_rates, fixtures, _ = fetch_fpl_data(target_gw)
+        players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(target_gw)
         
         # Load manager team from previous gameweek
         def fetch_manager_team(previous_gameweek):
@@ -240,10 +265,11 @@ def __(fetch_fpl_data, gameweek_input, mo, pd):
         teams = pd.DataFrame() 
         xg_rates = pd.DataFrame()
         fixtures = pd.DataFrame()
+        live_data_historical = pd.DataFrame()
     
     team_display
     
-    return current_squad, team_data, players, teams, xg_rates, fixtures
+    return current_squad, team_data, players, teams, xg_rates, fixtures, live_data_historical
 
 
 @app.cell
@@ -253,259 +279,84 @@ def __(mo):
 
 
 @app.cell
-def __(current_squad, team_data, players, teams, xg_rates, fixtures, gameweek_input, mo, pd, np):
-    def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek):
-        """Calculate expected points for all players using XP model methodology"""
+def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd):
+    def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek, live_data_hist=None):
+        """Calculate expected points for all players using improved XP model with form weighting"""
         if players_data.empty or not target_gameweek:
             return mo.md("Select gameweek and load data first"), pd.DataFrame()
         
-        print(f"🧠 Calculating expected points for all players for GW{target_gameweek}...")
+        print(f"🧠 Calculating expected points using improved XP model for GW{target_gameweek}...")
         
-        # Import XP calculation functions from the XP model
         try:
-            # Team strength ratings (simplified version)
-            def get_team_strength_ratings():
-                team_positions = {
-                    'Manchester City': 1, 'Arsenal': 2, 'Liverpool': 3, 'Aston Villa': 4,
-                    'Tottenham': 5, 'Chelsea': 6, 'Newcastle': 7, 'Manchester Utd': 8,
-                    'West Ham': 9, 'Crystal Palace': 10, 'Brighton': 11, 'Bournemouth': 12,
-                    'Fulham': 13, 'Wolves': 14, 'Everton': 15, 'Brentford': 16,
-                    'Nottingham Forest': 17, 'Luton': 18, 'Burnley': 19, 'Sheffield Utd': 20,
-                    'Man City': 1, 'Man Utd': 8, "Nott'm Forest": 17, 'Spurs': 5
-                }
-                
-                strength_ratings = {}
-                for team, position in team_positions.items():
-                    if position <= 20:
-                        strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
-                    else:
-                        strength = 0.7 - (position - 20) * 0.05
-                    strength_ratings[team] = round(strength, 3)
-                
-                return strength_ratings
+            # Import and use the new XP model
+            from xp_model import XPModel
             
-            # Minutes calculation
-            def calculate_start_probability(selected_by_percent, availability_status):
-                def _sbp_to_start_prob(sbp):
-                    if sbp >= 40: return 0.95
-                    elif sbp >= 20: return 0.85
-                    elif sbp >= 10: return 0.70
-                    elif sbp >= 5: return 0.55
-                    elif sbp >= 2: return 0.35
-                    elif sbp >= 0.5: return 0.20
-                    else: return 0.05
-                
-                if availability_status == 'i': return 0.0
-                elif availability_status == 's': return 0.0
-                elif availability_status == 'u': return 0.0
-                elif availability_status == 'd': return _sbp_to_start_prob(selected_by_percent) * 0.5
-                else: return _sbp_to_start_prob(selected_by_percent)
-            
-            def calculate_expected_minutes(row):
-                sbp = row.get('selected_by_percent', 0)
-                availability = row.get('status', 'a')
-                
-                p_start = calculate_start_probability(sbp, availability)
-                
-                if availability in ['i', 's', 'u']:
-                    return {
-                        'expected_minutes': 0,
-                        'p_start': 0,
-                        'p_60_plus_mins': 0,
-                        'p_any_appearance': 0
-                    }
-                
-                # Position and price-based defaults
-                if row['position'] == 'GKP':
-                    avg_mins_when_started = 90
-                    p_full_game_given_start = 0.95
-                    p_sub_given_no_start = 0.05
-                elif row['price'] >= 7.0:
-                    avg_mins_when_started = 85
-                    p_full_game_given_start = 0.80
-                    p_sub_given_no_start = 0.25
-                elif row['price'] >= 5.0:
-                    avg_mins_when_started = 75
-                    p_full_game_given_start = 0.70
-                    p_sub_given_no_start = 0.30
-                else:
-                    avg_mins_when_started = 70
-                    p_full_game_given_start = 0.60
-                    p_sub_given_no_start = 0.35
-                
-                if availability == 'd':
-                    p_full_game_given_start *= 0.7
-                    avg_mins_when_started *= 0.8
-                
-                p_full_game = p_start * p_full_game_given_start
-                p_partial_start = p_start * (1 - p_full_game_given_start)
-                p_sub_appearance = (1 - p_start) * p_sub_given_no_start
-                
-                expected_minutes = (
-                    p_full_game * avg_mins_when_started +
-                    p_partial_start * 45 +
-                    p_sub_appearance * 20
-                )
-                
-                return {
-                    'expected_minutes': expected_minutes,
-                    'p_start': p_start,
-                    'p_60_plus_mins': p_full_game,
-                    'p_any_appearance': 1 - (1 - p_full_game - p_partial_start - p_sub_appearance)
-                }
-            
-            # Prepare players dataset
-            players_xp = players_data.copy()
-            
-            # Debug: Check column names
-            print(f"Teams data columns: {list(teams_data.columns)}")
-            print(f"Players data columns: {list(players_data.columns)}")
-            
-            # Merge with team names - fix column name issue
-            if 'team_id' in teams_data.columns:
-                players_xp = players_xp.merge(teams_data[['team_id', 'name']], left_on='team', right_on='team_id', how='left')
-            elif 'id' in teams_data.columns:
-                players_xp = players_xp.merge(teams_data[['id', 'name']], left_on='team', right_on='id', how='left')
-            else:
-                print(f"Warning: Could not find team ID column in teams data")
-                # Add a placeholder team name
-                players_xp['name'] = 'Unknown Team'
-            
-            # Add minutes expectation
-            minute_data = players_xp.apply(calculate_expected_minutes, axis=1)
-            players_xp['expected_minutes'] = minute_data.apply(lambda x: x['expected_minutes'])
-            players_xp['p_start'] = minute_data.apply(lambda x: x['p_start'])
-            players_xp['p_60_plus_mins'] = minute_data.apply(lambda x: x['p_60_plus_mins'])
-            players_xp['p_any_appearance'] = minute_data.apply(lambda x: x['p_any_appearance'])
-            
-            # Merge with xG/xA rates
-            players_xp = players_xp.merge(
-                xg_rates_data[['mapped_player_id', 'xG90', 'xA90']], 
-                left_on='player_id',
-                right_on='mapped_player_id',
-                how='left'
+            # Initialize model with form weighting enabled
+            xp_model = XPModel(
+                form_weight=0.7,  # 70% recent form, 30% season average
+                form_window=5,    # Last 5 gameweeks for form
+                debug=True
             )
             
-            # Fill missing xG/xA with position-based estimates
-            position_xg_defaults = {'GKP': 0.005, 'DEF': 0.08, 'MID': 0.15, 'FWD': 0.25}
-            position_xa_defaults = {'GKP': 0.02, 'DEF': 0.12, 'MID': 0.20, 'FWD': 0.15}
-            
-            players_xp['xG90'] = players_xp['xG90'].fillna(
-                players_xp['position'].map(position_xg_defaults)
-            )
-            players_xp['xA90'] = players_xp['xA90'].fillna(
-                players_xp['position'].map(position_xa_defaults)
-            )
-            
-            # Calculate fixture difficulty for target gameweek
-            team_strength = get_team_strength_ratings()
-            
-            # Get fixtures for target gameweek
-            gw_fixtures = fixtures_data[fixtures_data['event'] == target_gameweek].copy()
-            
-            # Add team names to fixtures - fix column name issue
-            if 'team_id' in teams_data.columns:
-                team_id_col = 'team_id'
-            elif 'id' in teams_data.columns:
-                team_id_col = 'id'
-            else:
-                print(f"Warning: Could not find team ID column in teams data for fixtures")
-                # Create dummy fixtures difficulty
-                gw_fixtures['home_team'] = 'Unknown'
-                gw_fixtures['away_team'] = 'Unknown'
-                team_id_col = None
-            
-            if team_id_col:
-                gw_fixtures = gw_fixtures.merge(
-                    teams_data[[team_id_col, 'name']], 
-                    left_on='home_team_id', 
-                    right_on=team_id_col, 
-                    how='left'
-                ).drop(team_id_col, axis=1).rename(columns={'name': 'home_team'})
-                
-                gw_fixtures = gw_fixtures.merge(
-                    teams_data[[team_id_col, 'name']], 
-                    left_on='away_team_id', 
-                    right_on=team_id_col, 
-                    how='left'
-                ).drop(team_id_col, axis=1).rename(columns={'name': 'away_team'})
-            
-            # Calculate fixture difficulty
-            gw_fixtures['home_difficulty'] = 2.0 - gw_fixtures['away_team'].map(team_strength).fillna(1.0)
-            gw_fixtures['away_difficulty'] = 2.0 - gw_fixtures['home_team'].map(team_strength).fillna(1.0)
-            
-            # Clip to [0.7, 1.3] range
-            gw_fixtures['home_difficulty'] = gw_fixtures['home_difficulty'].clip(0.7, 1.3)
-            gw_fixtures['away_difficulty'] = gw_fixtures['away_difficulty'].clip(0.7, 1.3)
-            
-            # Create team difficulty lookup
-            team_difficulty = {}
-            for _, fixture in gw_fixtures.iterrows():
-                team_difficulty[fixture['home_team']] = fixture['home_difficulty']
-                team_difficulty[fixture['away_team']] = fixture['away_difficulty']
-            
-            # Add difficulty to players
-            players_xp['fixture_difficulty'] = players_xp['name'].map(team_difficulty).fillna(1.0)
-            
-            # Calculate XP components
-            # Expected contributions
-            xG_expected = (players_xp['xG90'] / 90) * players_xp['expected_minutes'] * players_xp['fixture_difficulty']
-            xA_expected = (players_xp['xA90'] / 90) * players_xp['expected_minutes'] * players_xp['fixture_difficulty']
-            
-            # Appearance points
-            appearance_pts = (
-                players_xp['p_60_plus_mins'] * 2 +
-                (players_xp['p_any_appearance'] - players_xp['p_60_plus_mins']) * 1
+            # Calculate XP using the new model
+            players_xp = xp_model.calculate_expected_points(
+                players_data=players_data,
+                teams_data=teams_data,
+                xg_rates_data=xg_rates_data,
+                fixtures_data=fixtures_data,
+                target_gameweek=target_gameweek,
+                live_data=live_data_hist,  # Historical form data
+                gameweeks_ahead=1
             )
             
-            # Goal points by position
-            goal_multipliers = {'GKP': 6, 'DEF': 6, 'MID': 5, 'FWD': 4}
-            goal_pts = xG_expected * players_xp['position'].map(goal_multipliers)
+            # Add form indicators to display if available
+            form_columns = ['web_name', 'position', 'name', 'price', 'xP', 'xP_per_price', 'fixture_difficulty', 'status']
             
-            # Assist points
-            assist_pts = xA_expected * 3
+            # Add form indicators if they exist
+            if 'momentum' in players_xp.columns:
+                form_columns.insert(-1, 'momentum')  # Insert before status
+            if 'form_multiplier' in players_xp.columns:
+                form_columns.insert(-1, 'form_multiplier')
+            if 'recent_points_per_game' in players_xp.columns:
+                form_columns.insert(-1, 'recent_points_per_game')
             
-            # Clean sheet points
-            cs_multipliers = {'GKP': 4, 'DEF': 4, 'MID': 1, 'FWD': 0}
-            base_cs_prob = 0.3
-            cs_prob = (
-                players_xp['p_60_plus_mins'] * 
-                players_xp['fixture_difficulty'] * 
-                base_cs_prob
-            )
-            cs_pts = cs_prob * players_xp['position'].map(cs_multipliers)
+            # Create display table
+            display_df = players_xp[form_columns].sort_values('xP', ascending=False).round(3)
             
-            # Total XP
-            players_xp['xP'] = appearance_pts + goal_pts + assist_pts + cs_pts
+            # Count form-enhanced players
+            form_enhanced_players = 0
+            avg_form_multiplier = 1.0
+            if 'form_multiplier' in players_xp.columns:
+                form_enhanced_players = len(players_xp[players_xp['form_multiplier'] != 1.0])
+                avg_form_multiplier = players_xp['form_multiplier'].mean()
             
-            # Add value metrics
-            players_xp['xP_per_price'] = players_xp['xP'] / players_xp['price']
-            
-            print(f"✅ Calculated XP for {len(players_xp)} players")
-            print(f"Average XP: {players_xp['xP'].mean():.2f}")
-            print(f"Top XP: {players_xp['xP'].max():.2f}")
+            # Enhanced display with form information
+            form_info = ""
+            if form_enhanced_players > 0:
+                hot_players = len(players_xp[players_xp.get('momentum', '') == '🔥'])
+                cold_players = len(players_xp[players_xp.get('momentum', '') == '❄️'])
+                form_info = f"**Form Analysis:** {form_enhanced_players} players with form data | {hot_players} 🔥 Hot | {cold_players} ❄️ Cold | Avg multiplier: {avg_form_multiplier:.2f}"
             
             return mo.vstack([
-                mo.md(f"### ✅ Expected Points Calculated for GW{target_gameweek}"),
+                mo.md(f"### ✅ Improved XP Model - GW{target_gameweek}"),
                 mo.md(f"**Players analyzed:** {len(players_xp)}"),
                 mo.md(f"**Average XP:** {players_xp['xP'].mean():.2f}"),
                 mo.md(f"**Top performing player XP:** {players_xp['xP'].max():.2f}"),
-                mo.md("**All Players by Expected Points (sorted high to low):**"),
-                mo.ui.table(
-                    players_xp[['web_name', 'position', 'name', 'price', 'xP', 'xP_per_price', 'fixture_difficulty', 'status']]
-                    .sort_values('xP', ascending=False)
-                    .round(3),
-                    page_size=25
-                )
+                mo.md(form_info) if form_info else mo.md(""),
+                mo.md("**All Players by Expected Points (with form analysis):**"),
+                mo.ui.table(display_df, page_size=25)
             ]), players_xp
             
+        except ImportError as e:
+            print(f"⚠️ New XP model not available: {e}")
+            return mo.md("❌ Could not load improved XP model - check xp_model.py"), pd.DataFrame()
         except Exception as e:
-            print(f"Error calculating XP: {e}")
+            print(f"❌ Error calculating XP: {e}")
             return mo.md(f"❌ Error calculating expected points: {e}"), pd.DataFrame()
     
     # Only calculate XP if we have valid data
     if not players.empty and gameweek_input.value:
-        xp_display, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value)
+        xp_display, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
     else:
         xp_display = mo.md("Load gameweek data first")
         players_with_xp = pd.DataFrame()
@@ -517,7 +368,413 @@ def __(current_squad, team_data, players, teams, xg_rates, fixtures, gameweek_in
 
 @app.cell
 def __(mo):
-    mo.md("## 3. Team Optimization & Constraints")
+    mo.md("## 3. Form Analytics Dashboard")
+    return
+
+
+@app.cell
+def __(players_with_xp, mo):
+    # Form Analytics Dashboard - Fixed for marimo rendering
+    
+    # Check if we have form data
+    if not players_with_xp.empty and 'momentum' in players_with_xp.columns:
+        # Hot players analysis
+        hot_players = players_with_xp[players_with_xp['momentum'] == '🔥'].nlargest(8, 'xP')
+        cold_players = players_with_xp[players_with_xp['momentum'] == '❄️'].nsmallest(8, 'form_multiplier')
+        
+        # Value analysis with form
+        value_players = players_with_xp[
+            (players_with_xp['momentum'].isin(['🔥', '📈'])) & 
+            (players_with_xp['price'] <= 7.5)
+        ].nlargest(10, 'xP_per_price')
+        
+        # Expensive underperformers
+        expensive_poor = players_with_xp[
+            (players_with_xp['price'] >= 8.0) & 
+            (players_with_xp['momentum'].isin(['❄️', '📉']))
+        ].nsmallest(6, 'form_multiplier')
+        
+        insights = []
+        
+        if len(hot_players) > 0:
+            insights.extend([
+                mo.md("### 🔥 Hot Players (Prime Transfer Targets)"),
+                mo.md(f"**{len(hot_players)} players in excellent recent form**"),
+                mo.ui.table(
+                    hot_players[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    page_size=8
+                )
+            ])
+        
+        if len(value_players) > 0:
+            insights.extend([
+                mo.md("### 💎 Form + Value Players (Budget-Friendly Options)"),
+                mo.md(f"**{len(value_players)} players with good form and great value**"),
+                mo.ui.table(
+                    value_players[['web_name', 'position', 'name', 'price', 'xP', 'xP_per_price', 'momentum']].round(3),
+                    page_size=10
+                )
+            ])
+        
+        if len(cold_players) > 0:
+            insights.extend([
+                mo.md("### ❄️ Cold Players (Sell Candidates)"),
+                mo.md(f"**{len(cold_players)} players in poor recent form - consider selling**"),
+                mo.ui.table(
+                    cold_players[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    page_size=8
+                )
+            ])
+        
+        if len(expensive_poor) > 0:
+            insights.extend([
+                mo.md("### 💸 Expensive Underperformers (Priority Sells)"),
+                mo.md(f"**{len(expensive_poor)} expensive players in poor form - sell to fund transfers**"),
+                mo.ui.table(
+                    expensive_poor[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    page_size=6
+                )
+            ])
+        
+        # Summary stats
+        if 'form_multiplier' in players_with_xp.columns:
+            momentum_counts = players_with_xp['momentum'].value_counts()
+            avg_multiplier = players_with_xp['form_multiplier'].mean()
+            
+            insights.append(mo.md(f"""
+            ### 📊 Form Summary
+            **Player Distribution:** 🔥 {momentum_counts.get('🔥', 0)} | 📈 {momentum_counts.get('📈', 0)} | ➡️ {momentum_counts.get('➡️', 0)} | 📉 {momentum_counts.get('📉', 0)} | ❄️ {momentum_counts.get('❄️', 0)}
+            
+            **Average Form Multiplier:** {avg_multiplier:.2f}
+            
+            **Transfer Strategy:** Target 🔥 hot and 📈 rising players, avoid ❄️ cold and 📉 declining players
+            """))
+        
+        form_insights_display = mo.vstack(insights)
+    else:
+        form_insights_display = mo.md("⚠️ **No form data available** - load historical data first")
+    
+    form_insights_display
+
+
+@app.cell
+def __(current_squad, players_with_xp, mo):
+    # Current Squad Form Analysis - Fixed for marimo rendering
+    
+    # Check data availability without early returns
+    squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
+    players_available = hasattr(players_with_xp, 'empty') and not players_with_xp.empty
+    momentum_available = hasattr(players_with_xp, 'columns') and 'momentum' in players_with_xp.columns
+    
+    # Create content based on data availability
+    if squad_available and players_available and momentum_available:
+        # Merge squad with form data
+        squad_with_form = current_squad.merge(
+            players_with_xp[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
+            on='player_id', 
+            how='left'
+        )
+        
+        if not squad_with_form.empty:
+            # Squad form analysis
+            squad_insights = []
+            
+            # Count momentum distribution in squad
+            squad_momentum = squad_with_form['momentum'].value_counts()
+            squad_avg_form = squad_with_form['form_multiplier'].mean()
+            
+            # Identify problem players in squad
+            problem_players = squad_with_form[
+                squad_with_form['momentum'].isin(['❄️', '📉'])
+            ].sort_values('form_multiplier')
+            
+            # Identify top performers in squad  
+            top_performers = squad_with_form[
+                squad_with_form['momentum'].isin(['🔥', '📈'])
+            ].sort_values('xP', ascending=False)
+            
+            squad_insights.append(mo.md("### 🔍 Current Squad Form Analysis"))
+            
+            # Squad overview
+            squad_insights.append(mo.md(f"""
+            **Your Squad Form Distribution:**
+            - 🔥 Hot: {squad_momentum.get('🔥', 0)} players - 📈 Rising: {squad_momentum.get('📈', 0)} players
+            - ➡️ Stable: {squad_momentum.get('➡️', 0)} players - 📉 Declining: {squad_momentum.get('📉', 0)} players - ❄️ Cold: {squad_momentum.get('❄️', 0)} players
+            
+            **Squad Average Form Multiplier:** {squad_avg_form:.2f}
+            """))
+            
+            # Squad health assessment
+            hot_count = squad_momentum.get('🔥', 0) + squad_momentum.get('📈', 0)
+            cold_count = squad_momentum.get('❄️', 0) + squad_momentum.get('📉', 0)
+            
+            if hot_count >= 8:
+                health_status = "🔥 EXCELLENT - Squad is in great form, minimal transfers needed"
+                transfer_priority = "Low"
+            elif hot_count >= 5:
+                health_status = "📈 GOOD - Squad form is solid, consider tactical transfers"
+                transfer_priority = "Medium"
+            elif cold_count >= 8:
+                health_status = "❄️ POOR - Squad struggling, multiple transfers recommended"
+                transfer_priority = "High"
+            else:
+                health_status = "➡️ AVERAGE - Squad form is stable, monitor for improvements"
+                transfer_priority = "Low"
+            
+            squad_insights.append(mo.md("### 🎯 Squad Health Assessment"))
+            squad_insights.append(mo.md(f"""
+            {health_status}
+            
+            **Transfer Priority:** {transfer_priority}
+            """))
+            
+            # Show top performers if any
+            if not top_performers.empty:
+                squad_insights.append(mo.md("### ⭐ Squad Stars (Keep!)"))
+                squad_insights.append(mo.ui.table(
+                    top_performers[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    page_size=5
+                ))
+            
+            # Show problem players if any
+            if not problem_players.empty:
+                squad_insights.append(mo.md("### ⚠️ Problem Players (Consider Selling)"))
+                squad_insights.append(mo.ui.table(
+                    problem_players[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    page_size=5
+                ))
+            
+            squad_form_content = mo.vstack(squad_insights)
+        else:
+            squad_form_content = mo.md("⚠️ **Could not merge squad with form data**")
+    else:
+        # Debug information for missing data
+        debug_parts = []
+        if not squad_available:
+            debug_parts.append("No squad loaded")
+        if not players_available:
+            debug_parts.append("No player XP data")
+        if not momentum_available:
+            debug_parts.append("No form/momentum data")
+        
+        debug_msg = ", ".join(debug_parts)
+        squad_form_content = mo.md(f"⚠️ **Squad form analysis unavailable**\n\n_{debug_msg}_")
+    
+    squad_form_content
+
+
+@app.cell
+def __(mo):
+    mo.md("## 5. Fixture Difficulty Analysis")
+    return
+
+
+@app.cell
+def __(gameweek_input, mo, pd):
+    # Fixture Difficulty Heatmap
+    def create_fixture_difficulty_visualization(start_gw, num_gws=5):
+        """Create fixture difficulty heatmap for next 5 gameweeks"""
+        try:
+            from client import get_current_teams, get_fixtures_normalized
+            from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
+            
+            # Load data
+            teams = get_current_teams()
+            fixtures = get_fixtures_normalized()
+            
+            # Get dynamic team strength ratings
+            calculator = DynamicTeamStrength(debug=False)
+            current_season_data = load_historical_gameweek_data(start_gw=1, end_gw=start_gw-1)
+            team_strength = calculator.get_team_strength(
+                target_gameweek=start_gw,
+                teams_data=teams,
+                current_season_data=current_season_data
+            )
+            
+            # Create team mapping
+            team_id_to_name = dict(zip(teams['team_id'], teams['name']))
+            
+            # Initialize difficulty matrix
+            team_names = sorted(team_strength.keys())
+            difficulty_matrix = pd.DataFrame(
+                index=team_names,
+                columns=[f'GW{gw}' for gw in range(start_gw, start_gw + num_gws)]
+            )
+            
+            # Calculate fixture difficulty for each team and gameweek
+            for gw in range(start_gw, start_gw + num_gws):
+                gw_fixtures = fixtures[fixtures['event'] == gw].copy()
+                
+                if gw_fixtures.empty:
+                    continue
+                
+                for _, fixture in gw_fixtures.iterrows():
+                    home_team_id = fixture['home_team_id']
+                    away_team_id = fixture['away_team_id']
+                    
+                    home_team_name = team_id_to_name.get(home_team_id)
+                    away_team_name = team_id_to_name.get(away_team_id)
+                    
+                    if home_team_name and away_team_name:
+                        # Home team difficulty = opponent strength
+                        away_strength = team_strength.get(away_team_name, 1.0)
+                        home_difficulty = away_strength
+                        
+                        # Away team difficulty = opponent strength + away disadvantage
+                        home_strength = team_strength.get(home_team_name, 1.0)
+                        away_difficulty = home_strength * 1.1  # 10% away disadvantage
+                        
+                        difficulty_matrix.loc[home_team_name, f'GW{gw}'] = home_difficulty
+                        difficulty_matrix.loc[away_team_name, f'GW{gw}'] = away_difficulty
+            
+            # Convert to float and fill missing values
+            difficulty_matrix = difficulty_matrix.astype(float)
+            difficulty_matrix = difficulty_matrix.fillna(1.0)
+            
+            # Calculate average difficulty for analysis
+            avg_difficulty = difficulty_matrix.mean(axis=1).sort_values()
+            
+            # Best and worst fixture runs
+            best_fixtures = avg_difficulty.head(5)
+            worst_fixtures = avg_difficulty.tail(5)
+            
+            # Create analysis summary
+            analysis_md = f"""
+            ### 🏟️ Fixture Difficulty Analysis (GW{start_gw}-{start_gw + num_gws - 1})
+            
+            **🟢 EASIEST FIXTURE RUNS:**
+            """
+            
+            for i, (team, difficulty) in enumerate(best_fixtures.items(), 1):
+                analysis_md += f"\n{i}. **{team}**: {difficulty:.3f} avg difficulty"
+            
+            analysis_md += "\n\n**🔴 HARDEST FIXTURE RUNS:**"
+            
+            for i, (team, difficulty) in enumerate(worst_fixtures.items(), 1):
+                analysis_md += f"\n{i}. **{team}**: {difficulty:.3f} avg difficulty"
+            
+            analysis_md += """
+            
+            **💡 Transfer Strategy:**
+            - 🎯 Target players from teams with green fixtures (easy run)
+            - ⚠️ Avoid players from teams with red fixtures (tough run)  
+            - 📊 Difficulty: 0.7=Very Easy, 1.0=Average, 1.4=Very Hard
+            """
+            
+            # Create interactive plotly heatmap
+            import plotly.graph_objects as go
+            
+            # Get opponent info for hover text
+            opponent_info = {}
+            for gw in range(start_gw, start_gw + num_gws):
+                gw_fixtures = fixtures[fixtures['event'] == gw].copy()
+                for _, fixture in gw_fixtures.iterrows():
+                    home_team_name = team_id_to_name.get(fixture['home_team_id'])
+                    away_team_name = team_id_to_name.get(fixture['away_team_id'])
+                    
+                    if home_team_name and away_team_name:
+                        opponent_info[(home_team_name, f'GW{gw}')] = f"vs {away_team_name} (H)"
+                        opponent_info[(away_team_name, f'GW{gw}')] = f"vs {home_team_name} (A)"
+            
+            # Reshape hover text to match matrix
+            hover_matrix = []
+            for i, team in enumerate(difficulty_matrix.index):
+                team_row = []
+                for j, gw_col in enumerate(difficulty_matrix.columns):
+                    difficulty = difficulty_matrix.loc[team, gw_col]
+                    opponent = opponent_info.get((team, gw_col), "No fixture")
+                    
+                    if difficulty < 0.85:
+                        diff_desc = "Very Easy"
+                    elif difficulty < 0.95:
+                        diff_desc = "Easy"
+                    elif difficulty < 1.05:
+                        diff_desc = "Average"
+                    elif difficulty < 1.15:
+                        diff_desc = "Hard"
+                    else:
+                        diff_desc = "Very Hard"
+                    
+                    hover_info = (
+                        f"<b>{team}</b><br>"
+                        f"{gw_col}: {opponent}<br>"
+                        f"Difficulty: {difficulty:.2f}<br>"
+                        f"Rating: {diff_desc}"
+                    )
+                    team_row.append(hover_info)
+                hover_matrix.append(team_row)
+            
+            # Create the interactive heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=difficulty_matrix.values,
+                x=difficulty_matrix.columns,
+                y=difficulty_matrix.index,
+                colorscale=[
+                    [0.0, '#2E8B57'],   # Dark green (very easy)
+                    [0.25, '#90EE90'],  # Light green (easy)
+                    [0.5, '#FFFF99'],   # Yellow (average)
+                    [0.75, '#FFA500'],  # Orange (hard)
+                    [1.0, '#FF4500']    # Red (very hard)
+                ],
+                zmid=1.0,  # Center on average difficulty
+                zmin=0.7,
+                zmax=1.4,
+                text=difficulty_matrix.round(2).values,
+                texttemplate="%{text}",
+                textfont={"size": 10},
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_matrix,
+                colorbar=dict(
+                    title=dict(
+                        text="Fixture Difficulty<br>(0.7=Very Easy, 1.4=Very Hard)",
+                        side="right"
+                    )
+                )
+            ))
+            
+            fig.update_layout(
+                title=f'Fixture Difficulty Heatmap: GW{start_gw}-{start_gw + num_gws - 1}<br><sub>Interactive - Hover for details</sub>',
+                title_x=0.5,
+                xaxis_title="Gameweek",
+                yaxis_title="Team",
+                font=dict(size=12),
+                height=600,
+                width=800,
+                margin=dict(l=120, r=100, t=80, b=50)
+            )
+            
+            # Update axes
+            fig.update_xaxes(side="bottom")
+            fig.update_yaxes(autorange="reversed")  # Teams from top to bottom
+            
+            # Create table as backup
+            display_df = difficulty_matrix.round(2).reset_index()
+            display_df = display_df.rename(columns={'index': 'Team'})
+            
+            return mo.vstack([
+                mo.md(analysis_md),
+                mo.md("### 📊 Interactive Fixture Difficulty Heatmap"),
+                mo.md("*🟢 Green = Easy, 🟡 Yellow = Average, 🔴 Red = Hard | Hover for opponent details*"),
+                mo.as_html(fig),
+                mo.md("### 📋 Detailed Values Table"),
+                mo.ui.table(display_df, page_size=20)
+            ])
+            
+        except Exception as e:
+            return mo.md(f"❌ **Could not create fixture analysis:** {e}")
+    
+    # Only show if gameweek is selected
+    if gameweek_input.value:
+        fixture_analysis = create_fixture_difficulty_visualization(gameweek_input.value)
+    else:
+        fixture_analysis = mo.md("Select target gameweek to see fixture difficulty analysis")
+    
+    fixture_analysis
+
+
+@app.cell
+def __(mo):
+    mo.md("## 6. Team Optimization & Constraints")
     return
 
 
@@ -570,7 +827,7 @@ def __(players_with_xp, mo):
 
 
 @app.cell
-def __(current_squad, team_data, players_with_xp, mo, pd, np, optimize_button, must_include_dropdown, must_exclude_dropdown):
+def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_include_dropdown, must_exclude_dropdown):
     def optimize_team_with_transfers():
         """Smart optimization that decides optimal number of transfers (0-3) based on net XP"""
         if len(current_squad) == 0 or players_with_xp.empty or not team_data:
@@ -829,7 +1086,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, np, optimize_button, m
 
 @app.cell
 def __(mo):
-    mo.md("## 4. Captain Selection")
+    mo.md("## 7. Captain Selection")
     return
 
 
