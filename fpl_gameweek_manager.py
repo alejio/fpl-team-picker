@@ -828,6 +828,200 @@ def __(players_with_xp, mo):
 
 @app.cell
 def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_include_dropdown, must_exclude_dropdown):
+    def calculate_total_budget_pool(current_squad, bank_balance, players_to_keep=None):
+        """
+        Calculate total budget available for transfers including sellable squad value.
+        
+        Args:
+            current_squad: DataFrame of current 15 players with price column
+            bank_balance: Available money in bank (float)
+            players_to_keep: Optional set of player_ids that must be retained
+            
+        Returns:
+            dict with budget analysis for advanced transfer scenarios
+        """
+        if players_to_keep is None:
+            players_to_keep = set()
+        
+        # Calculate sellable value (exclude must-keep players)
+        sellable_players = current_squad[~current_squad['player_id'].isin(players_to_keep)]
+        sellable_value = sellable_players['price'].sum()
+        
+        # Total theoretical budget pool
+        total_budget = bank_balance + sellable_value
+        
+        # Constrained budget (keeping minimum viable squad)
+        # Must keep at least: 1 GKP, 3 DEF, 3 MID, 1 FWD = 8 players minimum for valid squad
+        min_squad_positions = {'GKP': 1, 'DEF': 3, 'MID': 3, 'FWD': 1}
+        
+        # Find cheapest players per position to calculate minimum squad cost
+        min_squad_cost = 0
+        for pos, min_count in min_squad_positions.items():
+            pos_players = current_squad[current_squad['position'] == pos]
+            if len(pos_players) >= min_count:
+                cheapest = pos_players.nsmallest(min_count, 'price')['price'].sum()
+                min_squad_cost += cheapest
+            else:
+                # If we don't have enough players in this position, use their total cost
+                min_squad_cost += pos_players['price'].sum()
+        
+        # Constrained budget = total available - minimum squad cost to maintain validity
+        constrained_budget = total_budget - min_squad_cost
+        
+        # Calculate potential for premium acquisitions (high-value single player purchases)
+        max_single_acquisition = constrained_budget
+        
+        return {
+            'total_budget': total_budget,
+            'bank_balance': bank_balance,
+            'sellable_value': sellable_value,
+            'constrained_budget': max(0, constrained_budget),  # Can't go negative
+            'min_squad_cost': min_squad_cost,
+            'sellable_players_count': len(sellable_players),
+            'max_single_acquisition': max(0, max_single_acquisition),
+            'budget_utilization_pct': (bank_balance / total_budget * 100) if total_budget > 0 else 0
+        }
+
+
+
+    def premium_acquisition_planner(current_squad, all_players, budget_pool_info, top_n=3):
+        """
+        Work backwards from premium targets to find optimal funding strategies.
+        
+        Args:
+            current_squad: DataFrame of current 15 players
+            all_players: DataFrame of all available players  
+            budget_pool_info: Dict from calculate_total_budget_pool()
+            top_n: Number of top premium targets to analyze per position
+            
+        Returns:
+            List of premium acquisition scenarios with funding strategies
+        """
+        scenarios = []
+        
+        # Define premium player thresholds (top tier by position)
+        premium_thresholds = {
+            'GKP': 5.5,  # Premium GKPs are 5.5m+
+            'DEF': 6.0,  # Premium DEFs are 6.0m+ 
+            'MID': 8.0,  # Premium MIDs are 8.0m+
+            'FWD': 9.0   # Premium FWDs are 9.0m+
+        }
+        
+        # Find premium targets not in current squad
+        for position, min_price in premium_thresholds.items():
+            premium_targets = all_players[
+                (all_players['position'] == position) &
+                (all_players['price'] >= min_price) &
+                (~all_players['player_id'].isin(current_squad['player_id'])) &
+                (all_players['xP'] > 0)  # Must have valid XP
+            ].nlargest(top_n, 'xP')  # Top N by expected points
+            
+            print(f"🏆 Found {len(premium_targets)} premium {position} targets (threshold £{min_price:.1f}m+)")
+            
+            for _, target in premium_targets.iterrows():
+                # Check if we can afford this target with available budget  
+                max_affordable = budget_pool_info['max_single_acquisition']
+                print(f"🎯 Testing premium target {target['web_name']} (£{target['price']:.1f}m) vs max affordable £{max_affordable:.1f}m")
+                
+                if target['price'] <= max_affordable:
+                    
+                    # Strategy 1: Direct replacement (same position)
+                    current_position_players = current_squad[
+                        current_squad['position'] == position
+                    ].nsmallest(3, 'xP')  # Consider replacing weakest 3
+                    
+                    for _, weak_player in current_position_players.iterrows():
+                        funding_gap = target['price'] - weak_player['price']
+                        xp_gain = target['xP'] - weak_player['xP']
+                        
+                        # For direct swaps, check if we can afford with available budget
+                        # We have bank + selling the weak player = bank + weak_player_price total available
+                        total_available = budget_pool_info['bank_balance'] + weak_player['price']
+                        
+                        print(f"  📊 Direct swap: {weak_player['web_name']} (£{weak_player['price']:.1f}m, {weak_player['xP']:.2f}xP) → {target['web_name']} (£{target['price']:.1f}m, {target['xP']:.2f}xP)")
+                        print(f"  💰 Need £{target['price']:.1f}m vs available £{budget_pool_info['bank_balance']:.1f}m + £{weak_player['price']:.1f}m = £{total_available:.1f}m, XP gain: {xp_gain:.2f}")
+                        can_afford = target['price'] <= total_available
+                        
+                        if can_afford:
+                            # Simple same-position upgrade
+                            if xp_gain > 0.05:  # Meaningful upgrade threshold (lowered for early season)
+                                print(f"  ✅ Direct premium scenario viable!")
+                                scenarios.append({
+                                    'type': 'premium_direct',
+                                    'target_player': target,
+                                    'sell_players': [weak_player],
+                                    'funding_gap': funding_gap,
+                                    'xp_gain': xp_gain,
+                                    'transfers': 1,
+                                    'description': f"Premium Direct: {target['web_name']} for {weak_player['web_name']}"
+                                })
+                            else:
+                                print(f"  ❌ XP gain too small ({xp_gain:.2f} ≤ 0.05)")
+                        else:
+                            print(f"  ❌ Cannot afford: need £{target['price']:.1f}m but only have £{total_available:.1f}m available")
+                    
+                    # Strategy 2: Multi-player funding (sell 2-3 players to fund 1 premium)
+                    if target['price'] > budget_pool_info['bank_balance']:
+                        funding_needed = target['price'] - budget_pool_info['bank_balance']
+                        
+                        # Find combinations of players to sell (excluding same position to maintain squad balance)
+                        other_positions = [pos for pos in ['DEF', 'MID', 'FWD'] if pos != position]
+                        potential_sales = current_squad[
+                            current_squad['position'].isin(other_positions)
+                        ].nsmallest(5, 'xP')  # Consider weakest 5 from other positions
+                        
+                        # Try 2-player funding combinations
+                        from itertools import combinations
+                        for sell_combo in combinations(range(len(potential_sales)), 2):
+                            sell_players = [potential_sales.iloc[i] for i in sell_combo]
+                            sell_value = sum(p['price'] for p in sell_players)
+                            sell_xp = sum(p['xP'] for p in sell_players)
+                            
+                            if sell_value >= funding_needed:
+                                # Need to find replacement(s) for sold players
+                                remaining_budget = budget_pool_info['bank_balance'] + sell_value - target['price']
+                                
+                                # Find budget replacements for sold players
+                                replacements = []
+                                replacement_xp = 0
+                                
+                                for sell_player in sell_players:
+                                    budget_options = all_players[
+                                        (all_players['position'] == sell_player['position']) &
+                                        (all_players['price'] <= remaining_budget / len(sell_players)) &  # Split budget
+                                        (~all_players['player_id'].isin(current_squad['player_id'])) &
+                                        (~all_players['player_id'].isin([r['player_id'] for r in replacements]))
+                                    ]
+                                    
+                                    if len(budget_options) > 0:
+                                        best_budget = budget_options.nlargest(1, 'xP').iloc[0]
+                                        replacements.append(best_budget)
+                                        replacement_xp += best_budget['xP']
+                                        remaining_budget -= best_budget['price']
+                                
+                                if len(replacements) == len(sell_players):
+                                    # Calculate net XP gain
+                                    net_xp_gain = (target['xP'] + replacement_xp) - sell_xp
+                                    
+                                    if net_xp_gain > 0.2:  # Higher threshold for multi-transfer
+                                        sell_names = ", ".join([p['web_name'] for p in sell_players])
+                                        replace_names = ", ".join([r['web_name'] for r in replacements])
+                                        
+                                        scenarios.append({
+                                            'type': 'premium_funded',
+                                            'target_player': target,
+                                            'sell_players': sell_players,
+                                            'replacement_players': replacements,
+                                            'funding_gap': target['price'] - budget_pool_info['bank_balance'],
+                                            'xp_gain': net_xp_gain,
+                                            'transfers': 1 + len(sell_players) + len(replacements),
+                                            'description': f"Premium Funded: {target['web_name']} (sell {sell_names}, buy {replace_names})"
+                                        })
+        
+        # Sort by XP gain and return top scenarios
+        scenarios.sort(key=lambda x: x['xp_gain'], reverse=True)
+        return scenarios[:8]  # Return top 8 premium acquisition scenarios
+
     def optimize_team_with_transfers():
         """Smart optimization that decides optimal number of transfers (0-3) based on net XP"""
         if len(current_squad) == 0 or players_with_xp.empty or not team_data:
@@ -857,6 +1051,10 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         current_player_ids = set(current_squad_with_xp['player_id'].tolist())
         available_budget = team_data['bank']
         free_transfers = team_data.get('free_transfers', 1)
+        
+        # Calculate total budget pool for advanced transfer scenarios
+        budget_pool_info = calculate_total_budget_pool(current_squad_with_xp, available_budget, must_include_ids)
+        print(f"💰 Budget Analysis: Bank £{available_budget:.1f}m | Sellable Value £{budget_pool_info['sellable_value']:.1f}m | Total Pool £{budget_pool_info['total_budget']:.1f}m")
         
         # Get all players with XP data and apply exclusion constraints
         all_players = players_with_xp[players_with_xp['xP'].notna()].copy()
@@ -1037,13 +1235,70 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                             'description': f"OUT: {out_names} → IN: {in_names}"
                         })
         
+        # Note: Cross-position transfers are not possible in FPL (only like-for-like position swaps allowed)
+        print(f"📊 Squad composition: {current_squad_with_xp['position'].value_counts().to_dict()}")
+        print(f"💰 Budget pool: Bank £{budget_pool_info['bank_balance']:.1f}m, Max acquisition £{budget_pool_info['max_single_acquisition']:.1f}m")
+        
+        # Scenario 4+: Premium Acquisition Planning
+        print(f"🎯 Generating premium acquisition scenarios...")
+        premium_scenarios = premium_acquisition_planner(
+            current_squad_with_xp, all_players, budget_pool_info, top_n=2
+        )
+        
+        # Convert premium scenarios to standard format
+        for prem_scenario in premium_scenarios:
+            num_transfers = prem_scenario['transfers']
+            penalty = -4 * max(0, num_transfers - free_transfers)
+            
+            # For premium scenarios, we need to build the new squad
+            if prem_scenario['type'] == 'premium_direct':
+                # Simple 1:1 replacement
+                new_squad = current_squad_with_xp[
+                    current_squad_with_xp['player_id'] != prem_scenario['sell_players'][0]['player_id']
+                ].copy()
+                new_squad = pd.concat([new_squad, pd.DataFrame([prem_scenario['target_player']])], ignore_index=True)
+                
+            elif prem_scenario['type'] == 'premium_funded':
+                # Multi-player funding scenario
+                sell_ids = [p['player_id'] for p in prem_scenario['sell_players']]
+                new_squad = current_squad_with_xp[
+                    ~current_squad_with_xp['player_id'].isin(sell_ids)
+                ].copy()
+                
+                # Add target player and replacements
+                new_players = [prem_scenario['target_player']] + prem_scenario['replacement_players']
+                new_squad = pd.concat([new_squad, pd.DataFrame(new_players)], ignore_index=True)
+            
+            # Validate team constraints
+            if new_squad['name'].value_counts().max() <= 3:
+                # Get best starting 11 from new squad
+                new_11, new_formation, new_xp = get_best_starting_11(new_squad)
+                net_xp = new_xp + penalty
+                
+                # Only add if net XP is better than current
+                if net_xp > current_xp:
+                    scenarios.append({
+                        'transfers': num_transfers,
+                        'cost': prem_scenario['funding_gap'], 
+                        'penalty': penalty,
+                        'net_xp': net_xp,
+                        'formation': new_formation,
+                        'starting_11': new_11,
+                        'description': f"🎯 {prem_scenario['description']} (+{prem_scenario['xp_gain']:.1f} raw XP)",
+                        'type': 'premium_acquisition',
+                        'target': prem_scenario['target_player']['web_name']
+                    })
+        
+        print(f"✅ Found {len(premium_scenarios)} premium acquisition scenarios, {len([s for s in premium_scenarios if s['transfers'] <= 5])} viable with transfer limits")
+        
         # Smart decision: Find best scenario based on net XP
         best_scenario = max(scenarios, key=lambda x: x['net_xp'])
         
         # Create comparison table sorted by net XP
         comparison_df = pd.DataFrame([{
             'Transfers': s['transfers'], 
-            'Description': s['description'][:50] + '...' if len(s['description']) > 50 else s['description'],
+            'Type': s.get('type', 'standard'),
+            'Description': s['description'][:55] + '...' if len(s['description']) > 55 else s['description'],
             'Penalty': s['penalty'], 
             'Net XP': round(s['net_xp'], 2), 
             'Formation': s['formation'],
@@ -1060,10 +1315,27 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         if must_include_ids or must_exclude_ids:
             constraint_info = f"\n**Constraints Applied:** {len(must_include_ids)} must include, {len(must_exclude_ids)} must exclude"
         
+        # Count scenario types for display
+        premium_count = len([s for s in scenarios if s.get('type') == 'premium_acquisition'])
+        
+        # Create budget analysis display
+        budget_analysis = f"""
+        **💰 Budget Pool Analysis:**
+        - Bank: £{budget_pool_info['bank_balance']:.1f}m | Sellable Value: £{budget_pool_info['sellable_value']:.1f}m | **Total Pool: £{budget_pool_info['total_budget']:.1f}m**
+        - Max Single Acquisition: £{budget_pool_info['max_single_acquisition']:.1f}m | Budget Utilization: {budget_pool_info['budget_utilization_pct']:.1f}%
+        - {budget_pool_info['sellable_players_count']} sellable players | Min squad cost: £{budget_pool_info['min_squad_cost']:.1f}m
+        
+        **🎯 Enhanced Transfer Analysis:**
+        - {len(scenarios)} total scenarios analyzed ({premium_count} premium acquisition scenarios)
+        - Premium acquisition planner targets high-value players with smart funding strategies
+        - Enhanced budget pool calculation enables complex multi-player funding scenarios
+        """
+        
         return mo.vstack([
             mo.md(f"### 🏆 Smart Decision: {best_scenario['transfers']} Transfer(s) Optimal"),
             mo.md(f"**Recommended Strategy:** {best_scenario['description']}"),
             mo.md(f"**Expected Net XP:** {best_scenario['net_xp']:.2f} | **Formation:** {best_scenario['formation']}{constraint_info}"),
+            mo.md(budget_analysis),
             mo.md("**All Scenarios (sorted by Net XP):**"),
             mo.ui.table(comparison_df, page_size=6),
             mo.md("**Optimal Starting 11:**"),
