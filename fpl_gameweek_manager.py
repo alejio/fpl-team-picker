@@ -374,26 +374,24 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
-    # Form Analytics Dashboard
-    def create_form_insights(players_df):
-        """Create form-based insights for transfer decisions"""
-        if players_df.empty or 'momentum' not in players_df.columns:
-            return mo.md("⚠️ **No form data available** - load historical data first")
-        
+    # Form Analytics Dashboard - Fixed for marimo rendering
+    
+    # Check if we have form data
+    if not players_with_xp.empty and 'momentum' in players_with_xp.columns:
         # Hot players analysis
-        hot_players = players_df[players_df['momentum'] == '🔥'].nlargest(8, 'xP')
-        cold_players = players_df[players_df['momentum'] == '❄️'].nsmallest(8, 'form_multiplier')
+        hot_players = players_with_xp[players_with_xp['momentum'] == '🔥'].nlargest(8, 'xP')
+        cold_players = players_with_xp[players_with_xp['momentum'] == '❄️'].nsmallest(8, 'form_multiplier')
         
         # Value analysis with form
-        value_players = players_df[
-            (players_df['momentum'].isin(['🔥', '📈'])) & 
-            (players_df['price'] <= 7.5)
+        value_players = players_with_xp[
+            (players_with_xp['momentum'].isin(['🔥', '📈'])) & 
+            (players_with_xp['price'] <= 7.5)
         ].nlargest(10, 'xP_per_price')
         
         # Expensive underperformers
-        expensive_poor = players_df[
-            (players_df['price'] >= 8.0) & 
-            (players_df['momentum'].isin(['❄️', '📉']))
+        expensive_poor = players_with_xp[
+            (players_with_xp['price'] >= 8.0) & 
+            (players_with_xp['momentum'].isin(['❄️', '📉']))
         ].nsmallest(6, 'form_multiplier')
         
         insights = []
@@ -439,9 +437,9 @@ def __(players_with_xp, mo):
             ])
         
         # Summary stats
-        if 'form_multiplier' in players_df.columns:
-            momentum_counts = players_df['momentum'].value_counts()
-            avg_multiplier = players_df['form_multiplier'].mean()
+        if 'form_multiplier' in players_with_xp.columns:
+            momentum_counts = players_with_xp['momentum'].value_counts()
+            avg_multiplier = players_with_xp['form_multiplier'].mean()
             
             insights.append(mo.md(f"""
             ### 📊 Form Summary
@@ -452,122 +450,331 @@ def __(players_with_xp, mo):
             **Transfer Strategy:** Target 🔥 hot and 📈 rising players, avoid ❄️ cold and 📉 declining players
             """))
         
-        return mo.vstack(insights)
+        form_insights_display = mo.vstack(insights)
+    else:
+        form_insights_display = mo.md("⚠️ **No form data available** - load historical data first")
     
-    # Display form insights
-    form_insights_display = create_form_insights(players_with_xp)
     form_insights_display
-    
-    return (form_insights_display,)
 
 
 @app.cell
 def __(current_squad, players_with_xp, mo):
-    # Current Squad Form Analysis
-    def analyze_current_squad_form(squad_df, all_players_df):
-        """Analyze the form of current squad players"""
-        if squad_df.empty or all_players_df.empty or 'momentum' not in all_players_df.columns:
-            return mo.md("⚠️ **No squad or form data available**")
-        
+    # Current Squad Form Analysis - Fixed for marimo rendering
+    
+    # Check data availability without early returns
+    squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
+    players_available = hasattr(players_with_xp, 'empty') and not players_with_xp.empty
+    momentum_available = hasattr(players_with_xp, 'columns') and 'momentum' in players_with_xp.columns
+    
+    # Create content based on data availability
+    if squad_available and players_available and momentum_available:
         # Merge squad with form data
-        squad_with_form = squad_df.merge(
-            all_players_df[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
+        squad_with_form = current_squad.merge(
+            players_with_xp[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
             on='player_id', 
             how='left'
         )
         
-        if squad_with_form.empty:
-            return mo.md("⚠️ **Could not analyze squad form**")
-        
-        # Squad form analysis
-        squad_insights = []
-        
-        # Count momentum distribution in squad
-        squad_momentum = squad_with_form['momentum'].value_counts()
-        squad_avg_form = squad_with_form['form_multiplier'].mean()
-        
-        # Identify problem players in squad
-        problem_players = squad_with_form[
-            squad_with_form['momentum'].isin(['❄️', '📉'])
-        ].sort_values('form_multiplier')
-        
-        # Identify top performers in squad  
-        top_performers = squad_with_form[
-            squad_with_form['momentum'].isin(['🔥', '📈'])
-        ].sort_values('xP', ascending=False)
-        
-        squad_insights.append(mo.md("### 🔍 Current Squad Form Analysis"))
-        
-        # Squad overview
-        squad_insights.append(mo.md(f"""
-        **Your Squad Form Distribution:**
-        - 🔥 Hot: {squad_momentum.get('🔥', 0)} players
-        - 📈 Rising: {squad_momentum.get('📈', 0)} players  
-        - ➡️ Stable: {squad_momentum.get('➡️', 0)} players
-        - 📉 Declining: {squad_momentum.get('📉', 0)} players
-        - ❄️ Cold: {squad_momentum.get('❄️', 0)} players
-        
-        **Squad Average Form Multiplier:** {squad_avg_form:.2f}
-        """))
-        
-        # Show problem players if any
-        if len(problem_players) > 0:
-            squad_insights.extend([
-                mo.md("### 🚨 Squad Players in Poor Form (Consider Selling)"),
-                mo.ui.table(
-                    problem_players[['web_name', 'position', 'name', 'price', 'xP', 'momentum', 'form_multiplier']].round(2),
-                    page_size=10
-                )
-            ])
-        
-        # Show top performers
-        if len(top_performers) > 0:
-            squad_insights.extend([
-                mo.md("### ⭐ Squad Players in Great Form (Keep/Captain)"),
-                mo.ui.table(
-                    top_performers[['web_name', 'position', 'name', 'price', 'xP', 'momentum', 'form_multiplier']].round(2),
-                    page_size=10
-                )
-            ])
-        
-        # Overall squad health assessment
-        poor_form_count = len(problem_players)
-        good_form_count = len(top_performers)
-        
-        if poor_form_count >= 3:
-            health_status = "🚨 **POOR** - Multiple players in poor form, urgent transfers needed"
-        elif poor_form_count >= 2:
-            health_status = "⚠️ **CONCERNING** - Some players in poor form, consider transfers"
-        elif good_form_count >= 5:
-            health_status = "🔥 **EXCELLENT** - Squad in great form, minimal changes needed"
-        elif good_form_count >= 3:
-            health_status = "✅ **GOOD** - Solid squad form, selective improvements possible"
+        if not squad_with_form.empty:
+            # Squad form analysis
+            squad_insights = []
+            
+            # Count momentum distribution in squad
+            squad_momentum = squad_with_form['momentum'].value_counts()
+            squad_avg_form = squad_with_form['form_multiplier'].mean()
+            
+            # Identify problem players in squad
+            problem_players = squad_with_form[
+                squad_with_form['momentum'].isin(['❄️', '📉'])
+            ].sort_values('form_multiplier')
+            
+            # Identify top performers in squad  
+            top_performers = squad_with_form[
+                squad_with_form['momentum'].isin(['🔥', '📈'])
+            ].sort_values('xP', ascending=False)
+            
+            squad_insights.append(mo.md("### 🔍 Current Squad Form Analysis"))
+            
+            # Squad overview
+            squad_insights.append(mo.md(f"""
+            **Your Squad Form Distribution:**
+            - 🔥 Hot: {squad_momentum.get('🔥', 0)} players - 📈 Rising: {squad_momentum.get('📈', 0)} players
+            - ➡️ Stable: {squad_momentum.get('➡️', 0)} players - 📉 Declining: {squad_momentum.get('📉', 0)} players - ❄️ Cold: {squad_momentum.get('❄️', 0)} players
+            
+            **Squad Average Form Multiplier:** {squad_avg_form:.2f}
+            """))
+            
+            # Squad health assessment
+            hot_count = squad_momentum.get('🔥', 0) + squad_momentum.get('📈', 0)
+            cold_count = squad_momentum.get('❄️', 0) + squad_momentum.get('📉', 0)
+            
+            if hot_count >= 8:
+                health_status = "🔥 EXCELLENT - Squad is in great form, minimal transfers needed"
+                transfer_priority = "Low"
+            elif hot_count >= 5:
+                health_status = "📈 GOOD - Squad form is solid, consider tactical transfers"
+                transfer_priority = "Medium"
+            elif cold_count >= 8:
+                health_status = "❄️ POOR - Squad struggling, multiple transfers recommended"
+                transfer_priority = "High"
+            else:
+                health_status = "➡️ AVERAGE - Squad form is stable, monitor for improvements"
+                transfer_priority = "Low"
+            
+            squad_insights.append(mo.md("### 🎯 Squad Health Assessment"))
+            squad_insights.append(mo.md(f"""
+            {health_status}
+            
+            **Transfer Priority:** {transfer_priority}
+            """))
+            
+            # Show top performers if any
+            if not top_performers.empty:
+                squad_insights.append(mo.md("### ⭐ Squad Stars (Keep!)"))
+                squad_insights.append(mo.ui.table(
+                    top_performers[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    page_size=5
+                ))
+            
+            # Show problem players if any
+            if not problem_players.empty:
+                squad_insights.append(mo.md("### ⚠️ Problem Players (Consider Selling)"))
+                squad_insights.append(mo.ui.table(
+                    problem_players[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    page_size=5
+                ))
+            
+            squad_form_content = mo.vstack(squad_insights)
         else:
-            health_status = "➡️ **AVERAGE** - Squad form is stable, monitor for improvements"
-        
-        squad_insights.append(mo.md(f"""
-        ### 🎯 Squad Health Assessment
-        {health_status}
-        
-        **Transfer Priority:** {"High" if poor_form_count >= 2 else "Medium" if poor_form_count == 1 else "Low"}
-        """))
-        
-        return mo.vstack(squad_insights)
-    
-    # Only show if we have squad and form data
-    if not current_squad.empty and not players_with_xp.empty:
-        squad_form_analysis = analyze_current_squad_form(current_squad, players_with_xp)
+            squad_form_content = mo.md("⚠️ **Could not merge squad with form data**")
     else:
-        squad_form_analysis = mo.md("Load your team first to analyze squad form")
+        # Debug information for missing data
+        debug_parts = []
+        if not squad_available:
+            debug_parts.append("No squad loaded")
+        if not players_available:
+            debug_parts.append("No player XP data")
+        if not momentum_available:
+            debug_parts.append("No form/momentum data")
+        
+        debug_msg = ", ".join(debug_parts)
+        squad_form_content = mo.md(f"⚠️ **Squad form analysis unavailable**\n\n_{debug_msg}_")
     
-    squad_form_analysis
-    
-    return (squad_form_analysis,)
+    squad_form_content
 
 
 @app.cell
 def __(mo):
-    mo.md("## 5. Team Optimization & Constraints")
+    mo.md("## 5. Fixture Difficulty Analysis")
+    return
+
+
+@app.cell
+def __(gameweek_input, mo, pd):
+    # Fixture Difficulty Heatmap
+    def create_fixture_difficulty_visualization(start_gw, num_gws=5):
+        """Create fixture difficulty heatmap for next 5 gameweeks"""
+        try:
+            from client import get_current_teams, get_fixtures_normalized
+            from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
+            
+            # Load data
+            teams = get_current_teams()
+            fixtures = get_fixtures_normalized()
+            
+            # Get dynamic team strength ratings
+            calculator = DynamicTeamStrength(debug=False)
+            current_season_data = load_historical_gameweek_data(start_gw=1, end_gw=start_gw-1)
+            team_strength = calculator.get_team_strength(
+                target_gameweek=start_gw,
+                teams_data=teams,
+                current_season_data=current_season_data
+            )
+            
+            # Create team mapping
+            team_id_to_name = dict(zip(teams['team_id'], teams['name']))
+            
+            # Initialize difficulty matrix
+            team_names = sorted(team_strength.keys())
+            difficulty_matrix = pd.DataFrame(
+                index=team_names,
+                columns=[f'GW{gw}' for gw in range(start_gw, start_gw + num_gws)]
+            )
+            
+            # Calculate fixture difficulty for each team and gameweek
+            for gw in range(start_gw, start_gw + num_gws):
+                gw_fixtures = fixtures[fixtures['event'] == gw].copy()
+                
+                if gw_fixtures.empty:
+                    continue
+                
+                for _, fixture in gw_fixtures.iterrows():
+                    home_team_id = fixture['home_team_id']
+                    away_team_id = fixture['away_team_id']
+                    
+                    home_team_name = team_id_to_name.get(home_team_id)
+                    away_team_name = team_id_to_name.get(away_team_id)
+                    
+                    if home_team_name and away_team_name:
+                        # Home team difficulty = opponent strength
+                        away_strength = team_strength.get(away_team_name, 1.0)
+                        home_difficulty = away_strength
+                        
+                        # Away team difficulty = opponent strength + away disadvantage
+                        home_strength = team_strength.get(home_team_name, 1.0)
+                        away_difficulty = home_strength * 1.1  # 10% away disadvantage
+                        
+                        difficulty_matrix.loc[home_team_name, f'GW{gw}'] = home_difficulty
+                        difficulty_matrix.loc[away_team_name, f'GW{gw}'] = away_difficulty
+            
+            # Convert to float and fill missing values
+            difficulty_matrix = difficulty_matrix.astype(float)
+            difficulty_matrix = difficulty_matrix.fillna(1.0)
+            
+            # Calculate average difficulty for analysis
+            avg_difficulty = difficulty_matrix.mean(axis=1).sort_values()
+            
+            # Best and worst fixture runs
+            best_fixtures = avg_difficulty.head(5)
+            worst_fixtures = avg_difficulty.tail(5)
+            
+            # Create analysis summary
+            analysis_md = f"""
+            ### 🏟️ Fixture Difficulty Analysis (GW{start_gw}-{start_gw + num_gws - 1})
+            
+            **🟢 EASIEST FIXTURE RUNS:**
+            """
+            
+            for i, (team, difficulty) in enumerate(best_fixtures.items(), 1):
+                analysis_md += f"\n{i}. **{team}**: {difficulty:.3f} avg difficulty"
+            
+            analysis_md += "\n\n**🔴 HARDEST FIXTURE RUNS:**"
+            
+            for i, (team, difficulty) in enumerate(worst_fixtures.items(), 1):
+                analysis_md += f"\n{i}. **{team}**: {difficulty:.3f} avg difficulty"
+            
+            analysis_md += """
+            
+            **💡 Transfer Strategy:**
+            - 🎯 Target players from teams with green fixtures (easy run)
+            - ⚠️ Avoid players from teams with red fixtures (tough run)  
+            - 📊 Difficulty: 0.7=Very Easy, 1.0=Average, 1.4=Very Hard
+            """
+            
+            # Create interactive plotly heatmap
+            import plotly.graph_objects as go
+            
+            # Get opponent info for hover text
+            opponent_info = {}
+            for gw in range(start_gw, start_gw + num_gws):
+                gw_fixtures = fixtures[fixtures['event'] == gw].copy()
+                for _, fixture in gw_fixtures.iterrows():
+                    home_team_name = team_id_to_name.get(fixture['home_team_id'])
+                    away_team_name = team_id_to_name.get(fixture['away_team_id'])
+                    
+                    if home_team_name and away_team_name:
+                        opponent_info[(home_team_name, f'GW{gw}')] = f"vs {away_team_name} (H)"
+                        opponent_info[(away_team_name, f'GW{gw}')] = f"vs {home_team_name} (A)"
+            
+            # Reshape hover text to match matrix
+            hover_matrix = []
+            for i, team in enumerate(difficulty_matrix.index):
+                team_row = []
+                for j, gw_col in enumerate(difficulty_matrix.columns):
+                    difficulty = difficulty_matrix.loc[team, gw_col]
+                    opponent = opponent_info.get((team, gw_col), "No fixture")
+                    
+                    if difficulty < 0.85:
+                        diff_desc = "Very Easy"
+                    elif difficulty < 0.95:
+                        diff_desc = "Easy"
+                    elif difficulty < 1.05:
+                        diff_desc = "Average"
+                    elif difficulty < 1.15:
+                        diff_desc = "Hard"
+                    else:
+                        diff_desc = "Very Hard"
+                    
+                    hover_info = (
+                        f"<b>{team}</b><br>"
+                        f"{gw_col}: {opponent}<br>"
+                        f"Difficulty: {difficulty:.2f}<br>"
+                        f"Rating: {diff_desc}"
+                    )
+                    team_row.append(hover_info)
+                hover_matrix.append(team_row)
+            
+            # Create the interactive heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=difficulty_matrix.values,
+                x=difficulty_matrix.columns,
+                y=difficulty_matrix.index,
+                colorscale=[
+                    [0.0, '#2E8B57'],   # Dark green (very easy)
+                    [0.25, '#90EE90'],  # Light green (easy)
+                    [0.5, '#FFFF99'],   # Yellow (average)
+                    [0.75, '#FFA500'],  # Orange (hard)
+                    [1.0, '#FF4500']    # Red (very hard)
+                ],
+                zmid=1.0,  # Center on average difficulty
+                zmin=0.7,
+                zmax=1.4,
+                text=difficulty_matrix.round(2).values,
+                texttemplate="%{text}",
+                textfont={"size": 10},
+                hovertemplate='%{customdata}<extra></extra>',
+                customdata=hover_matrix,
+                colorbar=dict(
+                    title=dict(
+                        text="Fixture Difficulty<br>(0.7=Very Easy, 1.4=Very Hard)",
+                        side="right"
+                    )
+                )
+            ))
+            
+            fig.update_layout(
+                title=f'Fixture Difficulty Heatmap: GW{start_gw}-{start_gw + num_gws - 1}<br><sub>Interactive - Hover for details</sub>',
+                title_x=0.5,
+                xaxis_title="Gameweek",
+                yaxis_title="Team",
+                font=dict(size=12),
+                height=600,
+                width=800,
+                margin=dict(l=120, r=100, t=80, b=50)
+            )
+            
+            # Update axes
+            fig.update_xaxes(side="bottom")
+            fig.update_yaxes(autorange="reversed")  # Teams from top to bottom
+            
+            # Create table as backup
+            display_df = difficulty_matrix.round(2).reset_index()
+            display_df = display_df.rename(columns={'index': 'Team'})
+            
+            return mo.vstack([
+                mo.md(analysis_md),
+                mo.md("### 📊 Interactive Fixture Difficulty Heatmap"),
+                mo.md("*🟢 Green = Easy, 🟡 Yellow = Average, 🔴 Red = Hard | Hover for opponent details*"),
+                mo.as_html(fig),
+                mo.md("### 📋 Detailed Values Table"),
+                mo.ui.table(display_df, page_size=20)
+            ])
+            
+        except Exception as e:
+            return mo.md(f"❌ **Could not create fixture analysis:** {e}")
+    
+    # Only show if gameweek is selected
+    if gameweek_input.value:
+        fixture_analysis = create_fixture_difficulty_visualization(gameweek_input.value)
+    else:
+        fixture_analysis = mo.md("Select target gameweek to see fixture difficulty analysis")
+    
+    fixture_analysis
+
+
+@app.cell
+def __(mo):
+    mo.md("## 6. Team Optimization & Constraints")
     return
 
 
@@ -879,7 +1086,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
 
 @app.cell
 def __(mo):
-    mo.md("## 6. Captain Selection")
+    mo.md("## 7. Captain Selection")
     return
 
 

@@ -140,14 +140,51 @@ class XPModel:
                                  players_df: pd.DataFrame, 
                                  target_gameweek: int) -> Dict[str, float]:
         """
-        Calculate dynamic team strength ratings based on current season performance
+        Calculate dynamic team strength ratings using 2024-25 data + current season
         
-        For now, uses 2023-24 table as baseline but designed to incorporate:
-        - Current season form (last 6 fixtures)
-        - Goal difference and xG performance  
-        - Squad depth and injury impact
+        Transition logic:
+        - GW1-7: Weighted combination of 2024-25 historical + current season
+        - GW8+: Pure current season performance (ignoring historical)
         """
-        # Static baseline from 2023-24 final table
+        try:
+            from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
+            
+            # Initialize dynamic team strength calculator
+            calculator = DynamicTeamStrength(debug=self.debug)
+            
+            # Load current season data for dynamic calculation
+            current_season_data = load_historical_gameweek_data(start_gw=1, end_gw=target_gameweek-1)
+            
+            # Get dynamic team strength ratings
+            strength_ratings = calculator.get_team_strength(
+                target_gameweek=target_gameweek,
+                teams_data=teams_df,
+                current_season_data=current_season_data
+            )
+            
+            if self.debug:
+                if target_gameweek >= 8:
+                    print(f"🔥 Using current season team strength (GW{target_gameweek})")
+                else:
+                    print(f"📊 Using weighted team strength (GW{target_gameweek})")
+                
+                strongest = max(strength_ratings.items(), key=lambda x: x[1])
+                weakest = min(strength_ratings.items(), key=lambda x: x[1])
+                print(f"   Strongest: {strongest[0]} ({strongest[1]})")
+                print(f"   Weakest: {weakest[0]} ({weakest[1]})")
+            
+            self._team_strength_cache = strength_ratings
+            return strength_ratings
+            
+        except Exception as e:
+            if self.debug:
+                print(f"⚠️ Dynamic team strength failed: {e}, using static fallback")
+            
+            # Fallback to static ratings
+            return self._get_static_team_strength_fallback()
+    
+    def _get_static_team_strength_fallback(self) -> Dict[str, float]:
+        """Fallback to static 2023-24 table ratings if dynamic calculation fails"""
         team_positions = {
             'Manchester City': 1, 'Arsenal': 2, 'Liverpool': 3, 'Aston Villa': 4,
             'Tottenham': 5, 'Chelsea': 6, 'Newcastle': 7, 'Manchester Utd': 8,
@@ -168,12 +205,6 @@ class XPModel:
                 strength = 0.7 - (position - 20) * 0.05
             strength_ratings[team] = round(strength, 3)
         
-        # TODO: Phase 2 - Add current season form adjustments
-        # - Recent 6 fixture performance
-        # - Goals scored/conceded rates
-        # - Home/away split
-        
-        self._team_strength_cache = strength_ratings
         return strength_ratings
     
     def _merge_xg_xa_rates(self, players_df: pd.DataFrame, 
@@ -387,6 +418,17 @@ class XPModel:
             form_start_gw = max(1, target_gameweek - self.form_window)
             form_end_gw = target_gameweek - 1
             
+            # Early season adjustment: use available data even if limited
+            if target_gameweek <= 3:
+                # For very early season, use all available data up to previous GW
+                available_gws = sorted(live_data['event'].unique())
+                if available_gws:
+                    form_start_gw = min(available_gws)
+                    form_end_gw = max([gw for gw in available_gws if gw < target_gameweek] or [1])
+                    
+                    if self.debug:
+                        print(f"🌟 Early season form calculation: Using GW{form_start_gw}-{form_end_gw}")
+            
             # Filter live data for form window
             form_data = live_data[
                 (live_data['event'] >= form_start_gw) & 
@@ -394,6 +436,8 @@ class XPModel:
             ].copy()
             
             if form_data.empty:
+                if self.debug:
+                    print(f"⚠️ No form data available for GW{form_start_gw}-{form_end_gw}")
                 return pd.DataFrame()
             
             # Calculate form metrics by player
@@ -419,7 +463,8 @@ class XPModel:
                 - Poor form (1-3 PPG): 0.6-0.9x multiplier
                 - Very poor form (<1 PPG): 0.5-0.6x multiplier
                 """
-                if gameweeks_played < 2:  # Need at least 2 games for reliable form
+                # Early season: accept single gameweek for initial form assessment
+                if gameweeks_played < 1:  # Need at least 1 game for any form
                     return 1.0
                 
                 if recent_ppg >= 8.0:
@@ -439,7 +484,7 @@ class XPModel:
             )
             
             # Calculate momentum indicators
-            def get_momentum_indicator(recent_ppg, form_multiplier):
+            def get_momentum_indicator(form_multiplier):
                 """Get emoji momentum indicator"""
                 if form_multiplier >= 1.4:
                     return '🔥'  # Hot
@@ -453,7 +498,7 @@ class XPModel:
                     return '❄️'  # Cold
             
             player_form['momentum'] = player_form.apply(
-                lambda row: get_momentum_indicator(row['recent_points_per_game'], row['form_multiplier']),
+                lambda row: get_momentum_indicator(row['form_multiplier']),
                 axis=1
             )
             
