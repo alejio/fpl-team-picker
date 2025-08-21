@@ -582,13 +582,22 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
     
+    # Debug current state
+    print(f"🔍 XP Calculation Debug:")
+    print(f"  - players.empty: {players.empty if hasattr(players, 'empty') else 'not available'}")
+    print(f"  - gameweek_input.value: {gameweek_input.value if hasattr(gameweek_input, 'value') else 'not available'}")
+    print(f"  - players shape: {players.shape if hasattr(players, 'shape') else 'not available'}")
+    
     # Only calculate XP if we have valid data
     try:
         if not players.empty and gameweek_input.value:
             print(f"🚀 Starting XP calculation for {len(players)} players...")
             xp_result, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
             print(f"✅ XP calculation completed, returned {len(players_with_xp)} players with XP data")
+            print(f"📊 players_with_xp type: {type(players_with_xp)}")
+            print(f"📊 players_with_xp shape: {players_with_xp.shape if hasattr(players_with_xp, 'shape') else 'no shape'}")
         else:
+            print(f"❌ XP calculation skipped - players empty: {players.empty}, gameweek: {gameweek_input.value}")
             xp_result = mo.md("Load gameweek data first")
             # Create empty dataframe with expected structure to prevent downstream errors
             players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
@@ -806,7 +815,444 @@ def __(current_squad, players_with_xp, mo):
 
 @app.cell
 def __(mo):
-    mo.md("## 5. Fixture Difficulty Analysis")
+    mo.md("## 5. Player Performance Trends")
+    return
+
+
+@app.cell
+def __(mo, pd, players_with_xp):
+    def create_player_trends_visualization(players_data):
+        """Create interactive player trends visualization"""
+        try:
+            # Get historical data for trends
+            from client import get_gameweek_live_data
+            import plotly.graph_objects as go
+            import plotly.express as px
+            
+            # Load historical gameweek data (check available gameweeks)
+            historical_data = []
+            max_gw = 10  # Adjust based on season progress
+            
+            print(f"🔍 Loading historical data for trends...")
+            
+            for gw in range(1, max_gw + 1):
+                try:
+                    gw_data = get_gameweek_live_data(gw)
+                    if not gw_data.empty:
+                        gw_data['gameweek'] = gw
+                        historical_data.append(gw_data)
+                        print(f"✅ GW{gw}: {len(gw_data)} player records")
+                    else:
+                        print(f"❌ GW{gw}: No data")
+                        break  # Stop if we hit missing data
+                except Exception as e:
+                    print(f"❌ GW{gw}: Error - {e}")
+                    break
+            
+            if not historical_data:
+                return [], [], pd.DataFrame()
+            
+            print(f"📊 Total historical datasets: {len(historical_data)}")
+            
+            # Combine all historical data
+            all_data = pd.concat(historical_data, ignore_index=True)
+            print(f"📊 Combined data shape: {all_data.shape}")
+            
+            # CRITICAL: Merge with current player names 
+            # The live data only has player_id, we need names from current players
+            if not players_data.empty:
+                print(f"🔗 Merging with players data to get names...")
+                player_names = players_data[['player_id', 'web_name', 'position', 'team', 'name']].drop_duplicates('player_id')
+                print(f"📋 Player names data shape: {player_names.shape}")
+                
+                # Include current price info too (handle missing columns gracefully)
+                base_cols = ['player_id', 'web_name', 'position', 'team', 'name']
+                optional_cols = ['now_cost', 'selected_by_percent']
+                
+                # Only include columns that exist
+                available_cols = base_cols + [col for col in optional_cols if col in players_data.columns]
+                player_info = players_data[available_cols].drop_duplicates('player_id')
+                
+                print(f"📊 Using player info columns: {available_cols}")
+                
+                all_data = all_data.merge(
+                    player_info,
+                    on='player_id',
+                    how='left'
+                )
+                print(f"📊 After merge shape: {all_data.shape}")
+                print(f"📊 Players with names: {all_data['web_name'].notna().sum()}")
+                print(f"📊 Sample merged data columns: {list(all_data.columns)}")
+            else:
+                print("⚠️ No players data available for name merge!")
+            
+            # Calculate derived metrics (handle missing columns gracefully)
+            all_data['points_per_game'] = all_data['total_points'] / all_data['gameweek']
+            all_data['xg_per_90'] = (all_data.get('expected_goals', 0) / all_data.get('minutes', 1)) * 90
+            all_data['xa_per_90'] = (all_data.get('expected_assists', 0) / all_data.get('minutes', 1)) * 90
+            
+            # Value ratio - only calculate if we have price data
+            if 'now_cost' in all_data.columns:
+                all_data['value_ratio'] = all_data['total_points'] / (all_data['now_cost'] / 10)  # Points per £1m
+            else:
+                print("⚠️ No price data available, skipping value ratio calculation")
+                all_data['value_ratio'] = 0
+            
+            # Debug: Check for specific players (try different name variations)
+            ekitike_data = all_data[all_data['web_name'].str.contains('Ekitike', case=False, na=False)]
+            if not ekitike_data.empty:
+                print(f"🎯 Found Ekitike data: {ekitike_data[['web_name', 'gameweek', 'total_points', 'goals_scored']].to_dict('records')}")
+            else:
+                # Try other variations
+                ekit_data = all_data[all_data['web_name'].str.contains('Ekit', case=False, na=False)]
+                if not ekit_data.empty:
+                    print(f"🎯 Found Ekit* player: {ekit_data[['web_name', 'gameweek', 'total_points', 'goals_scored']].to_dict('records')}")
+                else:
+                    print(f"❌ No Ekitike/Ekit player found")
+                    # Show players with high goals_scored to see if he's there under different name
+                    high_scorers = all_data[all_data['goals_scored'] >= 2]
+                    if not high_scorers.empty:
+                        print(f"🥅 Players with 2+ goals: {high_scorers[['web_name', 'goals_scored']].to_dict('records')}")
+                    print(f"📝 Sample player names: {all_data['web_name'].dropna().head(10).tolist()}")
+            
+            # Create player options (filter to players with data)
+            player_options = []
+            
+            # Get players with the most total points and data availability
+            valid_players = all_data[all_data['web_name'].notna()]
+            print(f"📊 Valid players with names: {len(valid_players)}")
+            
+            if valid_players.empty:
+                print("❌ No players with valid names found!")
+                return [], [], pd.DataFrame()
+                
+            player_stats = valid_players.groupby('player_id').agg({
+                'total_points': 'max',
+                'web_name': 'first',
+                'position': 'first', 
+                'name': 'first',
+                'gameweek': 'count'  # Number of gameweeks with data
+            }).reset_index()
+            
+            # Filter to players with at least some data and sort by points
+            active_players = player_stats[player_stats['gameweek'] >= 1].nlargest(100, 'total_points')
+            
+            for _, player_row in active_players.iterrows():
+                label = f"{player_row['web_name']} ({player_row['position']}, {player_row['name']}) - {player_row['total_points']} pts"
+                player_options.append({"label": label, "value": int(player_row['player_id'])})
+            
+            print(f"📊 Created {len(player_options)} player options for trends")
+            
+            # Create attribute options (only include available columns)
+            base_attributes = [
+                {"label": "Total Points", "value": "total_points"},
+                {"label": "Points Per Game", "value": "points_per_game"},
+                {"label": "Minutes Played", "value": "minutes"},
+                {"label": "Goals Scored", "value": "goals_scored"},
+                {"label": "Assists", "value": "assists"},
+                {"label": "Expected Goals (xG)", "value": "expected_goals"},
+                {"label": "Expected Assists (xA)", "value": "expected_assists"},
+                {"label": "xG per 90", "value": "xg_per_90"},
+                {"label": "xA per 90", "value": "xa_per_90"},
+                {"label": "Clean Sheets", "value": "clean_sheets"},
+                {"label": "Yellow Cards", "value": "yellow_cards"},
+                {"label": "Red Cards", "value": "red_cards"},
+                {"label": "Bonus Points", "value": "bonus"},
+                {"label": "ICT Index", "value": "ict_index"}
+            ]
+            
+            # Add optional attributes if they exist in the data
+            optional_attributes = [
+                {"label": "Price (£m)", "value": "now_cost"},
+                {"label": "Selected By %", "value": "selected_by_percent"},
+                {"label": "Value Ratio (pts/£1m)", "value": "value_ratio"}
+            ]
+            
+            attribute_options = base_attributes.copy()
+            for attr in optional_attributes:
+                if attr["value"] in all_data.columns:
+                    attribute_options.append(attr)
+                    
+            print(f"📊 Available attributes: {[attr['value'] for attr in attribute_options]}")
+            
+            return player_options, attribute_options, all_data
+            
+        except Exception as e:
+            print(f"Error creating trends data: {e}")
+            return [], [], pd.DataFrame()
+    
+    # Create the trend analysis components
+    if hasattr(players_with_xp, 'empty') and not players_with_xp.empty:
+        try:
+            print(f"🔍 Creating trends visualization with {len(players_with_xp)} players")
+            player_opts, attr_opts, trends_data = create_player_trends_visualization(players_with_xp)
+            print(f"✅ Trends created: {len(player_opts)} players, {len(attr_opts)} attributes")
+        except Exception as e:
+            print(f"❌ Error creating trends: {e}")
+            player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
+    else:
+        print("❌ No players_with_xp data available - calculate XP first")
+        player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
+    
+    return player_opts, attr_opts, trends_data
+
+
+@app.cell
+def __(mo, player_opts, attr_opts):
+    # Player and attribute selectors
+    if player_opts and attr_opts:
+        player_selector = mo.ui.dropdown(
+            options=player_opts[:50],  # Limit to top 50 for performance
+            label="Select Player:",
+            value=None  # Don't set default value to avoid validation issues
+        )
+        
+        attribute_selector = mo.ui.dropdown(
+            options=attr_opts,
+            label="Select Attribute:",
+            value=None  # Don't set default value to avoid validation issues
+        )
+        
+        multi_player_selector = mo.ui.multiselect(
+            options=player_opts[:20],  # Top 20 for multi-select
+            label="Compare Multiple Players (optional):",
+            value=[]
+        )
+        
+        trends_ui = mo.vstack([
+            mo.md("### 📈 Player Performance Trends"),
+            mo.md("*Track how players' attributes change over gameweeks*"),
+            mo.hstack([player_selector, attribute_selector]),
+            multi_player_selector,
+            mo.md("---")
+        ])
+    else:
+        trends_ui = mo.vstack([
+            mo.md("### 📈 Player Performance Trends"),
+            mo.md("⚠️ **Calculate XP first in section 2 to enable trends analysis**"),
+            mo.md("*After calculating XP, this section will show interactive player performance charts over gameweeks*")
+        ])
+        player_selector = None
+        attribute_selector = None
+        multi_player_selector = None
+    
+    trends_ui
+    
+    return player_selector, attribute_selector, multi_player_selector
+
+
+@app.cell
+def __(mo, player_selector, attribute_selector, multi_player_selector, trends_data, pd):
+    # Generate the trends chart
+    def create_trends_chart(data, selected_player, selected_attr, multi_players=None):
+        """Create interactive trends chart"""
+        if data.empty:
+            return mo.md("⚠️ **No data available for trends**")
+        
+        try:
+            import plotly.graph_objects as go
+            import plotly.express as px
+            
+            fig = go.Figure()
+            
+            # Extract values if they're still dict objects
+            if isinstance(selected_player, dict):
+                player_id = selected_player.get('value')
+            else:
+                player_id = selected_player
+                
+            if isinstance(selected_attr, dict):
+                attr_name = selected_attr.get('value')
+            else:
+                attr_name = selected_attr
+            
+            # Main player
+            if player_id:
+                # Debug player selection
+                print(f"🔍 Looking for player_id: {player_id} (type: {type(player_id)})")
+                print(f"🔍 Attribute: {attr_name} (type: {type(attr_name)})")
+                print(f"🔍 Unique player_ids in data: {sorted(data['player_id'].unique())[:10]}...")
+                print(f"🔍 Data player_id type: {type(data['player_id'].iloc[0]) if not data.empty else 'no data'}")
+                    
+                player_data = data[data['player_id'] == player_id].sort_values('gameweek')
+                print(f"🔍 Player data shape: {player_data.shape}")
+                print(f"🔍 Available columns: {list(player_data.columns)}")
+                
+                if not player_data.empty and attr_name in player_data.columns:
+                    player_name = player_data['web_name'].iloc[0]
+                    
+                    print(f"🔍 Raw data for {player_name} ({attr_name}): {player_data[attr_name].tolist()}")
+                    
+                    # Handle price conversion and ensure numeric data
+                    y_values = pd.to_numeric(player_data[attr_name], errors='coerce')
+                    if attr_name == 'now_cost':
+                        y_values = y_values / 10  # Convert to £m
+                    
+                    print(f"🔍 Processed y_values: {y_values.tolist()}")
+                    
+                    # Remove any NaN values
+                    valid_data = pd.DataFrame({
+                        'gameweek': player_data['gameweek'],
+                        'y_values': y_values
+                    }).dropna()
+                    
+                    print(f"🔍 Final valid_data:\n{valid_data}")
+                    print(f"🔍 All NaN check - y_values: {y_values.isna().sum()}, gameweeks: {player_data['gameweek'].isna().sum()}")
+                    
+                    print(f"📊 Valid data points: {len(valid_data)}")
+                    if not valid_data.empty:
+                        print(f"📊 Y-values range: {valid_data['y_values'].min():.2f} to {valid_data['y_values'].max():.2f}")
+                        print(f"📊 X-values range: {valid_data['gameweek'].min()} to {valid_data['gameweek'].max()}")
+                        
+                        fig.add_trace(go.Scatter(
+                            x=valid_data['gameweek'],
+                            y=valid_data['y_values'],
+                            mode='lines+markers',
+                            name=f"{player_name}",
+                            line=dict(width=3),
+                            marker=dict(size=8)
+                        ))
+                else:
+                    print(f"⚠️ No data found for player {player_id} or column {attr_name}")
+            
+            # Multiple players for comparison
+            if multi_players:
+                colors = px.colors.qualitative.Set3
+                for i, multi_player_id in enumerate(multi_players):
+                    if multi_player_id != player_id:  # Avoid duplicate
+                        player_data = data[data['player_id'] == multi_player_id].sort_values('gameweek')
+                        if not player_data.empty:
+                            player_name = player_data['web_name'].iloc[0]
+                            
+                            # Handle price conversion
+                            y_values = player_data[attr_name]
+                            if attr_name == 'now_cost':
+                                y_values = y_values / 10
+                            
+                            fig.add_trace(go.Scatter(
+                                x=player_data['gameweek'],
+                                y=y_values,
+                                mode='lines+markers',
+                                name=f"{player_name}",
+                                line=dict(width=2, color=colors[i % len(colors)]),
+                                marker=dict(size=6)
+                            ))
+            
+            # Customize layout
+            attr_labels = {
+                'total_points': 'Total Points',
+                'now_cost': 'Price (£m)',
+                'selected_by_percent': 'Selected By (%)',
+                'points_per_game': 'Points Per Game',
+                'minutes': 'Minutes',
+                'goals_scored': 'Goals',
+                'assists': 'Assists',
+                'expected_goals': 'Expected Goals (xG)',
+                'expected_assists': 'Expected Assists (xA)',
+                'xg_per_90': 'xG per 90 min',
+                'xa_per_90': 'xA per 90 min',
+                'value_ratio': 'Points per £1m',
+                'clean_sheets': 'Clean Sheets',
+                'bonus': 'Bonus Points',
+                'ict_index': 'ICT Index'
+            }
+            
+            # Handle case where attr_name might not be a string
+            if isinstance(attr_name, str):
+                y_label = attr_labels.get(attr_name, attr_name.replace('_', ' ').title())
+            else:
+                y_label = str(attr_name).replace('_', ' ').title()
+            
+            fig.update_layout(
+                title=f'Player Trends: {y_label} Over Time',
+                xaxis_title='Gameweek',
+                yaxis_title=y_label,
+                hovermode='x unified',
+                width=800,
+                height=500,
+                showlegend=True,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=1.02,
+                    xanchor="right",
+                    x=1
+                )
+            )
+            
+            # Ensure axes auto-scale to data
+            fig.update_xaxes(
+                showgrid=True, 
+                gridwidth=1, 
+                gridcolor='lightgray',
+                autorange=True
+            )
+            fig.update_yaxes(
+                showgrid=True, 
+                gridwidth=1, 
+                gridcolor='lightgray',
+                autorange=True,
+                type='linear'
+            )
+            
+            # Summary stats for selected player
+            if player_id and not data[data['player_id'] == player_id].empty:
+                player_stats = data[data['player_id'] == player_id]
+                current_value = player_stats[attr_name].iloc[-1] if not player_stats.empty else 0
+                if attr_name == 'now_cost':
+                    current_value = current_value / 10
+                
+                trend_direction = "📈" if len(player_stats) >= 2 and player_stats[attr_name].iloc[-1] > player_stats[attr_name].iloc[0] else "📉"
+                
+                summary = mo.md(f"""
+                **📊 Current {y_label}:** {current_value:.2f} {trend_direction}
+                
+                **📈 Trend Insights:**
+                - Data points: {len(player_stats)} gameweeks
+                - Showing progression of {y_label.lower()} over time
+                """)
+            else:
+                summary = mo.md("")
+            
+            return mo.vstack([
+                mo.as_html(fig),
+                summary
+            ])
+            
+        except Exception as e:
+            return mo.md(f"❌ **Error creating chart:** {str(e)}")
+    
+    # Generate chart when selectors have values
+    if (player_selector and hasattr(player_selector, 'value') and player_selector.value and 
+        attribute_selector and hasattr(attribute_selector, 'value') and attribute_selector.value):
+        
+        multi_values = multi_player_selector.value if multi_player_selector else []
+        # Extract actual values from selectors
+        selected_player_id = player_selector.value
+        selected_attr_val = attribute_selector.value
+        
+        print(f"🔍 Chart inputs: player={selected_player_id}, attr={selected_attr_val}")
+        print(f"🔍 Player type: {type(selected_player_id)}, Attr type: {type(selected_attr_val)}")
+        print(f"🔍 Trends data shape: {trends_data.shape}")
+        print(f"🔍 Trends data columns: {list(trends_data.columns)}")
+        
+        trends_chart = create_trends_chart(
+            trends_data, 
+            selected_player_id, 
+            selected_attr_val,
+            multi_values
+        )
+    else:
+        trends_chart = mo.md("👆 **Select a player and attribute above to view trends**")
+    
+    trends_chart
+    
+    return (trends_chart,)
+
+
+@app.cell
+def __(mo):
+    mo.md("## 6. Fixture Difficulty Analysis")
     return
 
 
@@ -921,7 +1367,7 @@ def __(gameweek_input, mo, pd):
             hover_matrix = []
             for i, team in enumerate(difficulty_matrix.index):
                 team_row = []
-                for j, gw_col in enumerate(difficulty_matrix.columns):
+                for gw_col in difficulty_matrix.columns:
                     difficulty = difficulty_matrix.loc[team, gw_col]
                     opponent = opponent_info.get((team, gw_col), "No fixture")
                     
@@ -1015,7 +1461,7 @@ def __(gameweek_input, mo, pd):
 
 @app.cell
 def __(mo):
-    mo.md("## 6. Team Optimization & Constraints")
+    mo.md("## 7. Team Optimization & Constraints")
     return
 
 
@@ -1631,7 +2077,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
 
 @app.cell
 def __(mo):
-    mo.md("## 7. Captain Selection")
+    mo.md("## 8. Captain Selection")
     return
 
 
