@@ -618,22 +618,29 @@ class XPModel:
                                     target_gameweek: int,
                                     gameweeks_ahead: int) -> Dict[str, float]:
         """
-        Calculate fixture difficulty for target gameweek(s)
+        Calculate fixture difficulty for target gameweek(s) with temporal weighting
         
-        Returns dict mapping team name to difficulty multiplier [0.7, 1.3]
+        Returns dict mapping team name to weighted average difficulty multiplier [0.7, 1.3]
         """
-        team_difficulty = {}
+        team_difficulties_by_gw = {}  # {team_name: [gw1_diff, gw2_diff, ...]}
         
+        # Handle different column naming conventions
+        team_id_col = 'team_id' if 'team_id' in teams_df.columns else 'id'
+        
+        # Calculate difficulty for each gameweek
         for gw_offset in range(gameweeks_ahead):
             current_gw = target_gameweek + gw_offset
             gw_fixtures = fixtures_df[fixtures_df['event'] == current_gw].copy()
             
             if gw_fixtures.empty:
+                # If no fixtures, use neutral difficulty for all teams
+                for team_name in team_strength.keys():
+                    if team_name not in team_difficulties_by_gw:
+                        team_difficulties_by_gw[team_name] = []
+                    team_difficulties_by_gw[team_name].append(1.0)
                 continue
-            
+                
             # Add team names to fixtures
-            team_id_col = 'team_id' if 'team_id' in teams_df.columns else 'id'
-            
             gw_fixtures = gw_fixtures.merge(
                 teams_df[[team_id_col, 'name']], 
                 left_on='home_team_id', 
@@ -649,6 +656,7 @@ class XPModel:
             ).rename(columns={'name': 'away_team'}).drop(team_id_col, axis=1)
             
             # Calculate difficulty based on opponent strength
+            gw_team_difficulties = {}
             for _, fixture in gw_fixtures.iterrows():
                 home_team = fixture['home_team']
                 away_team = fixture['away_team']
@@ -665,16 +673,38 @@ class XPModel:
                 home_difficulty = np.clip(home_difficulty, 0.7, 1.3)
                 away_difficulty = np.clip(away_difficulty, 0.7, 1.3)
                 
-                # For multi-gameweek, average the difficulties
-                if home_team in team_difficulty:
-                    team_difficulty[home_team] = (team_difficulty[home_team] + home_difficulty) / 2
-                else:
-                    team_difficulty[home_team] = home_difficulty
+                gw_team_difficulties[home_team] = home_difficulty
+                gw_team_difficulties[away_team] = away_difficulty
+            
+            # Store difficulties for each team for this gameweek
+            for team_name in team_strength.keys():
+                if team_name not in team_difficulties_by_gw:
+                    team_difficulties_by_gw[team_name] = []
                 
-                if away_team in team_difficulty:
-                    team_difficulty[away_team] = (team_difficulty[away_team] + away_difficulty) / 2
-                else:
-                    team_difficulty[away_team] = away_difficulty
+                # Use actual difficulty if team has fixture, otherwise neutral
+                team_diff = gw_team_difficulties.get(team_name, 1.0)
+                team_difficulties_by_gw[team_name].append(team_diff)
+        
+        # Apply temporal weighting to calculate final difficulty scores
+        if gameweeks_ahead > 1:
+            temporal_weights = [1.0, 0.9, 0.8, 0.7, 0.6][:gameweeks_ahead]
+            
+            team_difficulty = {}
+            for team_name, difficulties in team_difficulties_by_gw.items():
+                # Weighted average of difficulties across gameweeks
+                weighted_difficulty = sum(diff * weight for diff, weight in zip(difficulties, temporal_weights))
+                total_weight = sum(temporal_weights[:len(difficulties)])
+                team_difficulty[team_name] = weighted_difficulty / total_weight if total_weight > 0 else 1.0
+                
+            if self.debug:
+                sample_team = next(iter(team_difficulty.keys()))
+                sample_diffs = team_difficulties_by_gw[sample_team]
+                print(f"📊 Fixture difficulty example ({sample_team}): {sample_diffs} → {team_difficulty[sample_team]:.3f}")
+                
+        else:
+            # Single gameweek - just use the first (and only) difficulty
+            team_difficulty = {team: diffs[0] if diffs else 1.0 
+                             for team, diffs in team_difficulties_by_gw.items()}
         
         return team_difficulty
     
@@ -725,18 +755,31 @@ class XPModel:
         # Total XP per gameweek
         xp_per_gw = appearance_pts_per_gw + goal_pts_per_gw + assist_pts_per_gw + cs_pts_per_gw
         
-        # Apply multi-gameweek scaling if needed
+        # Apply multi-gameweek scaling with temporal weighting
         if gameweeks_ahead > 1:
-            # Simple scaling for now - could add temporal weighting in future
-            players_df['xP'] = xp_per_gw * gameweeks_ahead
+            # Temporal weighting: GW1=1.0, GW2=0.9, GW3=0.8, GW4=0.7, GW5=0.6
+            # This reflects diminishing importance of distant gameweeks for transfer decisions
+            temporal_weights = [1.0, 0.9, 0.8, 0.7, 0.6][:gameweeks_ahead]
+            total_weight = sum(temporal_weights)
+            
+            # Apply temporal weighting to XP calculation
+            players_df['xP'] = xp_per_gw * total_weight
+            
+            if self.debug:
+                print(f"📅 Applied temporal weighting: {temporal_weights} (total weight: {total_weight:.2f})")
         else:
             players_df['xP'] = xp_per_gw
         
-        # Store component breakdown for analysis
-        players_df['xP_appearance'] = appearance_pts_per_gw * gameweeks_ahead
-        players_df['xP_goals'] = goal_pts_per_gw * gameweeks_ahead
-        players_df['xP_assists'] = assist_pts_per_gw * gameweeks_ahead
-        players_df['xP_clean_sheets'] = cs_pts_per_gw * gameweeks_ahead
+        # Store component breakdown for analysis (with temporal weighting if applicable)
+        if gameweeks_ahead > 1:
+            component_weight = total_weight
+        else:
+            component_weight = gameweeks_ahead
+            
+        players_df['xP_appearance'] = appearance_pts_per_gw * component_weight
+        players_df['xP_goals'] = goal_pts_per_gw * component_weight
+        players_df['xP_assists'] = assist_pts_per_gw * component_weight
+        players_df['xP_clean_sheets'] = cs_pts_per_gw * component_weight
         
         return players_df
 

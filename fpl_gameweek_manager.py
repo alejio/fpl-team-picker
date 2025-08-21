@@ -283,23 +283,29 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
     def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek, live_data_hist=None):
         """Calculate expected points for all players using improved XP model with form weighting"""
         if players_data.empty or not target_gameweek:
-            return mo.md("Select gameweek and load data first"), pd.DataFrame()
+            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
+            return mo.md("Select gameweek and load data first"), empty_df
         
         print(f"🧠 Calculating expected points using improved XP model for GW{target_gameweek}...")
+        print(f"📊 Input data: {len(players_data)} players, {len(teams_data)} teams, {len(fixtures_data)} fixtures")
         
         try:
             # Import and use the new XP model
+            print("🔄 Importing XP model...")
             from xp_model import XPModel
             
             # Initialize model with form weighting enabled
+            print("🔄 Initializing XP model...")
             xp_model = XPModel(
                 form_weight=0.7,  # 70% recent form, 30% season average
                 form_window=5,    # Last 5 gameweeks for form
                 debug=True
             )
+            print("✅ XP model initialized successfully")
             
-            # Calculate XP using the new model
-            players_xp = xp_model.calculate_expected_points(
+            # Calculate both single-GW and 5-GW XP for strategic comparison
+            print(f"🔮 Calculating single-gameweek XP for tactical analysis...")
+            players_1gw = xp_model.calculate_expected_points(
                 players_data=players_data,
                 teams_data=teams_data,
                 xg_rates_data=xg_rates_data,
@@ -309,19 +315,113 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                 gameweeks_ahead=1
             )
             
-            # Add form indicators to display if available
-            form_columns = ['web_name', 'position', 'name', 'price', 'xP', 'xP_per_price', 'fixture_difficulty', 'status']
+            print(f"🎯 Calculating 5-gameweek strategic horizon XP...")
+            players_5gw = xp_model.calculate_expected_points(
+                players_data=players_data,
+                teams_data=teams_data,
+                xg_rates_data=xg_rates_data,
+                fixtures_data=fixtures_data,
+                target_gameweek=target_gameweek,
+                live_data=live_data_hist,  # Historical form data
+                gameweeks_ahead=5
+            )
+            
+            try:
+                # Debug: Check available columns and data integrity
+                print(f"🔍 1-GW columns: {list(players_1gw.columns)}")
+                print(f"🔍 5-GW columns: {list(players_5gw.columns)}")
+                print(f"🔍 1-GW shape: {players_1gw.shape}")
+                print(f"🔍 5-GW shape: {players_5gw.shape}")
+                
+                # Merge both calculations for comparison
+                # First check if player_id column exists in both dataframes
+                if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
+                    # Check which columns are actually available for merging
+                    merge_cols = ['player_id']
+                    for col in ['xP', 'xP_per_price', 'fixture_difficulty']:
+                        if col in players_5gw.columns:
+                            merge_cols.append(col)
+                    
+                    print(f"🔗 Merging columns: {merge_cols}")
+                    
+                    # Create suffix mapping to avoid conflicts
+                    suffix_data = players_5gw[merge_cols].copy()
+                    for col in merge_cols:
+                        if col != 'player_id':
+                            suffix_data[f"{col}_5gw"] = suffix_data[col]
+                            suffix_data = suffix_data.drop(col, axis=1)
+                    
+                    players_xp = players_1gw.merge(
+                        suffix_data,
+                        on='player_id',
+                        how='left'
+                    )
+                    print(f"✅ Successfully merged data for {len(players_xp)} players")
+                    
+                else:
+                    print("⚠️ Warning: player_id column missing, using single-GW data only")
+                    players_xp = players_1gw.copy()
+                    # Add placeholder 5-GW columns
+                    players_xp['xP_5gw'] = players_xp['xP'] * 4.0  # Approximate scaling
+                    players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
+                    players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
+                    
+            except Exception as e:
+                print(f"⚠️ Error merging 1-GW and 5-GW data: {e}")
+                print("🔧 Using single-GW data with estimated 5-GW projections")
+                players_xp = players_1gw.copy()
+                # Add placeholder 5-GW columns
+                players_xp['xP_5gw'] = players_xp['xP'] * 4.0  # Approximate scaling
+                players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
+                players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
+            
+            # Add strategic metrics with error handling
+            try:
+                players_xp['xP_horizon_advantage'] = players_xp['xP_5gw'] - (players_xp['xP'] * 5)  # 5-GW advantage over simple scaling
+                players_xp['fixture_outlook'] = players_xp['fixture_difficulty_5gw'].apply(
+                    lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+                )
+                print(f"✅ Added strategic metrics to {len(players_xp)} players")
+            except Exception as e:
+                print(f"⚠️ Error adding strategic metrics: {e}")
+                players_xp['xP_horizon_advantage'] = 0
+                players_xp['fixture_outlook'] = '🟡 Average'
+            
+            # Add comprehensive player attributes for display
+            # Start with core player info
+            display_columns = ['web_name', 'position', 'name', 'price', 'selected_by_percent']
+            
+            # Add XP model outputs (both 1-GW and 5-GW)
+            xp_columns = ['xP', 'xP_5gw', 'xP_per_price', 'xP_per_price_5gw', 'expected_minutes', 'fixture_difficulty', 'fixture_difficulty_5gw', 'xP_horizon_advantage', 'fixture_outlook']
+            display_columns.extend(xp_columns)
+            
+            # Add XP component breakdown if available
+            xp_components = ['xP_appearance', 'xP_goals', 'xP_assists', 'xP_clean_sheets']
+            for component in xp_components:
+                if component in players_xp.columns:
+                    display_columns.append(component)
             
             # Add form indicators if they exist
-            if 'momentum' in players_xp.columns:
-                form_columns.insert(-1, 'momentum')  # Insert before status
-            if 'form_multiplier' in players_xp.columns:
-                form_columns.insert(-1, 'form_multiplier')
-            if 'recent_points_per_game' in players_xp.columns:
-                form_columns.insert(-1, 'recent_points_per_game')
+            form_columns = ['momentum', 'form_multiplier', 'recent_points_per_game']
+            for form_col in form_columns:
+                if form_col in players_xp.columns:
+                    display_columns.append(form_col)
             
-            # Create display table
-            display_df = players_xp[form_columns].sort_values('xP', ascending=False).round(3)
+            # Add statistical data if available
+            stats_columns = ['xG90', 'xA90', 'minutes', 'p_60_plus_mins']
+            for stat_col in stats_columns:
+                if stat_col in players_xp.columns:
+                    display_columns.append(stat_col)
+            
+            # Add availability status at the end
+            if 'status' in players_xp.columns:
+                display_columns.append('status')
+            
+            # Filter to only include columns that actually exist in the dataframe
+            form_columns = [col for col in display_columns if col in players_xp.columns]
+            
+            # Create display table (sorted by 5-GW XP for strategic decisions)
+            display_df = players_xp[form_columns].sort_values('xP_5gw', ascending=False).round(3)
             
             # Count form-enhanced players
             form_enhanced_players = 0
@@ -337,33 +437,76 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                 cold_players = len(players_xp[players_xp.get('momentum', '') == '❄️'])
                 form_info = f"**Form Analysis:** {form_enhanced_players} players with form data | {hot_players} 🔥 Hot | {cold_players} ❄️ Cold | Avg multiplier: {avg_form_multiplier:.2f}"
             
+            # Strategic analysis with error handling
+            try:
+                fixture_advantage_players = len(players_xp[players_xp['xP_horizon_advantage'] > 0.5])
+                fixture_disadvantage_players = len(players_xp[players_xp['xP_horizon_advantage'] < -0.5])
+                
+                # Check if we have enough data for comparison
+                leaders_different = False
+                if not display_df.empty and 'xP' in players_xp.columns:
+                    top_5gw_player = display_df.iloc[0]['web_name']
+                    top_1gw_players = players_xp.nlargest(1, 'xP')
+                    if not top_1gw_players.empty:
+                        top_1gw_player = top_1gw_players.iloc[0]['web_name']
+                        leaders_different = top_5gw_player != top_1gw_player
+                
+                strategic_info = f"""
+                **🎯 Strategic 5-Gameweek Analysis:**
+                - Players with fixture advantage (5-GW > 1-GW): {fixture_advantage_players}
+                - Players with fixture disadvantage (tough upcoming): {fixture_disadvantage_players}
+                - 5-GW leaders different from 1-GW: {leaders_different}
+                """
+            except Exception as e:
+                print(f"⚠️ Error in strategic analysis: {e}")
+                strategic_info = "**🎯 Strategic 5-Gameweek Analysis:** Analysis unavailable"
+            
             return mo.vstack([
-                mo.md(f"### ✅ Improved XP Model - GW{target_gameweek}"),
+                mo.md(f"### ✅ Strategic XP Model - GW{target_gameweek} + 5 Horizon"),
                 mo.md(f"**Players analyzed:** {len(players_xp)}"),
-                mo.md(f"**Average XP:** {players_xp['xP'].mean():.2f}"),
-                mo.md(f"**Top performing player XP:** {players_xp['xP'].max():.2f}"),
+                mo.md(f"**Average 1-GW XP:** {players_xp['xP'].mean():.2f} | **Average 5-GW XP:** {players_xp['xP_5gw'].mean():.2f}"),
+                mo.md(f"**Top 1-GW:** {players_xp['xP'].max():.2f} | **Top 5-GW:** {players_xp['xP_5gw'].max():.2f}"),
+                mo.md(strategic_info),
                 mo.md(form_info) if form_info else mo.md(""),
-                mo.md("**All Players by Expected Points (with form analysis):**"),
+                mo.md("**All Players - Strategic Comparison (Sorted by 5-GW XP):**"),
+                mo.md("*Showing: 1-GW vs 5-GW XP, fixture outlook, horizon advantage, form data*"),
                 mo.ui.table(display_df, page_size=25)
             ]), players_xp
             
         except ImportError as e:
             print(f"⚠️ New XP model not available: {e}")
-            return mo.md("❌ Could not load improved XP model - check xp_model.py"), pd.DataFrame()
+            # Return empty dataframe with basic structure to prevent downstream errors
+            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
+            return mo.md("❌ Could not load improved XP model - check xp_model.py"), empty_df
         except Exception as e:
             print(f"❌ Error calculating XP: {e}")
-            return mo.md(f"❌ Error calculating expected points: {e}"), pd.DataFrame()
+            # Return empty dataframe with basic structure to prevent downstream errors
+            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
+            return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
     
     # Only calculate XP if we have valid data
-    if not players.empty and gameweek_input.value:
-        xp_display, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
-    else:
-        xp_display = mo.md("Load gameweek data first")
-        players_with_xp = pd.DataFrame()
+    try:
+        if not players.empty and gameweek_input.value:
+            print(f"🚀 Starting XP calculation for {len(players)} players...")
+            xp_result, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
+            print(f"✅ XP calculation completed, returned {len(players_with_xp)} players with XP data")
+        else:
+            xp_result = mo.md("Load gameweek data first")
+            # Create empty dataframe with expected structure to prevent downstream errors
+            players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
+            print("⚠️ No data loaded, using empty dataframe")
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR in XP calculation cell: {e}")
+        import traceback
+        traceback.print_exc()
+        xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
+        # Ensure we always return a valid dataframe
+        players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
     
-    xp_display
+    # Display the result
+    xp_result
     
-    return players_with_xp, xp_display
+    return players_with_xp
 
 
 @app.cell
@@ -780,43 +923,55 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
-    # Create player constraint UI and optimization button
-    if not players_with_xp.empty:
-        # Create options for dropdowns
-        player_options = []
-        for _, player in players_with_xp.sort_values(['position', 'xP'], ascending=[True, False]).iterrows():
-            label = f"{player['web_name']} ({player['position']}, {player['name']}) - £{player['price']:.1f}m, {player['xP']:.2f} xP"
-            player_options.append({"label": label, "value": player['player_id']})
-        
-        must_include_dropdown = mo.ui.multiselect(
-            options=player_options,
-            label="Must Include Players (force these players to be bought/kept)",
-            value=[]
-        )
-        
-        must_exclude_dropdown = mo.ui.multiselect(
-            options=player_options,
-            label="Must Exclude Players (never consider these players)", 
-            value=[]
-        )
-        
-        optimize_button = mo.ui.run_button(
-            label="🚀 Run Smart Optimization (Auto-selects 0-3 transfers)",
-            kind="success"
-        )
-        
-        constraints_ui = mo.vstack([
-            mo.md("### 🎯 Player Constraints"),
-            mo.md("**Set constraints before optimization:**"),
-            must_include_dropdown,
-            must_exclude_dropdown,
-            mo.md("---"),
-            mo.md("### 🧠 Smart Optimization"),
-            mo.md("**The optimizer will automatically decide the optimal number of transfers (0-3) based on net expected points after penalties.**"),
-            optimize_button
-        ])
-    else:
-        constraints_ui = mo.md("Calculate XP first to enable optimization")
+    # Create player constraint UI and optimization button with error handling
+    try:
+        if not players_with_xp.empty:
+            # Create options for dropdowns
+            player_options = []
+            # Use 5-GW XP if available, otherwise fall back to regular XP
+            sort_column = 'xP_5gw' if 'xP_5gw' in players_with_xp.columns else 'xP'
+            
+            for _, player in players_with_xp.sort_values(['position', sort_column], ascending=[True, False]).iterrows():
+                xp_display = player.get('xP_5gw', player.get('xP', 0))
+                label = f"{player['web_name']} ({player['position']}, {player['name']}) - £{player['price']:.1f}m, {xp_display:.2f} 5GW-xP"
+                player_options.append({"label": label, "value": player['player_id']})
+            
+            must_include_dropdown = mo.ui.multiselect(
+                options=player_options,
+                label="Must Include Players (force these players to be bought/kept)",
+                value=[]
+            )
+            
+            must_exclude_dropdown = mo.ui.multiselect(
+                options=player_options,
+                label="Must Exclude Players (never consider these players)", 
+                value=[]
+            )
+            
+            optimize_button = mo.ui.run_button(
+                label="🚀 Run Strategic 5-GW Optimization (Auto-selects 0-3 transfers)",
+                kind="success"
+            )
+            
+            constraints_ui = mo.vstack([
+                mo.md("### 🎯 Player Constraints"),
+                mo.md("**Set constraints before optimization:**"),
+                must_include_dropdown,
+                must_exclude_dropdown,
+                mo.md("---"),
+                mo.md("### 🧠 Strategic 5-GW Optimization"),
+                mo.md("**The optimizer will automatically decide the optimal number of transfers (0-3) based on 5-gameweek net expected points after penalties.**"),
+                optimize_button
+            ])
+        else:
+            constraints_ui = mo.md("Calculate XP first to enable optimization")
+            must_include_dropdown = None
+            must_exclude_dropdown = None
+            optimize_button = None
+            
+    except Exception as e:
+        print(f"⚠️ Error creating optimization UI: {e}")
+        constraints_ui = mo.md("⚠️ Error creating optimization interface - calculate XP first")
         must_include_dropdown = None
         must_exclude_dropdown = None
         optimize_button = None
@@ -1038,14 +1193,16 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         if must_exclude_ids:
             print(f"🚫 Must exclude {len(must_exclude_ids)} players")
         
-        # Update current squad with XP data
+        # Update current squad with both 1-GW and 5-GW XP data for strategic decisions
         current_squad_with_xp = current_squad.merge(
-            players_with_xp[['player_id', 'xP']], 
+            players_with_xp[['player_id', 'xP', 'xP_5gw', 'fixture_outlook']], 
             on='player_id', 
             how='left'
         )
         # Fill any missing XP with 0
         current_squad_with_xp['xP'] = current_squad_with_xp['xP'].fillna(0)
+        current_squad_with_xp['xP_5gw'] = current_squad_with_xp['xP_5gw'].fillna(0)
+        current_squad_with_xp['fixture_outlook'] = current_squad_with_xp['fixture_outlook'].fillna('🟡 Average')
         
         # Current squad and available budget
         current_player_ids = set(current_squad_with_xp['player_id'].tolist())
@@ -1062,17 +1219,17 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
             all_players = all_players[~all_players['player_id'].isin(must_exclude_ids)]
         
         def get_best_starting_11(squad_df):
-            """Get best starting 11 from squad using XP"""
+            """Get best starting 11 from squad using 5-GW strategic XP"""
             if len(squad_df) < 11:
                 return [], "", 0
             
-            # Group by position and sort by XP
+            # Group by position and sort by 5-GW XP for strategic decisions
             by_position = {'GKP': [], 'DEF': [], 'MID': [], 'FWD': []}
             for _, player in squad_df.iterrows():
                 by_position[player['position']].append(player)
             
             for pos in by_position:
-                by_position[pos].sort(key=lambda p: p['xP'], reverse=True)
+                by_position[pos].sort(key=lambda p: p.get('xP_5gw', p.get('xP', 0)), reverse=True)
             
             # Try formations and pick best
             formations = [(1, 3, 5, 2), (1, 3, 4, 3), (1, 4, 5, 1), (1, 4, 4, 2), (1, 4, 3, 3)]
@@ -1087,7 +1244,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                     
                     formation_11 = (by_position['GKP'][:gkp] + by_position['DEF'][:def_count] +
                                   by_position['MID'][:mid] + by_position['FWD'][:fwd])
-                    formation_xp = sum(p['xP'] for p in formation_11)
+                    formation_xp = sum(p.get('xP_5gw', p.get('xP', 0)) for p in formation_11)
                     
                     if formation_xp > best_xp:
                         best_xp = formation_xp
@@ -1105,15 +1262,18 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
             'description': 'Keep current squad'
         }]
         
-        # Scenario 1: 1 Transfer (simplified)
+        # Scenario 1: 1 Transfer (strategic - based on 5-GW XP)
         best_1_transfer_xp = current_xp
-        for _, out_player in current_squad_with_xp.nsmallest(5, 'xP').iterrows():
+        # Target worst 5-GW performers, considering fixture outlook
+        worst_5gw_players = current_squad_with_xp.nsmallest(5, 'xP_5gw')
+        for _, out_player in worst_5gw_players.iterrows():
             same_pos = all_players[(all_players['position'] == out_player['position']) &
                                  (~all_players['player_id'].isin(current_player_ids))]
             affordable = same_pos[same_pos['price'] <= out_player['price'] + available_budget]
             
             if len(affordable) > 0:
-                for _, in_player in affordable.nlargest(3, 'xP').iterrows():
+                # Prioritize players with best 5-GW prospects
+                for _, in_player in affordable.nlargest(3, 'xP_5gw').iterrows():
                     new_squad = current_squad_with_xp[current_squad_with_xp['player_id'] != out_player['player_id']].copy()
                     new_squad = pd.concat([new_squad, pd.DataFrame([in_player])], ignore_index=True)
                     
@@ -1130,13 +1290,13 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                                 'starting_11': new_11, 'description': f"OUT: {out_player['web_name']} → IN: {in_player['web_name']}"
                             })
         
-        # Scenario 2: 2 Transfers (simplified - best 2 single transfers)
+        # Scenario 2: 2 Transfers (strategic - target worst 5-GW performers)
         best_2_transfer_xp = current_xp
-        worst_players = current_squad_with_xp.nsmallest(3, 'xP')
+        worst_players = current_squad_with_xp.nsmallest(3, 'xP_5gw')
         
         for i, (_, out1) in enumerate(worst_players.iterrows()):
-            for j, (_, out2) in enumerate(worst_players.iterrows()):
-                if i >= j:  # Avoid duplicates and self-comparison
+            for k, (_, out2) in enumerate(worst_players.iterrows()):
+                if i >= k:  # Avoid duplicates and self-comparison
                     continue
                     
                 # Find replacements for both positions
@@ -1151,7 +1311,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                     (~all_players['player_id'].isin(temp_player_ids))
                 ]
                 
-                for _, in1 in pos1_options.nlargest(2, 'xP').iterrows():
+                for _, in1 in pos1_options.nlargest(2, 'xP_5gw').iterrows():
                     remaining_budget = available_budget - (in1['price'] - out1['price'])
                     
                     # Find best replacement for position 2
@@ -1162,7 +1322,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                     ]
                     
                     if len(pos2_options) > 0:
-                        in2 = pos2_options.nlargest(1, 'xP').iloc[0]
+                        in2 = pos2_options.nlargest(1, 'xP_5gw').iloc[0]
                         
                         # Create new squad
                         new_squad = temp_squad.copy()
@@ -1209,7 +1369,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                 affordable = pos_options[pos_options['price'] <= remaining_budget]
                 
                 if len(affordable) > 0:
-                    best_replacement = affordable.nlargest(1, 'xP').iloc[0]
+                    best_replacement = affordable.nlargest(1, 'xP_5gw').iloc[0]
                     replacements.append(best_replacement)
                     remaining_budget -= best_replacement['price']
             
@@ -1305,10 +1465,17 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
             'XP Gain': round(s['net_xp'] - scenarios[0]['net_xp'], 2)  # Gain vs no transfers
         } for s in scenarios]).sort_values('Net XP', ascending=False)
         
-        # Best starting 11
+        # Best starting 11 with strategic information
         best_11_df = pd.DataFrame(best_scenario['starting_11'])
         if not best_11_df.empty:
-            best_11_df = best_11_df[['web_name', 'position', 'name', 'price', 'xP', 'status']].round(2)
+            # Show both 1-GW and 5-GW XP for strategic insight
+            display_cols = ['web_name', 'position', 'name', 'price', 'xP', 'xP_5gw']
+            if 'fixture_outlook' in best_11_df.columns:
+                display_cols.append('fixture_outlook')
+            if 'status' in best_11_df.columns:
+                display_cols.append('status')
+            
+            best_11_df = best_11_df[[col for col in display_cols if col in best_11_df.columns]].round(2)
         
         # Constraint summary
         constraint_info = ""
@@ -1332,21 +1499,29 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         """
         
         return mo.vstack([
-            mo.md(f"### 🏆 Smart Decision: {best_scenario['transfers']} Transfer(s) Optimal"),
+            mo.md(f"### 🏆 Strategic 5-GW Decision: {best_scenario['transfers']} Transfer(s) Optimal"),
             mo.md(f"**Recommended Strategy:** {best_scenario['description']}"),
-            mo.md(f"**Expected Net XP:** {best_scenario['net_xp']:.2f} | **Formation:** {best_scenario['formation']}{constraint_info}"),
+            mo.md(f"**Expected Net 5-GW XP:** {best_scenario['net_xp']:.2f} | **Formation:** {best_scenario['formation']}{constraint_info}"),
+            mo.md("*Decisions based on 5-gameweek horizon with temporal weighting and fixture analysis*"),
             mo.md(budget_analysis),
-            mo.md("**All Scenarios (sorted by Net XP):**"),
+            mo.md("**All Scenarios (sorted by 5-GW Net XP):**"),
             mo.ui.table(comparison_df, page_size=6),
-            mo.md("**Optimal Starting 11:**"),
+            mo.md("**Optimal Starting 11 (Strategic):**"),
+            mo.md("*Shows both 1-GW and 5-GW XP with fixture outlook*"),
             mo.ui.table(best_11_df, page_size=11) if not best_11_df.empty else mo.md("No data")
         ]), best_11_df, best_scenario
     
-    # Only run optimization when button is clicked
-    if optimize_button.value:
-        optimization_display, optimal_starting_11, optimal_scenario = optimize_team_with_transfers()
-    else:
-        optimization_display = mo.md("👆 Click the optimization button above to analyze transfer scenarios")
+    # Only run optimization when button is clicked with error handling
+    try:
+        if optimize_button and hasattr(optimize_button, 'value') and optimize_button.value:
+            optimization_display, optimal_starting_11, optimal_scenario = optimize_team_with_transfers()
+        else:
+            optimization_display = mo.md("👆 Click the optimization button above to analyze 5-gameweek strategic transfer scenarios")
+            optimal_starting_11 = pd.DataFrame()
+            optimal_scenario = {}
+    except Exception as e:
+        print(f"⚠️ Error in optimization: {e}")
+        optimization_display = mo.md(f"❌ Optimization error: {str(e)}")
         optimal_starting_11 = pd.DataFrame()
         optimal_scenario = {}
     
