@@ -401,8 +401,8 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
             for gw in gameweeks:
                 # Find fixtures for this team in this gameweek
                 team_fixtures = relevant_fixtures[
-                    ((relevant_fixtures['team_h'] == team_id) | 
-                     (relevant_fixtures['team_a'] == team_id)) & 
+                    ((relevant_fixtures['home_team_id'] == team_id) | 
+                     (relevant_fixtures['away_team_id'] == team_id)) & 
                     (relevant_fixtures['event'] == gw)
                 ]
                 
@@ -410,13 +410,13 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
                     fixture = team_fixtures.iloc[0]
                     
                     # Determine opponent and home/away
-                    if fixture['team_h'] == team_id:
+                    if fixture['home_team_id'] == team_id:
                         # Team is at home
-                        opponent_id = fixture['team_a']
+                        opponent_id = fixture['away_team_id']
                         is_home = True
                     else:
                         # Team is away
-                        opponent_id = fixture['team_h']
+                        opponent_id = fixture['home_team_id']
                         is_home = False
                     
                     # Get opponent name
@@ -464,17 +464,151 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
         # Add summary column
         display_df['Avg Difficulty'] = fixture_df['Avg_Difficulty'].round(3)
         
+        # Create interactive plotly heatmap
+        import plotly.graph_objects as go
+        
+        # Create difficulty matrix for heatmap (numeric values for coloring)
+        heatmap_data = []
+        opponent_text_data = []
+        team_labels = []
+        
+        for team_name in fixture_df['Team']:
+            team_row = []
+            opponent_row = []
+            team_labels.append(team_name)
+            for gw in gameweeks:
+                difficulty_val = fixture_df[fixture_df['Team'] == team_name][f'GW{gw}_difficulty'].iloc[0]
+                opponent_text = display_df[display_df['Team'] == team_name][f'GW{gw}'].iloc[0]
+                team_row.append(difficulty_val)
+                opponent_row.append(opponent_text)
+            heatmap_data.append(team_row)
+            opponent_text_data.append(opponent_row)
+        
+        # Create hover text with fixture info
+        hover_text = []
+        for i, team_name in enumerate(team_labels):
+            team_hover_row = []
+            for j, gw in enumerate(gameweeks):
+                difficulty = heatmap_data[i][j]
+                fixture_text = opponent_text_data[i][j]
+                
+                if difficulty == 0:
+                    hover_info = f"<b>{team_name}</b><br>GW{gw}: Blank Gameweek<br>Difficulty: N/A"
+                else:
+                    if difficulty <= 0.8:
+                        diff_desc = "Very Easy"
+                        color_desc = "🟢"
+                    elif difficulty <= 0.95:
+                        diff_desc = "Easy"
+                        color_desc = "🟢"
+                    elif difficulty <= 1.05:
+                        diff_desc = "Average"
+                        color_desc = "🟡"
+                    elif difficulty <= 1.2:
+                        diff_desc = "Hard"
+                        color_desc = "🟠"
+                    else:
+                        diff_desc = "Very Hard"
+                        color_desc = "🔴"
+                    
+                    hover_info = (
+                        f"<b>{team_name}</b><br>"
+                        f"GW{gw}: {fixture_text}<br>"
+                        f"Difficulty: {difficulty:.3f}<br>"
+                        f"Rating: {color_desc} {diff_desc}"
+                    )
+                team_hover_row.append(hover_info)
+            hover_text.append(team_hover_row)
+        
+        # Create the heatmap
+        fig = go.Figure(data=go.Heatmap(
+            z=heatmap_data,
+            x=[f'GW{gw}' for gw in gameweeks],
+            y=team_labels,
+            colorscale=[
+                [0.0, '#2E8B57'],   # Dark green (very easy)
+                [0.25, '#90EE90'],  # Light green (easy)
+                [0.5, '#FFFF99'],   # Yellow (average)
+                [0.75, '#FFA500'],  # Orange (hard)
+                [1.0, '#FF4500']    # Red (very hard)
+            ],
+            zmid=1.0,  # Center on average difficulty
+            zmin=0.0,
+            zmax=1.5,
+            text=opponent_text_data,
+            texttemplate="%{text}",
+            textfont={"size": 9, "color": "black", "family": "Arial"},
+            hovertemplate='%{customdata}<extra></extra>',
+            customdata=hover_text,
+            colorbar=dict(
+                title=dict(
+                    text="Fixture Difficulty<br>(0.0=Very Easy, 1.5=Very Hard)",
+                    side="right"
+                ),
+                tickvals=[0.0, 0.5, 1.0, 1.5],
+                ticktext=["Very Easy", "Easy", "Average", "Very Hard"]
+            )
+        ))
+        
+        fig.update_layout(
+            title=f'🏟️ Fixture Difficulty Heatmap: GW{start_gw}-{start_gw + num_gws - 1}<br><sub>Interactive - Hover for details | Teams sorted by avg difficulty</sub>',
+            title_x=0.5,
+            xaxis_title="Gameweek",
+            yaxis_title="Team",
+            font=dict(size=12),
+            height=max(600, 25 * len(team_labels)),  # Height based on number of teams
+            width=max(800, 120 * num_gws),  # Much wider for better readability
+            margin=dict(l=150, r=120, t=120, b=60)  # More left margin for team names
+        )
+        
+        # Update axes with better formatting
+        fig.update_xaxes(
+            side="bottom",
+            tickfont=dict(size=12)
+        )
+        fig.update_yaxes(
+            autorange="reversed",  # Teams from top to bottom (easiest first)
+            tickfont=dict(size=11),
+            tickmode='array',
+            tickvals=list(range(len(team_labels))),
+            ticktext=team_labels  # Explicitly set team names
+        )
+        
+        # Summary analysis
+        best_fixtures = fixture_df.nsmallest(5, 'Avg_Difficulty')[['Team', 'Avg_Difficulty']]
+        worst_fixtures = fixture_df.nlargest(5, 'Avg_Difficulty')[['Team', 'Avg_Difficulty']]
+        
+        analysis_md = f"""
+        ### 🎯 Fixture Difficulty Analysis Summary
+        
+        **🟢 EASIEST FIXTURE RUNS (Target for FPL assets):**
+        """
+        
+        for i, (_, row) in enumerate(best_fixtures.iterrows(), 1):
+            analysis_md += f"\n{i}. **{row['Team']}**: {row['Avg_Difficulty']:.3f} avg difficulty"
+        
+        analysis_md += "\n\n**🔴 HARDEST FIXTURE RUNS (Avoid these teams' players):**"
+        
+        for i, (_, row) in enumerate(worst_fixtures.iterrows(), 1):
+            analysis_md += f"\n{i}. **{row['Team']}**: {row['Avg_Difficulty']:.3f} avg difficulty"
+        
+        analysis_md += """
+        
+        **💡 FPL Strategy:**
+        - 🎯 **Target players** from teams with green fixtures (easy runs)
+        - ⚠️ **Avoid players** from teams with red fixtures (tough runs)  
+        - 🏠 **Home advantage**: Teams playing at home have easier fixtures
+        - 📊 **Difficulty Scale**: 0.7=Very Easy, 1.0=Average, 1.3=Very Hard
+        """
+        
         return mo_ref.vstack([
-            mo_ref.md(f"### 📅 Fixture Difficulty Matrix - GW{start_gw} to GW{start_gw + num_gws - 1}"),
-            mo_ref.md("*Teams sorted by average fixture difficulty (easiest first)*"),
-            mo_ref.md("**Legend:** (H) = Home, (A) = Away, BGW = Blank Gameweek"),
-            mo_ref.ui.table(display_df, page_size=20),
-            mo_ref.md("""
-            **💡 How to Use:**
-            - **Lower difficulty** = easier fixtures = better for FPL assets
-            - **Higher difficulty** = harder fixtures = avoid these teams' players
-            - Consider home/away advantage when evaluating fixtures
-            """)
+            mo_ref.md(analysis_md),
+            mo_ref.md("### 📊 Interactive Fixture Difficulty Heatmap"),
+            mo_ref.md("*🟢 Green = Easy, 🟡 Yellow = Average, 🔴 Red = Hard | Hover for opponent details*"),
+            mo_ref.as_html(fig),
+            mo_ref.md("### 📋 Detailed Fixture Matrix"),
+            mo_ref.md("*Teams sorted by average difficulty (easiest first)*"),
+            mo_ref.ui.table(display_df, page_size=20)
         ]) if mo_ref else display_df
         
     except Exception as e:
