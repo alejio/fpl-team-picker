@@ -274,7 +274,105 @@ def __(fetch_fpl_data, gameweek_input, mo, pd):
 
 @app.cell
 def __(mo):
-    mo.md("## 2. Calculate Expected Points (XP) for All Players")
+    mo.md("## 2. Team Strength Analysis")
+    return
+
+
+@app.cell
+def __(gameweek_input, mo, pd):
+    def create_team_strength_visualization(target_gameweek):
+        """Create team strength visualization showing current ratings"""
+        try:
+            from client import get_current_teams
+            from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
+            
+            # Load team data
+            teams = get_current_teams()
+            
+            # Get dynamic team strength ratings for the target gameweek
+            calculator = DynamicTeamStrength(debug=False)
+            current_season_data = load_historical_gameweek_data(start_gw=1, end_gw=target_gameweek-1)
+            team_strength = calculator.get_team_strength(
+                target_gameweek=target_gameweek,
+                teams_data=teams,
+                current_season_data=current_season_data
+            )
+            
+            # Create team strength dataframe
+            strength_data = []
+            for team_name, strength in team_strength.items():
+                team_id = teams[teams['name'] == team_name]['team_id'].iloc[0] if len(teams[teams['name'] == team_name]) > 0 else None
+                
+                # Categorize strength
+                if strength >= 1.15:
+                    category = "🔴 Very Strong"
+                    difficulty_as_opponent = "Very Hard"
+                elif strength >= 1.05:
+                    category = "🟠 Strong" 
+                    difficulty_as_opponent = "Hard"
+                elif strength >= 0.95:
+                    category = "🟡 Average"
+                    difficulty_as_opponent = "Average"
+                elif strength >= 0.85:
+                    category = "🟢 Weak"
+                    difficulty_as_opponent = "Easy"
+                else:
+                    category = "🟢 Very Weak"
+                    difficulty_as_opponent = "Very Easy"
+                
+                strength_data.append({
+                    'Team': team_name,
+                    'Strength': round(strength, 3),
+                    'Category': category,
+                    'As Opponent': difficulty_as_opponent,
+                    'Attack Rating': round(strength * 1.0, 3),  # Simplified for display
+                    'Defense Rating': round(2.0 - strength, 3)  # Inverse relationship
+                })
+            
+            # Sort by strength (strongest first)
+            strength_df = pd.DataFrame(strength_data).sort_values('Strength', ascending=False)
+            strength_df['Rank'] = range(1, len(strength_df) + 1)
+            
+            # Reorder columns
+            display_df = strength_df[['Rank', 'Team', 'Strength', 'Category', 'As Opponent', 'Attack Rating', 'Defense Rating']]
+            
+            # Create summary stats
+            strongest_team = strength_df.iloc[0]
+            weakest_team = strength_df.iloc[-1]
+            avg_strength = strength_df['Strength'].mean()
+            
+            return mo.vstack([
+                mo.md(f"### 🏆 Team Strength Ratings - GW{target_gameweek}"),
+                mo.md(f"**Strongest:** {strongest_team['Team']} ({strongest_team['Strength']:.3f}) | **Weakest:** {weakest_team['Team']} ({weakest_team['Strength']:.3f}) | **Average:** {avg_strength:.3f}"),
+                mo.md("*Higher strength = better team = harder opponent when playing against them*"),
+                mo.md("**📊 Dynamic Team Strength Table:**"),
+                mo.ui.table(display_df, page_size=20),
+                mo.md("""
+                **💡 How to Use This:**
+                - **🔴 Very Strong teams**: Avoid their opponents (hard fixtures) 
+                - **🟢 Weak teams**: Target their opponents (easy fixtures)
+                - **Attack Rating**: Expected goals scoring ability
+                - **Defense Rating**: Expected goals conceded (lower = better defense)
+                """)
+            ])
+            
+        except Exception as e:
+            return mo.md(f"❌ **Could not create team strength analysis:** {e}")
+    
+    # Only show if gameweek is selected
+    if gameweek_input.value:
+        team_strength_analysis = create_team_strength_visualization(gameweek_input.value)
+    else:
+        team_strength_analysis = mo.md("Select target gameweek to see team strength analysis")
+    
+    team_strength_analysis
+    
+    return (team_strength_analysis,)
+
+
+@app.cell
+def __(mo):
+    mo.md("## 3. Calculate Expected Points (XP) for All Players")
     return
 
 
@@ -511,7 +609,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
 
 @app.cell
 def __(mo):
-    mo.md("## 3. Form Analytics Dashboard")
+    mo.md("## 4. Form Analytics Dashboard")
     return
 
 
