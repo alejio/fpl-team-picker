@@ -142,76 +142,89 @@ The suite includes two complementary xP calculation approaches:
 
 ## Implementation Architecture
 
-**Core Components:**
+**Modular Core Components (v1.2):**
 
-1. **Data Loading & Processing** (`load_datasets()`)
-   - FPL players, xG/xA rates, fixtures, teams data
-   - Data validation and consistency checks
-   - Missing data handling with position-based fallbacks
+### 1. **Data Loading Module** (`fpl_data_loader.py`)
+   - **`fetch_fpl_data()`** - Centralized FPL data loading from database
+   - **`fetch_manager_team()`** - Manager team data retrieval from previous gameweek
+   - **`process_current_squad()`** - Current squad processing with captain info
+   - **`load_gameweek_datasets()`** - Comprehensive gameweek data orchestration
+   - Historical form data collection with configurable windows
+   - Data validation and consistency checks with graceful fallbacks
 
-2. **Team Strength & Fixture Analysis** (`get_team_strength_ratings()`)
-   - 2023-24 final table position mapping to strength [0.7, 1.3]
-   - Multi-gameweek fixture difficulty matrix creation
-   - Home/away advantage incorporation
+### 2. **Expected Points Engine** (`xp_model.py`)
+   - **`XPModel` class** - Dedicated XP calculation engine
+   - **Form-weighted predictions** - 70% recent form + 30% season baseline
+   - **Statistical xG/xA estimation** - Multi-factor estimation for missing data
+   - **Dynamic team strength integration** - Real-time strength calculations
+   - **Enhanced minutes prediction** - SBP + availability + form-based modeling
+   - **Multi-gameweek capability** - 5-gameweek temporal weighting (1.0, 0.9, 0.8, 0.7, 0.6)
 
-3. **Minutes Prediction Model** (`calculate_expected_minutes_probabilistic()`)
-   - SBP-based start probability calculation
-   - Availability status processing (injured/suspended/doubtful)
-   - Position and price-based durability modeling
-   - Probabilistic scenario weighting
+### 3. **Dynamic Team Strength** (`dynamic_team_strength.py`)
+   - **`DynamicTeamStrength` class** - Evolving team strength ratings
+   - **Historical transition logic** - Weighted 2024-25 baseline → current season focus
+   - **GW8+ pure current season** - Responsive to current form once sufficient data
+   - **Rolling window analysis** - 6-gameweek performance windows
+   - **Venue-specific adjustments** - Home/away advantage incorporation
 
-4. **Expected Points Engine** (`calculate_multi_gw_xp()`)
-   - **Statistical xG/xA Estimation** for players missing historical data
-   - 5-gameweek temporal weighting (1.0, 0.9, 0.8, 0.7, 0.6)
-   - Fixture difficulty scaling per gameweek
-   - FPL scoring conversion (goals, assists, clean sheets, appearances)
-   - Transfer risk flagging for poor GW2-3 fixtures
+### 4. **Optimization Engine** (`fpl_optimization.py`)
+   - **`optimize_team_with_transfers()`** - Smart 0-3 transfer optimization
+   - **`calculate_total_budget_pool()`** - Advanced budget analysis
+   - **`premium_acquisition_planner()`** - Multi-transfer premium targeting
+   - **`get_best_starting_11()`** - Formation-flexible lineup selection
+   - **`select_captain()`** - Risk-adjusted captaincy recommendations
+   - Constraint-based optimization with must-include/exclude controls
 
-   **xG/xA Estimation Model** (`estimate_missing_xg_xa_rates()`)
-   - **Multi-factor estimation**: Price, position, team strength, Selected By Percentage
-   - **Premium player boosts**: £8m+ players get significant xG/xA multipliers
-   - **Team quality adjustment**: Better teams (higher strength) create more chances
-   - **Position-specific caps**: Prevents unrealistic estimates (e.g., DEF max xG90: 0.35)
-   - **Ownership weighting**: Higher SBP suggests better underlying stats
+### 5. **Visualization Suite** (`fpl_visualization.py`)
+   - **`create_team_strength_visualization()`** - Interactive team strength displays
+   - **`create_player_trends_visualization()`** - Historical performance trends
+   - **`create_trends_chart()`** - Interactive plotly-based charts
+   - **`create_fixture_difficulty_visualization()`** - Fixture difficulty heatmaps
+   - Real-time chart updates with error handling and graceful degradation
 
-5. **Team Optimization** (`select_optimal_team()`)
-   - Simulated Annealing with 5,000 iterations
+### 6. **Prediction Storage** (`prediction_storage.py`)
+   - **`PredictionStorage` class** - Retro analysis prediction tracking
+   - **`save_gameweek_predictions()`** - Systematic prediction archival
+   - **`load_saved_predictions()`** - Historical prediction retrieval
+   - **`compare_predictions_vs_actual()`** - Model accuracy validation
+   - Timestamped prediction storage for continuous improvement
+
+### 7. **Team Optimization (Legacy)** (`select_optimal_team()`)
+   - Simulated Annealing with 5,000 iterations for season-start building
    - Constraint satisfaction (budget, formation, 3-per-team rule)
    - Starting 11 formation optimization across 8 valid formations
    - Must-include/exclude player handling
 
-6. **Interactive Interface** (Marimo cells)
+### 8. **Interactive Interfaces** (Marimo notebooks)
+   - **Season Planning** (`fpl_xp_model.py`) - Multi-gameweek team building
+   - **Weekly Management** (`fpl_gameweek_manager.py`) - Form-weighted gameweek optimization
    - Real-time optimization with user constraints
    - Visual squad analysis and performance metrics
    - Transfer risk assessment and stability warnings
 
-### Gameweek Manager Components (NEW):
+### 9. **Form Analytics Dashboard** (Enhanced)
+   - **Hot/Cold player detection** - 🔥📈➡️📉❄️ momentum indicators
+   - **Performance delta tracking** - Week-over-week trend analysis
+   - **Current squad form analysis** - Team-specific form evaluation
+   - **Transfer risk identification** - Form-based transfer recommendations
 
-7. **Live Data Loading & Processing** (`load_gameweek_datasets()`)
-   - Enhanced dataset loading with live gameweek data integration
-   - Performance delta tracking and trend analysis
-   - Availability status and market movement processing
-   - Graceful fallback when live data unavailable
+### 10. **Player Performance Trends** (New Visualization)
+   - **Interactive trend charts** - Plotly-based historical performance visualization
+   - **Multi-attribute analysis** - Points, xG, xA, minutes, value ratios
+   - **Multi-player comparison** - Side-by-side player trend analysis
+   - **Real-time data integration** - Live gameweek data incorporation
 
-8. **Form-Weighted xP Engine** (`calculate_form_weighted_xp()`)
-   - Blends recent performance (70%) with season baseline (30%)
-   - Integrates live performance data and delta analysis
-   - Dynamic form multipliers based on recent point trends
-   - Enhanced minutes prediction using live start/substitute data
+### 11. **Fixture Difficulty Matrix** (Enhanced)
+   - **Dynamic team strength integration** - Real-time difficulty calculations
+   - **5-gameweek fixture heatmaps** - Visual fixture analysis
+   - **Home/away venue adjustments** - Contextual difficulty scaling
+   - **Transfer planning integration** - Fixture-informed decision making
 
-9. **Smart Gameweek Optimization Suite**
-   - **Constraint-Based Optimization**: Pre-optimization player inclusion/exclusion controls
-   - **Smart Transfer Decision Engine**: Auto-selects optimal number of transfers (0-3) based on net XP after penalties
-   - **Formation-Flexible Starting 11**: Automatically finds best lineup from optimal squad
-   - **Transfer Analysis Engine**: Hit calculations and opportunity cost analysis with scenario comparison
-   - **Captain Selection Tool**: Risk-adjusted captaincy recommendations
-   - **Squad Management**: Budget tracking and constraint validation
-
-10. **Retro Analysis Framework** (`retro_analysis_section`)
-    - Post-gameweek performance validation against predictions
-    - Top performers vs model predictions comparison
-    - Template vs differential analysis for learning
-    - Model accuracy tracking and improvement identification
+### 12. **Retro Analysis Framework** (`prediction_storage.py`)
+    - **Systematic prediction archival** - Timestamped prediction storage
+    - **Model accuracy validation** - Prediction vs actual comparison
+    - **Continuous improvement tracking** - Performance metric evolution
+    - **Template vs differential analysis** - Strategic learning framework
 
 ## Simulation Methodology
 
@@ -327,6 +340,64 @@ git commit -m "Description"
 - plotly>=6.3.0 (interactive visualizations)
 - pyarrow>=21.0.0 (efficient data I/O)
 
+**Modular Architecture Specifications:**
+
+### `fpl_data_loader.py`
+- **Purpose**: Centralized data orchestration and loading
+- **Key Functions**:
+  - `fetch_fpl_data(target_gameweek, form_window=5)` - Database integration with configurable form windows
+  - `fetch_manager_team(previous_gameweek)` - Manager team data retrieval with error handling
+  - `process_current_squad(team_data, players, teams)` - Squad processing with captain information
+  - `load_gameweek_datasets(target_gameweek)` - Comprehensive data loading orchestration
+- **Features**: Graceful fallbacks, data validation, column standardization, historical form data collection
+
+### `xp_model.py`
+- **Purpose**: Dedicated Expected Points calculation engine
+- **Key Classes**: `XPModel` - Main XP calculation engine with configurable parameters
+- **Key Methods**:
+  - `calculate_expected_points()` - Main XP calculation with form weighting
+  - `_apply_form_weighting()` - 70% recent form + 30% season baseline blending
+  - `_estimate_missing_xg_xa()` - Statistical estimation for missing xG/xA data
+  - `_calculate_expected_minutes()` - Enhanced minutes prediction with SBP + availability
+- **Features**: Multi-gameweek capability, form weighting, statistical estimation, caching
+
+### `dynamic_team_strength.py`
+- **Purpose**: Evolving team strength ratings throughout the season
+- **Key Classes**: `DynamicTeamStrength` - Team strength calculator with transition logic
+- **Key Methods**:
+  - `get_team_strength()` - Main strength calculation with historical transition
+  - `_calculate_current_season_strength()` - Current season performance analysis
+  - `_load_historical_strength()` - 2024-25 season baseline strength ratings
+- **Features**: GW8+ transition to current season, rolling 6-GW windows, venue adjustments
+
+### `fpl_optimization.py`
+- **Purpose**: Advanced transfer optimization and budget analysis
+- **Key Functions**:
+  - `optimize_team_with_transfers()` - Smart 0-3 transfer optimization with scenario analysis
+  - `calculate_total_budget_pool()` - Budget analysis including sellable player values
+  - `premium_acquisition_planner()` - Multi-transfer scenarios for expensive targets
+  - `get_best_starting_11()` - Formation-flexible lineup selection
+  - `select_captain()` - Risk-adjusted captaincy recommendations
+- **Features**: Constraint handling, budget optimization, transfer cost analysis, scenario comparison
+
+### `fpl_visualization.py`
+- **Purpose**: Interactive visualization suite with Plotly integration
+- **Key Functions**:
+  - `create_team_strength_visualization()` - Dynamic team strength displays
+  - `create_player_trends_visualization()` - Historical performance trend setup
+  - `create_trends_chart()` - Interactive Plotly-based trend charts
+  - `create_fixture_difficulty_visualization()` - Fixture difficulty heatmaps
+- **Features**: Error handling, graceful degradation, interactive charts, real-time updates
+
+### `prediction_storage.py`
+- **Purpose**: Systematic prediction archival for retro analysis
+- **Key Classes**: `PredictionStorage` - Prediction management system
+- **Key Methods**:
+  - `save_gameweek_predictions()` - Timestamped prediction storage
+  - `load_saved_predictions()` - Historical prediction retrieval
+  - `compare_predictions_vs_actual()` - Model accuracy validation
+- **Features**: JSON metadata storage, CSV prediction data, automated timestamping
+
 **Key Model Assumptions:**
 - **Statistical xG/xA estimation** for new transfers using price, position, team strength, and SBP
 - **Enhanced minutes model** using SBP + availability rather than simple price proxy
@@ -347,7 +418,16 @@ git commit -m "Description"
 - Target: Our 5-week xP projections should align with ~370 points (5 × 74) for competitive squads
 - Validation: Premium players should project 8-12 xP per gameweek, budget options 4-7 xP
 
-## Current Implementation Status
+## Current Implementation Status (v1.2)
+
+**🆕 VERSION 1.2 HIGHLIGHTS:**
+- **Complete modular refactor** - Separated monolithic code into 6 specialized modules
+- **Enhanced form analytics** - Hot/cold player detection with momentum indicators
+- **Dynamic team strength** - Evolving ratings with historical transition logic
+- **Advanced visualizations** - Interactive trends, fixture analysis, team strength displays
+- **Prediction storage system** - Systematic archival for model validation and improvement
+- **Premium acquisition planning** - Multi-transfer scenarios with budget pool analysis
+- **Improved error handling** - Graceful fallbacks and validation throughout
 
 **✅ COMPLETED - Season-Start Builder (v1.0):**
 - Multi-gameweek xP calculations (GW1-5 weighted horizon)
@@ -361,43 +441,46 @@ git commit -m "Description"
 - Budget utilization optimization and efficiency tracking
 - Team customization with must-include/exclude player constraints
 
-**✅ COMPLETED - Gameweek Manager (v1.1):**
-- **Live data integration** with real-time gameweek performance tracking
-- **Form-weighted xP calculations** blending recent performance (70%) with season baseline (30%)
-- **Performance delta analysis** for week-over-week trend identification
-- **Momentum indicators** with visual form tracking (🔥📈➡️📉❄️)
-- **Enhanced minutes prediction** using live start/substitute data
-- **Smart transfer optimization** with automatic 0-3 transfer decision based on net XP after penalties
-- **Constraint-based optimization** with pre-optimization player inclusion/exclusion controls
-- **Comprehensive scenario analysis** comparing all transfer options with XP gain calculations
-- **Paginated player display** showing all players ranked by expected points
-- **Transfer analysis engine** with hit calculations and opportunity cost analysis
-- **Captain selection tools** with risk-adjusted recommendations
-- **Squad management suite** with budget tracking and constraint validation
-- **Retro analysis framework** for post-gameweek performance validation
+**✅ COMPLETED - Gameweek Manager (v1.2) - Modular Architecture:**
+- **Modular codebase restructure** - Separated concerns into dedicated modules
+- **Enhanced data loading** (`fpl_data_loader.py`) - Centralized, robust data orchestration
+- **Dedicated XP engine** (`xp_model.py`) - Form-weighted calculations with 70% recent + 30% baseline
+- **Dynamic team strength** (`dynamic_team_strength.py`) - Evolving ratings with historical transition
+- **Advanced optimization suite** (`fpl_optimization.py`) - Smart 0-3 transfer decisions with budget pool analysis
+- **Comprehensive visualizations** (`fpl_visualization.py`) - Interactive charts, trends, and fixture analysis
+- **Prediction storage system** (`prediction_storage.py`) - Retro analysis and model validation
+- **Form analytics dashboard** - Hot/cold player detection with momentum indicators (🔥📈➡️📉❄️)
+- **Player performance trends** - Interactive historical visualization with multi-attribute analysis
+- **Fixture difficulty matrix** - Dynamic 5-gameweek heatmaps with venue adjustments
+- **Enhanced optimization** - Constraint-based optimization with premium acquisition planning
+- **Captain selection tools** - Risk-adjusted recommendations with fixture outlook
+- **Transfer analysis engine** - Comprehensive scenario analysis with XP gain calculations
+- **Squad management suite** - Budget tracking, constraint validation, and transfer cost analysis
 
-**✅ INTERACTIVE FEATURES:**
-- **Dual-tool workflow**: Season planning + weekly management
-- Real-time squad optimization with constraint handling
-- Starting 11 auto-selection from best formation
-- Transfer risk warnings and fixture analysis
-- Budget and efficiency analysis with live market data
-- Rule compliance validation across both tools
-- Multi-gameweek vs single-gameweek breakdown per player
-- **Live performance monitoring** with momentum tracking
-- **Post-gameweek analysis** for continuous model improvement
+**✅ INTERACTIVE FEATURES (v1.2):**
+- **Modular dual-tool workflow**: Season planning + weekly management with shared components
+- **Real-time optimization** with constraint handling and smart transfer decisions
+- **Formation-flexible lineup selection** - Auto-selects best starting 11 from optimal squad
+- **Advanced visualization suite** - Interactive trends, team strength, and fixture difficulty
+- **Transfer risk assessment** - Form-based warnings and fixture analysis
+- **Budget pool analysis** - Total available funds with sellable value calculations
+- **Premium acquisition planning** - Multi-transfer scenarios for expensive targets
+- **Live performance monitoring** - Form analytics dashboard with momentum tracking
+- **Prediction archival system** - Systematic storage for model validation and improvement
+- **Rule compliance validation** - Automatic constraint checking across both tools
+- **Multi-gameweek vs single-gameweek** - Strategic vs tactical decision breakdowns
 
-**⏭️ FUTURE ENHANCEMENTS:**
-- **Price change prediction** and market intelligence
-- **Live performance monitoring dashboard** with real-time alerts
-- Historical back-testing and validation across multiple seasons
-- Complex minute modeling from detailed game logs
-- Venue-specific attack/defense ratings
-- Advanced injury data integration with return predictions
-- Bonus points (BPS) modeling and prediction
-- Sensitivity analysis and uncertainty quantification
-- Auto-transfer suggestions with risk assessment
-- Mini-league strategy optimization
+**⏭️ FUTURE ENHANCEMENTS (v1.3+):**
+- **Advanced injury prediction** - Return date modeling with medical data integration
+- **Price change prediction** - Market intelligence with ownership trend analysis
+- **Bonus points (BPS) modeling** - Real-time BPS prediction and captain optimization
+- **Historical back-testing framework** - Multi-season validation with performance benchmarking
+- **Advanced venue modeling** - Stadium-specific attack/defense rating adjustments
+- **Uncertainty quantification** - Confidence intervals and risk assessment
+- **Auto-transfer suggestions** - AI-powered transfer recommendations with risk assessment
+- **Mini-league strategy optimization** - Differential vs template strategy selection
+- **Live performance alerts** - Real-time notifications for form changes and opportunities
+- **Advanced sensitivity analysis** - Model robustness testing and parameter optimization
 
 ## Future Improvements
 
