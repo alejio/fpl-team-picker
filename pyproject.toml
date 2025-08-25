@@ -14,6 +14,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "fpl-dataset-builder",
     "plotly>=6.3.0",
+    "ruff>=0.12.10",
 ]
 
 [dependency-groups]

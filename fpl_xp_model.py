@@ -872,7 +872,7 @@ def __(players_xp, np, pd):
         
         # Debug: Show which players are being excluded
         if must_exclude_ids:
-            print(f"🚫 Players being excluded:")
+            print("🚫 Players being excluded:")
             for player_id in must_exclude_ids:
                 excluded_player = players_df[players_df['player_id'] == player_id]
                 if len(excluded_player) > 0:
@@ -883,7 +883,7 @@ def __(players_xp, np, pd):
         
         # Debug: Show which players are being included
         if must_include_ids:
-            print(f"✅ Players being included:")
+            print("✅ Players being included:")
             for player_id in must_include_ids:
                 included_player = players_df[players_df['player_id'] == player_id]
                 if len(included_player) > 0:
@@ -975,7 +975,6 @@ def __(players_xp, np, pd):
         
         def generate_random_team():
             """Generate a random valid team - enforce budget, formation, and 3-per-team during generation"""
-            import random
             team = []
             remaining_budget = budget
             team_counts = {}
@@ -1317,7 +1316,7 @@ def __(players_xp, np, pd):
             exclude_set = set(must_exclude_ids) if isinstance(must_exclude_ids[0], (int, str)) else set([id['value'] if isinstance(id, dict) else id for id in must_exclude_ids])
             excluded_in_team = final_team_ids.intersection(exclude_set)
             if excluded_in_team:
-                print(f"🚨 BUG DETECTED: Excluded players found in final team!")
+                print("🚨 BUG DETECTED: Excluded players found in final team!")
                 for player_id in excluded_in_team:
                     violating_player = players_df[players_df['player_id'] == player_id].iloc[0]
                     print(f"   ❌ {violating_player['web_name']} (ID: {player_id}) should have been excluded!")
@@ -1327,11 +1326,11 @@ def __(players_xp, np, pd):
                 best_team = [p for p in best_team if p['player_id'] not in excluded_in_team]
                 print(f"   Remaining players in team: {len(best_team)}/15")
             else:
-                print(f"✅ Exclusion constraint verified: No excluded players in final team")
+                print("✅ Exclusion constraint verified: No excluded players in final team")
         
         # Print transfer risk analysis
         transfer_risky_players = [p for p in best_team if p.get('transfer_risk', False)]
-        print(f"\nTransfer Risk Analysis:")
+        print("\nTransfer Risk Analysis:")
         print(f"Players at high transfer risk: {len(transfer_risky_players)}/15")
         
         if len(transfer_risky_players) > 0:
@@ -1554,7 +1553,7 @@ def __(optimization_trigger, must_include_dropdown, must_exclude_dropdown, selec
             included_players = players_xp[players_xp['player_id'].isin(must_include_ids)]
             excluded_count = len(must_exclude_ids)
             
-            print(f"✅ Applied constraints:")
+            print("✅ Applied constraints:")
             if len(must_include_ids) > 0:
                 print(f"   • Must include: {len(must_include_ids)} players")
                 for _, player in included_players.iterrows():

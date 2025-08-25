@@ -9,7 +9,6 @@ Handles all visualization functions for FPL gameweek management including:
 """
 
 import pandas as pd
-import plotly.graph_objects as go
 from typing import Tuple, List, Dict, Optional
 
 
@@ -120,7 +119,7 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         historical_data = []
         max_gw = 10  # Adjust based on season progress
         
-        print(f"🔍 Loading historical data for trends...")
+        print("🔍 Loading historical data for trends...")
         
         for gw in range(1, max_gw + 1):
             try:
@@ -148,7 +147,7 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         # CRITICAL: Merge with current player names 
         # The live data only has player_id, we need names from current players
         if not players_data.empty:
-            print(f"🔗 Merging with players data to get names...")
+            print("🔗 Merging with players data to get names...")
             player_names = players_data[['player_id', 'web_name', 'position', 'team', 'name']].drop_duplicates('player_id')
             print(f"📋 Player names data shape: {player_names.shape}")
             
@@ -292,7 +291,7 @@ def create_trends_chart(data: pd.DataFrame, selected_player: int, selected_attr:
         if isinstance(player_id, str):
             try:
                 player_id = int(player_id)
-            except:
+            except ValueError:
                 print(f"❌ Could not convert player_id to int: {player_id}")
                 return mo_ref.md("❌ **Invalid player selection**") if mo_ref else None
         
@@ -581,7 +580,7 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
         best_fixtures = fixture_df.nsmallest(5, 'Avg_Difficulty')[['Team', 'Avg_Difficulty']]
         worst_fixtures = fixture_df.nlargest(5, 'Avg_Difficulty')[['Team', 'Avg_Difficulty']]
         
-        analysis_md = f"""
+        analysis_md = """
         ### 🎯 Fixture Difficulty Analysis Summary
         
         **🟢 EASIEST FIXTURE RUNS (Target for FPL assets):**

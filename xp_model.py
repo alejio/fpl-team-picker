@@ -14,8 +14,7 @@ Key Features:
 
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -334,7 +333,7 @@ class XPModel:
                         
                 else:
                     if self.debug:
-                        print(f"⚠️ Cannot merge raw data - player ID mapping not found")
+                        print("⚠️ Cannot merge raw data - player ID mapping not found")
                         print(f"   Estimates columns: {[col for col in estimates.columns if 'id' in col.lower()]}")
                         print(f"   Raw data columns: {[col for col in raw_players.columns if 'id' in col.lower()]}")
                         enhanced_data = estimates  # Use original data
@@ -541,7 +540,7 @@ class XPModel:
                         
                 if not enhanced_form_data.empty and self.debug:
                     print(f"✅ Enhanced form data: {len(enhanced_form_data)} player-gameweek records")
-            except:
+            except Exception:
                 if self.debug:
                     print("⚠️ Enhanced form data unavailable, using legacy data")
             
@@ -655,13 +654,20 @@ class XPModel:
         def get_start_probability(sbp, availability):
             """Convert SBP to start probability with availability adjustments"""
             def sbp_to_prob(sbp_val):
-                if sbp_val >= 40: return 0.95
-                elif sbp_val >= 20: return 0.85
-                elif sbp_val >= 10: return 0.70
-                elif sbp_val >= 5: return 0.55
-                elif sbp_val >= 2: return 0.35
-                elif sbp_val >= 0.5: return 0.20
-                else: return 0.05
+                if sbp_val >= 40:
+                    return 0.95
+                elif sbp_val >= 20:
+                    return 0.85
+                elif sbp_val >= 10:
+                    return 0.70
+                elif sbp_val >= 5:
+                    return 0.55
+                elif sbp_val >= 2:
+                    return 0.35
+                elif sbp_val >= 0.5:
+                    return 0.20
+                else:
+                    return 0.05
             
             # Handle availability status
             if availability in ['i', 's', 'u']:  # injured, suspended, unavailable

@@ -62,9 +62,9 @@ def __(pd):
 def __(mo):
     gameweek_input = mo.ui.number(
         value=2,
-        start=2,
+        start=1,
         stop=38,
-        label="Target Gameweek (we'll optimize for this GW using data from GW-1)"
+        label="Target Gameweek (we'll optimize for this GW using data from previous GW)"
     )
     
     mo.vstack([
@@ -82,15 +82,92 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
     if gameweek_input.value:
         # Load data for target gameweek
         target_gw = gameweek_input.value
-        previous_gw = target_gw - 1
+        
+        # Handle different gameweek scenarios
+        if target_gw == 1:
+            # GW1 - no previous gameweek data available
+            previous_gw = None
+            team_data = None
+            current_squad = pd.DataFrame()
+        else:
+            previous_gw = target_gw - 1
+            # Load manager team from previous gameweek
+            team_data = fetch_manager_team(previous_gw)
+            
+            # Special handling for GW2 when it's in progress
+            if target_gw == 2 and not team_data:
+                print("⚠️ No GW1 team data found - GW2 may be in progress")
+                print("💡 Try loading GW1 first to see your initial team")
         
         # Get FPL data and calculate XP for target gameweek
         players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(target_gw)
         
-        # Load manager team from previous gameweek
-        team_data = fetch_manager_team(previous_gw)
+        # Check what data is available for better guidance
+        def check_data_availability():
+            """Check what gameweek data is currently available"""
+            try:
+                from client import FPLDataClient
+                client = FPLDataClient()
+                
+                available_gws = []
+                for gw in range(1, 6):  # Check first 5 gameweeks
+                    try:
+                        gw_data = client.get_gameweek_live_data(gw)
+                        if not gw_data.empty:
+                            available_gws.append(gw)
+                    except:
+                        continue
+                
+                return available_gws
+            except:
+                return []
         
-        if team_data:
+        available_gameweeks = check_data_availability()
+        if available_gameweeks:
+            print(f"📊 Available gameweek data: {available_gameweeks}")
+        else:
+            print("⚠️ No gameweek data found in database")
+        
+        if target_gw == 1:
+            # GW1 - no previous team data available
+            # Check what columns are available in players DataFrame
+            available_columns = list(players.columns)
+            print(f"🔍 Available columns in players DataFrame: {available_columns}")
+            
+            # Select columns that exist for display
+            display_columns = []
+            for col in ['web_name', 'position', 'name', 'price', 'selected_by_percent']:
+                if col in available_columns:
+                    display_columns.append(col)
+            
+            # Fallback columns if primary ones don't exist
+            if not display_columns:
+                display_columns = available_columns[:5]  # Take first 5 columns as fallback
+            
+            print(f"📊 Using columns for display: {display_columns}")
+            
+            # Show data availability info for GW1
+            data_info = ""
+            if available_gameweeks:
+                if 1 in available_gameweeks:
+                    data_info = "✅ GW1 data available for analysis"
+                else:
+                    data_info = f"⚠️ GW1 data not found. Available: GW{', GW'.join(map(str, available_gameweeks))}"
+            else:
+                data_info = "⚠️ No gameweek data found in database"
+            
+            team_display = mo.vstack([
+                mo.md(f"### 🚀 GW1 Team Selection"),
+                mo.md(f"**Optimizing for GW{target_gw}**"),
+                mo.md(data_info),
+                mo.md("**Note:** No previous team data available for GW1. This will help you select your initial squad."),
+                mo.md("**Available Players:**"),
+                mo.ui.table(
+                    players[display_columns].head(20).round(2),
+                    page_size=20
+                )
+            ])
+        elif team_data:
             # Process current squad using the imported function
             current_squad = process_current_squad(team_data, players, teams)
             
@@ -100,12 +177,36 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 mo.md(f"**Optimizing for GW{target_gw}**"),
                 mo.md("**Current Squad:**"),
                 mo.ui.table(
-                    current_squad[['web_name', 'position', 'name', 'price', 'role', 'status']].round(2),
+                    current_squad[['web_name', 'position', 'price']].round(2),  # Simplified columns to avoid missing ones
                     page_size=15
                 )
             ])
         else:
-            team_display = mo.md("❌ Could not load team data")
+            # Handle case where team data couldn't be loaded
+            if target_gw == 2:
+                available_info = ""
+                if available_gameweeks:
+                    available_info = f"**Available data:** GW{', GW'.join(map(str, available_gameweeks))}"
+                else:
+                    available_info = "**Available data:** None found"
+                
+                team_display = mo.vstack([
+                    mo.md("### ⚠️ GW2 Team Data Unavailable"),
+                    mo.md(available_info),
+                    mo.md(""),
+                    mo.md("**Possible reasons:**"),
+                    mo.md("• GW2 is currently in progress"),
+                    mo.md("• No GW1 team data has been saved yet"),
+                    mo.md("• Database connection issue"),
+                    mo.md(""),
+                    mo.md("**Suggestions:**"),
+                    mo.md("• Try selecting GW1 to see available players"),
+                    mo.md("• Check if your GW1 team has been saved"),
+                    mo.md("• Wait for GW2 to complete and data to be updated")
+                ])
+            else:
+                team_display = mo.md("❌ Could not load team data")
+            
             current_squad = pd.DataFrame()
             team_data = None
             players = pd.DataFrame()
@@ -181,7 +282,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             print("✅ XP model initialized successfully")
             
             # Calculate both single-GW and 5-GW XP for strategic comparison
-            print(f"🔮 Calculating single-gameweek XP for tactical analysis...")
+            print("🔮 Calculating single-gameweek XP for tactical analysis...")
             players_1gw = xp_model.calculate_expected_points(
                 players_data=players_data,
                 teams_data=teams_data,
@@ -192,7 +293,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                 gameweeks_ahead=1
             )
             
-            print(f"🎯 Calculating 5-gameweek strategic horizon XP...")
+            print("🎯 Calculating 5-gameweek strategic horizon XP...")
             players_5gw = xp_model.calculate_expected_points(
                 players_data=players_data,
                 teams_data=teams_data,
@@ -362,7 +463,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
     
     # Debug current state
-    print(f"🔍 XP Calculation Debug:")
+    print("🔍 XP Calculation Debug:")
     print(f"  - players.empty: {players.empty if hasattr(players, 'empty') else 'not available'}")
     print(f"  - gameweek_input.value: {gameweek_input.value if hasattr(gameweek_input, 'value') else 'not available'}")
     print(f"  - players shape: {players.shape if hasattr(players, 'shape') else 'not available'}")
@@ -405,6 +506,15 @@ def __(mo):
 def __(players_with_xp, mo):
     # Form Analytics Dashboard - Fixed for marimo rendering
     
+    def get_safe_columns_form(df, preferred_columns):
+        """Get columns that exist in the DataFrame"""
+        available_columns = list(df.columns)
+        safe_columns = []
+        for col in preferred_columns:
+            if col in available_columns:
+                safe_columns.append(col)
+        return safe_columns if safe_columns else available_columns[:3]  # Fallback to first 3 columns
+    
     # Check if we have form data
     if not players_with_xp.empty and 'momentum' in players_with_xp.columns:
         # Hot players analysis
@@ -426,41 +536,45 @@ def __(players_with_xp, mo):
         insights = []
         
         if len(hot_players) > 0:
+            hot_columns = get_safe_columns_form(hot_players, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
             insights.extend([
                 mo.md("### 🔥 Hot Players (Prime Transfer Targets)"),
                 mo.md(f"**{len(hot_players)} players in excellent recent form**"),
                 mo.ui.table(
-                    hot_players[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    hot_players[hot_columns].round(2),
                     page_size=8
                 )
             ])
         
         if len(value_players) > 0:
+            value_columns = get_safe_columns(value_players, ['web_name', 'position', 'price', 'xP', 'xP_per_price', 'momentum'])
             insights.extend([
                 mo.md("### 💎 Form + Value Players (Budget-Friendly Options)"),
                 mo.md(f"**{len(value_players)} players with good form and great value**"),
                 mo.ui.table(
-                    value_players[['web_name', 'position', 'name', 'price', 'xP', 'xP_per_price', 'momentum']].round(3),
+                    value_players[value_columns].round(3),
                     page_size=10
                 )
             ])
         
         if len(cold_players) > 0:
+            cold_columns = get_safe_columns(cold_players, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
             insights.extend([
                 mo.md("### ❄️ Cold Players (Sell Candidates)"),
                 mo.md(f"**{len(cold_players)} players in poor recent form - consider selling**"),
                 mo.ui.table(
-                    cold_players[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    cold_players[cold_columns].round(2),
                     page_size=8
                 )
             ])
         
         if len(expensive_poor) > 0:
+            expensive_columns = get_safe_columns(expensive_poor, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
             insights.extend([
                 mo.md("### 💸 Expensive Underperformers (Priority Sells)"),
                 mo.md(f"**{len(expensive_poor)} expensive players in poor form - sell to fund transfers**"),
                 mo.ui.table(
-                    expensive_poor[['web_name', 'position', 'name', 'price', 'xP', 'recent_points_per_game', 'momentum']].round(2),
+                    expensive_poor[expensive_columns].round(2),
                     page_size=6
                 )
             ])
@@ -489,6 +603,15 @@ def __(players_with_xp, mo):
 @app.cell
 def __(current_squad, players_with_xp, mo):
     # Current Squad Form Analysis - Fixed for marimo rendering
+    
+    def get_safe_columns(df, preferred_columns):
+        """Get columns that exist in the DataFrame"""
+        available_columns = list(df.columns)
+        safe_columns = []
+        for col in preferred_columns:
+            if col in available_columns:
+                safe_columns.append(col)
+        return safe_columns if safe_columns else available_columns[:3]  # Fallback to first 3 columns
     
     # Check data availability without early returns
     squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
@@ -559,17 +682,19 @@ def __(current_squad, players_with_xp, mo):
             
             # Show top performers if any
             if not top_performers.empty:
+                top_columns = get_safe_columns(top_performers, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
                 squad_insights.append(mo.md("### ⭐ Squad Stars (Keep!)"))
                 squad_insights.append(mo.ui.table(
-                    top_performers[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    top_performers[top_columns].round(2),
                     page_size=5
                 ))
             
             # Show problem players if any
             if not problem_players.empty:
+                problem_columns = get_safe_columns(problem_players, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
                 squad_insights.append(mo.md("### ⚠️ Problem Players (Consider Selling)"))
                 squad_insights.append(mo.ui.table(
-                    problem_players[['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP']].round(2),
+                    problem_players[problem_columns].round(2),
                     page_size=5
                 ))
             
@@ -905,7 +1030,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                         if can_afford:
                             # Simple same-position upgrade
                             if xp_gain > 0.05:  # Meaningful upgrade threshold (lowered for early season)
-                                print(f"  ✅ Direct premium scenario viable!")
+                                print("  ✅ Direct premium scenario viable!")
                                 scenarios.append({
                                     'type': 'premium_direct',
                                     'target_player': target,
@@ -984,10 +1109,14 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
 
     def optimize_team_with_transfers():
         """Smart optimization that decides optimal number of transfers (0-3) based on net XP"""
-        if len(current_squad) == 0 or players_with_xp.empty or not team_data:
+        if len(current_squad) == 0 or players_with_xp.empty:
             return mo.md("Load team and calculate XP first"), pd.DataFrame(), {}
         
-        print(f"🧠 Smart optimization: Finding optimal number of transfers...")
+        # Handle GW1 case - no previous team data
+        if not team_data:
+            return mo.md("🚀 GW1 Team Selection Mode - Use this to build your initial squad"), pd.DataFrame(), {}
+        
+        print("🧠 Smart optimization: Finding optimal number of transfers...")
         
         # Process constraints
         must_include_ids = set(must_include_dropdown.value if must_include_dropdown else [])
@@ -1011,8 +1140,15 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         
         # Current squad and available budget
         current_player_ids = set(current_squad_with_xp['player_id'].tolist())
-        available_budget = team_data['bank']
-        free_transfers = team_data.get('free_transfers', 1)
+        
+        # Handle GW1 case - use default budget and transfers
+        if team_data:
+            available_budget = team_data['bank']
+            free_transfers = team_data.get('free_transfers', 1)
+        else:
+            # GW1 defaults
+            available_budget = 100.0  # Standard FPL starting budget
+            free_transfers = 0  # No transfers in GW1
         
         # Calculate total budget pool for advanced transfer scenarios
         budget_pool_info = calculate_total_budget_pool(current_squad_with_xp, available_budget, must_include_ids)
@@ -1205,7 +1341,7 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
         print(f"💰 Budget pool: Bank £{budget_pool_info['bank_balance']:.1f}m, Max acquisition £{budget_pool_info['max_single_acquisition']:.1f}m")
         
         # Scenario 4+: Premium Acquisition Planning
-        print(f"🎯 Generating premium acquisition scenarios...")
+        print("🎯 Generating premium acquisition scenarios...")
         premium_scenarios = premium_acquisition_planner(
             current_squad_with_xp, all_players, budget_pool_info, top_n=2
         )
@@ -1349,6 +1485,15 @@ def __(optimal_starting_11, mo):
         if optimal_starting_11.empty:
             return mo.md("Optimize team first to select captain")
         
+        def get_safe_columns(df, preferred_columns):
+            """Get columns that exist in the DataFrame"""
+            available_columns = list(df.columns)
+            safe_columns = []
+            for col in preferred_columns:
+                if col in available_columns:
+                    safe_columns.append(col)
+            return safe_columns if safe_columns else available_columns[:3]  # Fallback to first 3 columns
+        
         # Captain selection based on XP
         captain_candidates = optimal_starting_11.copy()
         captain_candidates['captain_score'] = captain_candidates['xP'] * 2  # Double points consideration
@@ -1357,13 +1502,16 @@ def __(optimal_starting_11, mo):
         captain = top_3.iloc[0]
         vice_captain = top_3.iloc[1] if len(top_3) > 1 else captain
         
+        # Get safe columns for display
+        captain_columns = get_safe_columns(top_3, ['web_name', 'position', 'price', 'xP'])
+        
         return mo.vstack([
             mo.md("### 👑 Captain Selection"),
             mo.md(f"**Captain:** {captain['web_name']} ({captain['position']}) - {captain['xP']:.2f} xP"),
             mo.md(f"**Vice-Captain:** {vice_captain['web_name']} ({vice_captain['position']}) - {vice_captain['xP']:.2f} xP"),
             mo.md("**Top Captain Options:**"),
             mo.ui.table(
-                top_3[['web_name', 'position', 'name', 'price', 'xP']].round(2),
+                top_3[captain_columns].round(2),
                 page_size=3
             )
         ])
@@ -1377,7 +1525,7 @@ def __(optimal_starting_11, mo):
 @app.cell
 def __(mo, current_squad, team_data, optimal_scenario):
     # Summary
-    if len(current_squad) > 0 and team_data:
+    if len(current_squad) > 0:
         optimal_info = ""
         if optimal_scenario:
             optimal_info = f"""
@@ -1386,21 +1534,39 @@ def __(mo, current_squad, team_data, optimal_scenario):
         **Formation:** {optimal_scenario.get('formation', 'N/A')}
         """
         
-        mo.md(f"""
-        ## ✅ Summary
-        
-        **Team:** {team_data['entry_name']}
-        **Current Squad:** {len(current_squad)}/15 players
-        **Available Budget:** £{team_data['bank']:.1f}m
-        **Free Transfers:** {team_data.get('free_transfers', 1)}
-        {optimal_info}
-        
-        **Next Steps:**
-        1. Review optimization recommendations above
-        2. Apply any transfer constraints if needed
-        3. Confirm captain and vice-captain selection
-        4. Execute transfers and lineup in FPL app before deadline
-        """)
+        if team_data:
+            # Regular gameweek summary
+            mo.md(f"""
+            ## ✅ Summary
+            
+            **Team:** {team_data['entry_name']}
+            **Current Squad:** {len(current_squad)}/15 players
+            **Available Budget:** £{team_data['bank']:.1f}m
+            **Free Transfers:** {team_data.get('free_transfers', 1)}
+            {optimal_info}
+            
+            **Next Steps:**
+            1. Review optimization recommendations above
+            2. Apply any transfer constraints if needed
+            3. Confirm captain and vice-captain selection
+            4. Execute transfers and lineup in FPL app before deadline
+            """)
+        else:
+            # GW1 summary
+            mo.md(f"""
+            ## 🚀 GW1 Team Selection Summary
+            
+            **Mode:** Initial Squad Selection
+            **Available Budget:** £100.0m (standard FPL starting budget)
+            **Free Transfers:** 0 (no transfers in GW1)
+            {optimal_info}
+            
+            **Next Steps:**
+            1. Review player recommendations above
+            2. Use the optimization tool to build your initial squad
+            3. Confirm captain and vice-captain selection
+            4. Create your team in the FPL app
+            """)
     else:
         mo.md("Select target gameweek above to get started")
     

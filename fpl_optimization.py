@@ -10,7 +10,6 @@ Handles all optimization and transfer logic for FPL gameweek management includin
 """
 
 import pandas as pd
-import numpy as np
 from typing import Dict, List, Tuple, Optional, Set
 
 
@@ -232,7 +231,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
     if len(current_squad) == 0 or players_with_xp.empty or not team_data:
         return mo.md("Load team and calculate XP first"), pd.DataFrame(), {}
     
-    print(f"🧠 Smart optimization: Finding optimal number of transfers...")
+    print("🧠 Smart optimization: Finding optimal number of transfers...")
     
     # Process constraints
     must_include_ids = must_include_ids or set()
