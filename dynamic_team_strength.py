@@ -156,70 +156,67 @@ class DynamicTeamStrength:
     
     def _get_historical_baseline(self, teams_data: pd.DataFrame) -> Dict[str, float]:
         """
-        Load and calculate team strength from 2024-25 season data
+        Load team strength from existing derived_team_form data
         """
         if 'historical_baseline' in self._historical_cache:
             return self._historical_cache['historical_baseline']
         
         try:
-            # Load 2024-25 vaastav data
-            historical_path = '/Users/alex/dev/FPL/fpl-dataset-builder/data/vaastav_full_player_history_2024_2025.csv'
-            historical_df = pd.read_csv(historical_path)
+            # Use existing derived team form data from database
+            from client import get_derived_team_form
+            team_form = get_derived_team_form()
             
             if self.debug:
-                print(f"📂 Loaded 2024-25 historical data: {historical_df.shape}")
+                print(f"📂 Loaded derived team form data: {team_form.shape}")
             
-            # Aggregate team-level statistics
-            team_stats = historical_df.groupby('team').agg({
-                'goals_scored': 'sum',
-                'goals_conceded': 'sum',
-                'expected_goals': 'sum',
-                'expected_goals_conceded': 'sum',
-                'clean_sheets': 'sum',
-                'total_points': 'sum'
-            }).round(3)
+            strength_ratings = {}
             
-            # Calculate per-game averages (38 games in season)
-            team_stats['xG_per_game'] = team_stats['expected_goals'] / 38
-            team_stats['xGA_per_game'] = team_stats['expected_goals_conceded'] / 38
-            team_stats['goals_per_game'] = team_stats['goals_scored'] / 38
-            team_stats['goals_conceded_per_game'] = team_stats['goals_conceded'] / 38
+            # Calculate combined strengths for normalization
+            combined_strengths = []
+            for _, team in team_form.iterrows():
+                attack_strength = team['overall_attack_strength']
+                defense_strength = team['overall_defense_strength']
+                combined_strength = (attack_strength + defense_strength) / 2
+                combined_strengths.append(combined_strength)
             
-            # Add team names
-            team_stats = team_stats.reset_index()
+            # Get min and max for normalization
+            min_strength = min(combined_strengths)
+            max_strength = max(combined_strengths)
             
-            # Handle different team_id column naming
-            if 'team_id' in teams_data.columns:
-                team_stats = team_stats.merge(
-                    teams_data[['team_id', 'name']], 
-                    left_on='team', 
-                    right_on='team_id', 
-                    how='left'
-                )
-            else:
-                # Fallback: create team name mapping
-                team_names = {
-                    1: 'Arsenal', 2: 'Aston Villa', 3: 'Burnley', 4: 'Bournemouth', 5: 'Brentford',
-                    6: 'Brighton', 7: 'Chelsea', 8: 'Crystal Palace', 9: 'Everton', 10: 'Fulham',
-                    11: 'Leeds', 12: 'Liverpool', 13: 'Man City', 14: 'Man Utd', 15: 'Newcastle',
-                    16: "Nott'm Forest", 17: 'Sunderland', 18: 'Spurs', 19: 'West Ham', 20: 'Wolves'
-                }
-                team_stats['name'] = team_stats['team'].map(team_names)
-            
-            # Calculate strength ratings
-            strength_ratings = self._calculate_strength_from_stats(team_stats, is_current_season=False)
+            # Convert to [0.7, 1.3] range
+            for _, team in team_form.iterrows():
+                team_name = team['team_name']
+                
+                # Use overall attack and defense strength (already calculated)
+                attack_strength = team['overall_attack_strength']
+                defense_strength = team['overall_defense_strength']
+                
+                # Combined strength (average of attack and defense)
+                combined_strength = (attack_strength + defense_strength) / 2
+                
+                # Normalize to [0.7, 1.3] range
+                if max_strength > min_strength:
+                    normalized_strength = 0.7 + (combined_strength - min_strength) * (1.3 - 0.7) / (max_strength - min_strength)
+                else:
+                    normalized_strength = 1.0  # All teams equal
+                
+                strength_ratings[team_name] = round(normalized_strength, 3)
             
             # Cache for future use
             self._historical_cache['historical_baseline'] = strength_ratings
             
             if self.debug:
-                print(f"✅ Historical baseline calculated for {len(strength_ratings)} teams")
+                print(f"✅ Team strength loaded for {len(strength_ratings)} teams")
+                strongest = max(strength_ratings.items(), key=lambda x: x[1])
+                weakest = min(strength_ratings.items(), key=lambda x: x[1])
+                print(f"🏆 Strongest: {strongest[0]} ({strongest[1]})")
+                print(f"📉 Weakest: {weakest[0]} ({weakest[1]})")
             
             return strength_ratings
             
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error loading historical data: {e}")
+                print(f"⚠️ Error loading derived team form data: {e}")
             
             # Fallback to static ratings
             return self._get_static_fallback_ratings()
