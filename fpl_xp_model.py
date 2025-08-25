@@ -40,19 +40,15 @@ def __(pd):
     # Load core FPL datasets
     def load_datasets():
         """Load core FPL datasets from database"""
-        from client import (
-            get_current_players,
-            get_player_xg_xa_rates,
-            get_fixtures_normalized,
-            get_current_teams
-        )
+        from client import FPLDataClient
+        client = FPLDataClient()
         
         print("Loading datasets from database...")
         
-        players = get_current_players()
-        xg_rates = get_player_xg_xa_rates()
-        fixtures = get_fixtures_normalized()
-        teams = get_current_teams()
+        players = client.get_current_players()
+        xg_rates = client.get_player_xg_xa_rates()
+        fixtures = client.get_fixtures_normalized()
+        teams = client.get_current_teams()
         
         print(f"Loaded: {len(players)} players, {len(fixtures)} fixtures, {len(teams)} teams")
         print(f"xG rates for {len(xg_rates)} players")

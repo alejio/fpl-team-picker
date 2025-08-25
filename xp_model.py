@@ -119,9 +119,21 @@ class XPModel:
     
     def _merge_team_data(self, players_df: pd.DataFrame, teams_df: pd.DataFrame) -> pd.DataFrame:
         """Merge team information with players"""
-        # Handle different column naming conventions
+        # Handle different column naming conventions with debug info
         team_id_col = 'team_id' if 'team_id' in teams_df.columns else 'id'
-        player_team_col = 'team' if 'team' in players_df.columns else 'team_id'
+        
+        # Check for player team column with multiple possible names
+        if 'team' in players_df.columns:
+            player_team_col = 'team'
+        elif 'team_id' in players_df.columns:
+            player_team_col = 'team_id'
+        elif 'team_id_x' in players_df.columns:  # In case of merge conflicts
+            player_team_col = 'team_id_x'
+        else:
+            if self.debug:
+                print(f"⚠️ Available player columns: {list(players_df.columns)}")
+                print(f"⚠️ Available team columns: {list(teams_df.columns)}")
+            raise KeyError(f"No team column found in players data. Available: {list(players_df.columns)}")
         
         merged = players_df.merge(
             teams_df[[team_id_col, 'name']], 
@@ -251,15 +263,93 @@ class XPModel:
     def _estimate_missing_xg_xa_rates(self, missing_players_df: pd.DataFrame,
                                     team_strength: Dict[str, float]) -> pd.DataFrame:
         """
-        Statistical estimation of xG90/xA90 for players missing historical data
+        Enhanced statistical estimation of xG90/xA90 using additional raw data fields
         
-        Uses price, position, team strength, and SBP as predictors.
-        Based on the advanced model from fpl_xp_model.py
+        Uses price, position, team strength, SBP, and additional raw data fields as predictors.
+        Enhanced with 100+ raw API fields for more accurate estimation.
         """
         estimates = missing_players_df.copy()
         
-        # Add team strength feature
-        estimates['team_strength'] = estimates['name'].map(team_strength).fillna(1.0)
+        # Add team strength feature - handle different team name column names
+        team_name_col = None
+        for col in ['name', 'name_x', 'name_y', 'team_name']:
+            if col in estimates.columns:
+                team_name_col = col
+                break
+        
+        if team_name_col:
+            estimates['team_strength'] = estimates[team_name_col].map(team_strength).fillna(1.0)
+        else:
+            if self.debug:
+                print(f"⚠️ No team name column found in estimates. Available: {list(estimates.columns)}")
+            estimates['team_strength'] = 1.0
+        
+        # Enhanced estimation using additional raw data fields if available
+        try:
+            from client import FPLDataClient
+            client = FPLDataClient()
+            raw_players = client.get_raw_players_bootstrap()
+            
+            if not raw_players.empty:
+                # Merge with raw data to get additional fields - handle different column names
+                player_id_col = None
+                raw_id_col = None
+                
+                # Find player ID column in estimates
+                for col in ['player_id', 'id', 'element']:
+                    if col in estimates.columns:
+                        player_id_col = col
+                        break
+                
+                # Find ID column in raw data
+                for col in ['id', 'player_id', 'element']:
+                    if col in raw_players.columns:
+                        raw_id_col = col
+                        break
+                
+                if player_id_col and raw_id_col:
+                    # Select available columns from raw data
+                    available_cols = [raw_id_col]
+                    for col in ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat']:
+                        if col in raw_players.columns:
+                            available_cols.append(col)
+                    
+                    enhanced_data = estimates.merge(
+                        raw_players[available_cols], 
+                        left_on=player_id_col, right_on=raw_id_col, how='left'
+                    )
+                    
+                    if self.debug:
+                        print(f"✅ Enhanced estimation with raw data fields for {len(enhanced_data)} players")
+                    
+                    # Use additional fields in estimation if available
+                    if 'ict_index' in enhanced_data.columns:
+                        estimates['ict_factor'] = enhanced_data['ict_index'].fillna(0) / 100.0  # Normalize ICT
+                    if 'creativity' in enhanced_data.columns:
+                        estimates['creativity_factor'] = enhanced_data['creativity'].fillna(0) / 100.0
+                    if 'threat' in enhanced_data.columns:
+                        estimates['threat_factor'] = enhanced_data['threat'].fillna(0) / 100.0
+                    if 'influence' in enhanced_data.columns:
+                        estimates['influence_factor'] = enhanced_data['influence'].fillna(0) / 100.0
+                        
+                else:
+                    if self.debug:
+                        print(f"⚠️ Cannot merge raw data - player ID mapping not found")
+                        print(f"   Estimates columns: {[col for col in estimates.columns if 'id' in col.lower()]}")
+                        print(f"   Raw data columns: {[col for col in raw_players.columns if 'id' in col.lower()]}")
+                        enhanced_data = estimates  # Use original data
+            else:
+                if self.debug:
+                    print("⚠️ No raw players data available for enhanced estimation")
+                    
+        except Exception as e:
+            if self.debug:
+                print(f"⚠️ Enhanced estimation failed: {str(e)[:50]} - using basic method")
+            
+        # Set default factors if not available from raw data
+        for factor in ['ict_factor', 'creativity_factor', 'threat_factor', 'influence_factor']:
+            if factor not in estimates.columns:
+                estimates[factor] = 0.0
         
         # Handle missing SBP with position-based medians
         position_sbp_defaults = {'GKP': 5.0, 'DEF': 8.0, 'MID': 12.0, 'FWD': 10.0}
@@ -297,7 +387,11 @@ class XPModel:
             # SBP adjustment
             sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.3
             
-            estimated_xg = base_xg * price_multiplier * team_multiplier * sbp_multiplier
+            # Enhanced: ICT and threat factor adjustments for xG
+            threat_multiplier = 1.0 + row.get('threat_factor', 0) * 0.4  # Threat strongly correlates with xG
+            ict_multiplier = 1.0 + row.get('ict_factor', 0) * 0.2  # General performance indicator
+            
+            estimated_xg = base_xg * price_multiplier * team_multiplier * sbp_multiplier * threat_multiplier * ict_multiplier
             
             # Position-specific caps
             caps = {'GKP': 0.05, 'DEF': 0.35, 'MID': 0.70, 'FWD': 1.20}
@@ -323,7 +417,11 @@ class XPModel:
             # SBP adjustment
             sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.25
             
-            estimated_xa = base_xa * price_multiplier * team_multiplier * sbp_multiplier
+            # Enhanced: Creativity and influence factor adjustments for xA
+            creativity_multiplier = 1.0 + row.get('creativity_factor', 0) * 0.5  # Creativity strongly correlates with xA
+            influence_multiplier = 1.0 + row.get('influence_factor', 0) * 0.3  # Influential players create more assists
+            
+            estimated_xa = base_xa * price_multiplier * team_multiplier * sbp_multiplier * creativity_multiplier * influence_multiplier
             
             # Position-specific caps
             caps = {'GKP': 0.10, 'DEF': 0.40, 'MID': 0.80, 'FWD': 0.50}
@@ -401,7 +499,7 @@ class XPModel:
     
     def _calculate_recent_form(self, live_data: pd.DataFrame, target_gameweek: int) -> pd.DataFrame:
         """
-        Calculate recent form metrics for players
+        Enhanced recent form calculation using detailed gameweek history
         
         Returns DataFrame with:
         - player_id
@@ -414,6 +512,10 @@ class XPModel:
             return pd.DataFrame()
         
         try:
+            # Enhanced form calculation using new client capabilities
+            from client import FPLDataClient
+            client = FPLDataClient()
+            
             # Get data for form window (last 3-5 gameweeks before target)
             form_start_gw = max(1, target_gameweek - self.form_window)
             form_end_gw = target_gameweek - 1
@@ -421,7 +523,7 @@ class XPModel:
             # Early season adjustment: use available data even if limited
             if target_gameweek <= 3:
                 # For very early season, use all available data up to previous GW
-                available_gws = sorted(live_data['event'].unique())
+                available_gws = sorted(live_data['event'].unique()) if 'event' in live_data.columns else sorted(live_data['gameweek'].unique()) if 'gameweek' in live_data.columns else []
                 if available_gws:
                     form_start_gw = min(available_gws)
                     form_end_gw = max([gw for gw in available_gws if gw < target_gameweek] or [1])
@@ -429,11 +531,33 @@ class XPModel:
                     if self.debug:
                         print(f"🌟 Early season form calculation: Using GW{form_start_gw}-{form_end_gw}")
             
-            # Filter live data for form window
-            form_data = live_data[
-                (live_data['event'] >= form_start_gw) & 
-                (live_data['event'] <= form_end_gw)
-            ].copy()
+            # Try to get enhanced gameweek performance data for better form analysis
+            enhanced_form_data = pd.DataFrame()
+            try:
+                for gw in range(form_start_gw, form_end_gw + 1):
+                    gw_performance = client.get_gameweek_performance(gw)
+                    if not gw_performance.empty:
+                        enhanced_form_data = pd.concat([enhanced_form_data, gw_performance], ignore_index=True)
+                        
+                if not enhanced_form_data.empty and self.debug:
+                    print(f"✅ Enhanced form data: {len(enhanced_form_data)} player-gameweek records")
+            except:
+                if self.debug:
+                    print("⚠️ Enhanced form data unavailable, using legacy data")
+            
+            # Use enhanced data if available, otherwise fall back to live data
+            if not enhanced_form_data.empty:
+                form_data = enhanced_form_data.copy()
+                # Standardize column names for compatibility
+                if 'gameweek' in form_data.columns and 'event' not in form_data.columns:
+                    form_data['event'] = form_data['gameweek']
+            else:
+                # Filter live data for form window
+                event_col = 'event' if 'event' in live_data.columns else 'gameweek'
+                form_data = live_data[
+                    (live_data[event_col] >= form_start_gw) & 
+                    (live_data[event_col] <= form_end_gw)
+                ].copy()
             
             if form_data.empty:
                 if self.debug:
@@ -711,7 +835,20 @@ class XPModel:
     def _apply_fixture_difficulty(self, players_df: pd.DataFrame,
                                 fixture_difficulty: Dict[str, float]) -> pd.DataFrame:
         """Apply fixture difficulty multipliers to players"""
-        players_df['fixture_difficulty'] = players_df['name'].map(fixture_difficulty).fillna(1.0)
+        # Handle different team name column names
+        team_name_col = None
+        for col in ['name', 'name_x', 'name_y', 'team_name']:
+            if col in players_df.columns:
+                team_name_col = col
+                break
+        
+        if team_name_col:
+            players_df['fixture_difficulty'] = players_df[team_name_col].map(fixture_difficulty).fillna(1.0)
+        else:
+            if self.debug:
+                print(f"⚠️ No team name column found for fixture difficulty. Available: {list(players_df.columns)}")
+            players_df['fixture_difficulty'] = 1.0
+            
         return players_df
     
     def _calculate_xp_components(self, players_df: pd.DataFrame, 

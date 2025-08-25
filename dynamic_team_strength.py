@@ -163,25 +163,60 @@ class DynamicTeamStrength:
         
         try:
             # Use existing derived team form data from database
-            from client import get_derived_team_form
-            team_form = get_derived_team_form()
+            from client import FPLDataClient
+            client = FPLDataClient()
+            team_form = client.get_derived_team_form()
             
             if self.debug:
                 print(f"📂 Loaded derived team form data: {team_form.shape}")
+                if not team_form.empty:
+                    print(f"📊 Available team form columns: {list(team_form.columns)}")
             
             strength_ratings = {}
             
-            # Calculate combined strengths for normalization
-            combined_strengths = []
-            for _, team in team_form.iterrows():
-                attack_strength = team['overall_attack_strength']
-                defense_strength = team['overall_defense_strength']
-                combined_strength = (attack_strength + defense_strength) / 2
-                combined_strengths.append(combined_strength)
-            
-            # Get min and max for normalization
-            min_strength = min(combined_strengths)
-            max_strength = max(combined_strengths)
+            if not team_form.empty:
+                # Enhanced team strength calculation using derived analytics
+                combined_strengths = []
+                
+                # Use derived analytics if available, otherwise calculate basic combined strength
+                if 'overall_attack_strength' in team_form.columns and 'overall_defense_strength' in team_form.columns:
+                    for _, team in team_form.iterrows():
+                        attack_strength = team['overall_attack_strength']
+                        defense_strength = team['overall_defense_strength']
+                        
+                        # Enhanced weighting considering venue if available
+                        if 'home_advantage' in team_form.columns:
+                            venue_factor = team.get('home_advantage', 1.0)
+                            combined_strength = (attack_strength + defense_strength) / 2 * venue_factor
+                        else:
+                            combined_strength = (attack_strength + defense_strength) / 2
+                        
+                        combined_strengths.append(combined_strength)
+                        
+                    if self.debug:
+                        print(f"✅ Using enhanced derived team strengths")
+                else:
+                    # Fallback to basic calculation if derived columns not available
+                    for _, team in team_form.iterrows():
+                        # Use available columns for basic strength calculation
+                        goals_scored = team.get('goals_scored', 0)
+                        goals_conceded = team.get('goals_conceded', 0)
+                        matches_played = team.get('matches_played', 1)
+                        
+                        attack_rate = goals_scored / max(matches_played, 1)
+                        defense_rate = goals_conceded / max(matches_played, 1)
+                        combined_strength = attack_rate / max(defense_rate, 0.5)  # Avoid division by zero
+                        combined_strengths.append(combined_strength)
+                        
+                    if self.debug:
+                        print(f"⚠️ Using fallback team strength calculation")
+                
+                # Get min and max for normalization
+                if combined_strengths:
+                    min_strength = min(combined_strengths)
+                    max_strength = max(combined_strengths)
+                else:
+                    min_strength, max_strength = 0.5, 2.0
             
             # Convert to [0.7, 1.3] range
             for _, team in team_form.iterrows():
@@ -235,8 +270,9 @@ class DynamicTeamStrength:
             all_gw_data = pd.concat(gameweek_data_list, ignore_index=True)
             
             # Get player-team mapping from current players
-            from client import get_current_players
-            players = get_current_players()
+            from client import FPLDataClient
+            client = FPLDataClient()
+            players = client.get_current_players()
             
             # Merge gameweek data with team info
             gw_with_teams = all_gw_data.merge(
@@ -405,14 +441,15 @@ def load_historical_gameweek_data(start_gw: int = 1, end_gw: int = None) -> List
     Returns:
         List of gameweek DataFrames
     """
-    from client import get_gameweek_live_data
+    from client import FPLDataClient
+    client = FPLDataClient()
     
     gameweek_data = []
     max_gw = end_gw if end_gw else 38
     
     for gw in range(start_gw, max_gw + 1):
         try:
-            gw_data = get_gameweek_live_data(gw)
+            gw_data = client.get_gameweek_live_data(gw)
             if not gw_data.empty:
                 gameweek_data.append(gw_data)
         except:

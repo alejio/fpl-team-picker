@@ -25,11 +25,12 @@ def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
         Marimo UI component with team strength visualization
     """
     try:
-        from client import get_current_teams
+        from client import FPLDataClient
+        client = FPLDataClient()
         from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
         
         # Load team data
-        teams = get_current_teams()
+        teams = client.get_current_teams()
         
         # Get dynamic team strength ratings for the target gameweek
         calculator = DynamicTeamStrength(debug=False)
@@ -112,7 +113,8 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
     """
     try:
         # Get historical data for trends
-        from client import get_gameweek_live_data
+        from client import FPLDataClient
+        client = FPLDataClient()
         
         # Load historical gameweek data (check available gameweeks)
         historical_data = []
@@ -122,7 +124,7 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         
         for gw in range(1, max_gw + 1):
             try:
-                gw_data = get_gameweek_live_data(gw)
+                gw_data = client.get_gameweek_live_data(gw)
                 if not gw_data.empty:
                     gw_data['gameweek'] = gw
                     historical_data.append(gw_data)
@@ -362,12 +364,13 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
         Marimo UI component with fixture difficulty visualization
     """
     try:
-        from client import get_fixtures_normalized, get_current_teams
+        from client import FPLDataClient
+        client = FPLDataClient()
         from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
         
         # Load required data
-        fixtures = get_fixtures_normalized()
-        teams = get_current_teams()
+        fixtures = client.get_fixtures_normalized()
+        teams = client.get_current_teams()
         
         # Get team strengths
         calculator = DynamicTeamStrength(debug=False)
