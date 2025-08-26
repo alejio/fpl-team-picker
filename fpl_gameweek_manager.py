@@ -728,17 +728,19 @@ def __(mo, pd, players_with_xp):
     # Import visualization function from new module
     from fpl_visualization import create_player_trends_visualization
     
-    # Create the trend analysis components
-    if hasattr(players_with_xp, 'empty') and not players_with_xp.empty:
-        try:
-            print(f"🔍 Creating trends visualization with {len(players_with_xp)} players")
-            player_opts, attr_opts, trends_data = create_player_trends_visualization(players_with_xp)
-            print(f"✅ Trends created: {len(player_opts)} players, {len(attr_opts)} attributes")
-        except Exception as e:
-            print(f"❌ Error creating trends: {e}")
-            player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
-    else:
-        print("❌ No players_with_xp data available - calculate XP first")
+    # Create the trend analysis components - trends are independent of XP calculations
+    # They use live historical data from the API directly
+    try:
+        print(f"🔍 Creating trends visualization (loads historical data independently)")
+        
+        # Use players_with_xp if available for names, otherwise use empty DataFrame
+        player_data = players_with_xp if hasattr(players_with_xp, 'empty') and not players_with_xp.empty else pd.DataFrame()
+        
+        player_opts, attr_opts, trends_data = create_player_trends_visualization(player_data)
+        print(f"✅ Trends created: {len(player_opts)} players, {len(attr_opts)} attributes")
+        
+    except Exception as e:
+        print(f"❌ Error creating trends: {e}")
         player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
     
     return player_opts, attr_opts, trends_data
@@ -749,7 +751,7 @@ def __(mo, player_opts, attr_opts):
     # Player and attribute selectors
     if player_opts and attr_opts:
         player_selector = mo.ui.dropdown(
-            options=player_opts[:50],  # Limit to top 50 for performance
+            options=player_opts,  # All players available
             label="Select Player:",
             value=None  # Don't set default value to avoid validation issues
         )
@@ -761,7 +763,7 @@ def __(mo, player_opts, attr_opts):
         )
         
         multi_player_selector = mo.ui.multiselect(
-            options=player_opts[:20],  # Top 20 for multi-select
+            options=player_opts,  # All players available for comparison
             label="Compare Multiple Players (optional):",
             value=[]
         )
@@ -776,8 +778,8 @@ def __(mo, player_opts, attr_opts):
     else:
         trends_ui = mo.vstack([
             mo.md("### 📈 Player Performance Trends"),
-            mo.md("⚠️ **Calculate XP first in section 2 to enable trends analysis**"),
-            mo.md("*After calculating XP, this section will show interactive player performance charts over gameweeks*")
+            mo.md("⚠️ **Loading historical data...**"),
+            mo.md("*This section loads live gameweek data directly from the API to show trends*")
         ])
         player_selector = None
         attribute_selector = None

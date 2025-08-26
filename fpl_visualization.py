@@ -115,25 +115,30 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         from client import FPLDataClient
         client = FPLDataClient()
         
-        # Load historical gameweek data (check available gameweeks)
+        # Load historical gameweek data (dynamically detect available gameweeks)
         historical_data = []
-        max_gw = 10  # Adjust based on season progress
-        
         print("🔍 Loading historical data for trends...")
         
-        for gw in range(1, max_gw + 1):
+        # Start from GW1 and continue until we find no data
+        gw = 1
+        consecutive_failures = 0
+        max_failures = 2  # Allow up to 2 consecutive failures before stopping
+        
+        while consecutive_failures < max_failures and gw <= 38:  # Max 38 gameweeks in a season
             try:
-                gw_data = client.get_gameweek_live_data(gw)
+                gw_data = client.get_gameweek_performance(gameweek=gw)
                 if not gw_data.empty:
-                    gw_data['gameweek'] = gw
                     historical_data.append(gw_data)
                     print(f"✅ GW{gw}: {len(gw_data)} player records")
+                    consecutive_failures = 0  # Reset failure counter on success
                 else:
-                    print(f"❌ GW{gw}: No data")
-                    break  # Stop if we hit missing data
+                    print(f"❌ GW{gw}: No data available")
+                    consecutive_failures += 1
             except Exception as e:
-                print(f"❌ GW{gw}: Error - {e}")
-                break
+                print(f"❌ GW{gw}: Error loading data - {str(e)[:100]}")
+                consecutive_failures += 1
+            
+            gw += 1
         
         if not historical_data:
             return [], [], pd.DataFrame()
@@ -145,15 +150,13 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         print(f"📊 Combined data shape: {all_data.shape}")
         
         # CRITICAL: Merge with current player names 
-        # The live data only has player_id, we need names from current players
+        # The performance data only has player_id, we need names from current players
         if not players_data.empty:
-            print("🔗 Merging with players data to get names...")
-            player_names = players_data[['player_id', 'web_name', 'position', 'team', 'name']].drop_duplicates('player_id')
-            print(f"📋 Player names data shape: {player_names.shape}")
+            print("🔗 Merging with provided players data to get names...")
             
             # Include current price info too (handle missing columns gracefully)
-            base_cols = ['player_id', 'web_name', 'position', 'team', 'name']
-            optional_cols = ['now_cost', 'selected_by_percent']
+            base_cols = ['player_id', 'web_name', 'position', 'name']
+            optional_cols = ['team', 'now_cost', 'selected_by_percent']
             
             # Only include columns that exist
             available_cols = base_cols + [col for col in optional_cols if col in players_data.columns]
@@ -169,16 +172,71 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
             print(f"📊 After merge shape: {all_data.shape}")
             print(f"📊 Players with names: {all_data['web_name'].notna().sum()}")
         else:
-            print("⚠️ No players data available for name merge!")
+            # Load current players to get names
+            print("⚠️ No players data provided, loading current players for names...")
+            try:
+                current_players = client.get_current_players()
+                if not current_players.empty:
+                    # Create full name from first and second name if available
+                    if 'first' in current_players.columns and 'second' in current_players.columns:
+                        current_players['name'] = current_players['first'] + ' ' + current_players['second']
+                    elif 'first' in current_players.columns:
+                        current_players['name'] = current_players['first']
+                    else:
+                        current_players['name'] = current_players['web_name']
+                    
+                    # Map column names to standard format
+                    column_map = {
+                        'price_gbp': 'now_cost',
+                        'selected_by_percentage': 'selected_by_percent',
+                        'team_id': 'team'
+                    }
+                    current_players = current_players.rename(columns=column_map)
+                    
+                    base_cols = ['player_id', 'web_name', 'position', 'name']
+                    optional_cols = ['team', 'now_cost', 'selected_by_percent']
+                    
+                    # Only include columns that exist
+                    available_cols = base_cols + [col for col in optional_cols if col in current_players.columns]
+                    player_info = current_players[available_cols].drop_duplicates('player_id')
+                    
+                    all_data = all_data.merge(player_info, on='player_id', how='left')
+                    print(f"📊 Loaded {len(player_info)} current players for names")
+                    print(f"📊 Players with names after merge: {all_data['web_name'].notna().sum()}")
+                else:
+                    print("❌ Could not load current players!")
+                    return [], [], pd.DataFrame()
+            except Exception as e:
+                print(f"❌ Error loading current players: {e}")
+                return [], [], pd.DataFrame()
         
         # Calculate derived metrics (handle missing columns gracefully)
-        all_data['points_per_game'] = all_data['total_points'] / all_data['gameweek']
-        all_data['xg_per_90'] = (all_data.get('expected_goals', 0) / all_data.get('minutes', 1)) * 90
-        all_data['xa_per_90'] = (all_data.get('expected_assists', 0) / all_data.get('minutes', 1)) * 90
+        # Ensure numeric types for calculations
+        numeric_cols = ['total_points', 'gameweek', 'minutes']
+        for col in numeric_cols:
+            if col in all_data.columns:
+                all_data[col] = pd.to_numeric(all_data[col], errors='coerce')
+        
+        # Handle expected goals/assists if they exist
+        if 'expected_goals' in all_data.columns:
+            all_data['expected_goals'] = pd.to_numeric(all_data['expected_goals'], errors='coerce')
+        else:
+            all_data['expected_goals'] = 0
+            
+        if 'expected_assists' in all_data.columns:
+            all_data['expected_assists'] = pd.to_numeric(all_data['expected_assists'], errors='coerce')
+        else:
+            all_data['expected_assists'] = 0
+        
+        # Safe calculations
+        all_data['points_per_game'] = all_data['total_points'] / all_data['gameweek'].replace(0, 1)
+        all_data['xg_per_90'] = (all_data['expected_goals'] / all_data['minutes'].replace(0, 1)) * 90
+        all_data['xa_per_90'] = (all_data['expected_assists'] / all_data['minutes'].replace(0, 1)) * 90
         
         # Value ratio - only calculate if we have price data
         if 'now_cost' in all_data.columns:
-            all_data['value_ratio'] = all_data['total_points'] / (all_data['now_cost'] / 10)  # Points per £1m
+            all_data['now_cost'] = pd.to_numeric(all_data['now_cost'], errors='coerce')
+            all_data['value_ratio'] = all_data['total_points'] / (all_data['now_cost'] / 10).replace(0, 1)  # Points per £1m
         else:
             print("⚠️ No price data available, skipping value ratio calculation")
             all_data['value_ratio'] = 0
@@ -202,8 +260,8 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
             'gameweek': 'count'  # Number of gameweeks with data
         }).reset_index()
         
-        # Filter to players with at least some data and sort by points
-        active_players = player_stats[player_stats['gameweek'] >= 1].nlargest(100, 'total_points')
+        # Filter to players with at least some data and sort by points (all players)
+        active_players = player_stats[player_stats['gameweek'] >= 1].sort_values('total_points', ascending=False)
         
         for _, player_row in active_players.iterrows():
             label = f"{player_row['web_name']} ({player_row['position']}, {player_row['name']}) - {player_row['total_points']} pts"
