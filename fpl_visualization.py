@@ -10,6 +10,7 @@ Handles all visualization functions for FPL gameweek management including:
 
 import pandas as pd
 from typing import Tuple, List, Dict, Optional
+from fpl_utils import get_safe_columns, create_display_dataframe
 
 
 def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
@@ -696,3 +697,361 @@ def _get_attribute_options() -> List[Dict]:
         {"label": "Selected By %", "value": "selected_by_percent"},
         {"label": "Value Ratio (pts/£1m)", "value": "value_ratio"}
     ]
+
+
+def create_xp_results_display(players_xp: pd.DataFrame, target_gameweek: int, mo_ref) -> object:
+    """
+    Create comprehensive XP results display with form analysis and strategic insights
+    
+    Args:
+        players_xp: DataFrame with calculated XP data
+        target_gameweek: Target gameweek number
+        mo_ref: Marimo reference for UI components
+        
+    Returns:
+        Marimo UI component with XP results display
+    """
+    if players_xp.empty:
+        return mo_ref.md("No XP data available")
+    
+    try:
+        # Add comprehensive player attributes for display
+        # Start with core player info
+        display_columns = ['web_name', 'position', 'name', 'price', 'selected_by_percent']
+        
+        # Add XP model outputs (both 1-GW and 5-GW)
+        xp_columns = ['xP', 'xP_5gw', 'xP_per_price', 'xP_per_price_5gw', 'expected_minutes', 
+                     'fixture_difficulty', 'fixture_difficulty_5gw', 'xP_horizon_advantage', 'fixture_outlook']
+        display_columns.extend(xp_columns)
+        
+        # Add XP component breakdown if available
+        xp_components = ['xP_appearance', 'xP_goals', 'xP_assists', 'xP_clean_sheets']
+        for component in xp_components:
+            if component in players_xp.columns:
+                display_columns.append(component)
+        
+        # Add form indicators if they exist
+        form_columns = ['momentum', 'form_multiplier', 'recent_points_per_game']
+        for form_col in form_columns:
+            if form_col in players_xp.columns:
+                display_columns.append(form_col)
+        
+        # Add statistical data if available
+        stats_columns = ['xG90', 'xA90', 'minutes', 'p_60_plus_mins']
+        for stat_col in stats_columns:
+            if stat_col in players_xp.columns:
+                display_columns.append(stat_col)
+        
+        # Add availability status at the end
+        if 'status' in players_xp.columns:
+            display_columns.append('status')
+        
+        # Create safe display DataFrame
+        display_df = create_display_dataframe(
+            players_xp, 
+            core_columns=display_columns,
+            sort_by='xP_5gw',
+            ascending=False,
+            round_decimals=3
+        )
+        
+        # Generate form analysis
+        form_info = format_form_analysis(players_xp)
+        
+        # Generate strategic analysis
+        strategic_info = format_strategic_analysis(players_xp)
+        
+        return mo_ref.vstack([
+            mo_ref.md(f"### ✅ Strategic XP Model - GW{target_gameweek} + 5 Horizon"),
+            mo_ref.md(f"**Players analyzed:** {len(players_xp)}"),
+            mo_ref.md(f"**Average 1-GW XP:** {players_xp['xP'].mean():.2f} | **Average 5-GW XP:** {players_xp['xP_5gw'].mean():.2f}"),
+            mo_ref.md(f"**Top 1-GW:** {players_xp['xP'].max():.2f} | **Top 5-GW:** {players_xp['xP_5gw'].max():.2f}"),
+            mo_ref.md(strategic_info),
+            mo_ref.md(form_info) if form_info else mo_ref.md(""),
+            mo_ref.md("**All Players - Strategic Comparison (Sorted by 5-GW XP):**"),
+            mo_ref.md("*Showing: 1-GW vs 5-GW XP, fixture outlook, horizon advantage, form data*"),
+            mo_ref.ui.table(display_df, page_size=25)
+        ])
+        
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating XP results display: {e}")
+
+
+def format_form_analysis(players_xp: pd.DataFrame) -> str:
+    """
+    Format form analysis information from XP data
+    
+    Args:
+        players_xp: DataFrame with form and XP data
+        
+    Returns:
+        Formatted form analysis string
+    """
+    try:
+        # Count form-enhanced players
+        form_enhanced_players = 0
+        avg_form_multiplier = 1.0
+        if 'form_multiplier' in players_xp.columns:
+            form_enhanced_players = len(players_xp[players_xp['form_multiplier'] != 1.0])
+            avg_form_multiplier = players_xp['form_multiplier'].mean()
+        
+        # Enhanced display with form information
+        form_info = ""
+        if form_enhanced_players > 0:
+            hot_players = len(players_xp[players_xp.get('momentum', '') == '🔥'])
+            cold_players = len(players_xp[players_xp.get('momentum', '') == '❄️'])
+            form_info = f"**Form Analysis:** {form_enhanced_players} players with form data | {hot_players} 🔥 Hot | {cold_players} ❄️ Cold | Avg multiplier: {avg_form_multiplier:.2f}"
+        
+        return form_info
+    except Exception:
+        return ""
+
+
+def format_strategic_analysis(players_xp: pd.DataFrame) -> str:
+    """
+    Format strategic 5-gameweek analysis information
+    
+    Args:
+        players_xp: DataFrame with strategic XP data
+        
+    Returns:
+        Formatted strategic analysis string
+    """
+    try:
+        fixture_advantage_players = len(players_xp[players_xp['xP_horizon_advantage'] > 0.5])
+        fixture_disadvantage_players = len(players_xp[players_xp['xP_horizon_advantage'] < -0.5])
+        
+        # Check if we have enough data for comparison
+        leaders_different = False
+        if not players_xp.empty and 'xP' in players_xp.columns:
+            display_df = players_xp.sort_values('xP_5gw', ascending=False)
+            if not display_df.empty:
+                top_5gw_player = display_df.iloc[0]['web_name']
+                top_1gw_players = players_xp.nlargest(1, 'xP')
+                if not top_1gw_players.empty:
+                    top_1gw_player = top_1gw_players.iloc[0]['web_name']
+                    leaders_different = top_5gw_player != top_1gw_player
+        
+        return f"""
+**🎯 Strategic 5-Gameweek Analysis:**
+- Players with fixture advantage (5-GW > 1-GW): {fixture_advantage_players}
+- Players with fixture disadvantage (tough upcoming): {fixture_disadvantage_players}
+- 5-GW leaders different from 1-GW: {leaders_different}
+"""
+    except Exception as e:
+        print(f"⚠️ Error in strategic analysis: {e}")
+        return "**🎯 Strategic 5-Gameweek Analysis:** Analysis unavailable"
+
+
+def create_form_analytics_display(players_with_xp: pd.DataFrame, mo_ref) -> object:
+    """
+    Create form analytics dashboard with hot/cold player detection
+    
+    Args:
+        players_with_xp: DataFrame with form and XP data
+        mo_ref: Marimo reference for UI components
+        
+    Returns:
+        Marimo UI component with form analytics
+    """
+    if players_with_xp.empty or 'momentum' not in players_with_xp.columns:
+        return mo_ref.md("⚠️ **No form data available** - load historical data first")
+    
+    try:
+        # Hot players analysis
+        hot_players = players_with_xp[players_with_xp['momentum'] == '🔥'].nlargest(8, 'xP')
+        cold_players = players_with_xp[players_with_xp['momentum'] == '❄️'].nsmallest(8, 'form_multiplier')
+        
+        # Value analysis with form
+        value_players = players_with_xp[
+            (players_with_xp['momentum'].isin(['🔥', '📈'])) & 
+            (players_with_xp['price'] <= 7.5)
+        ].nlargest(10, 'xP_per_price')
+        
+        # Expensive underperformers
+        expensive_poor = players_with_xp[
+            (players_with_xp['price'] >= 8.0) & 
+            (players_with_xp['momentum'].isin(['❄️', '📉']))
+        ].nsmallest(6, 'form_multiplier')
+        
+        insights = []
+        
+        if len(hot_players) > 0:
+            hot_columns = get_safe_columns(hot_players, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
+            insights.extend([
+                mo_ref.md("### 🔥 Hot Players (Prime Transfer Targets)"),
+                mo_ref.md(f"**{len(hot_players)} players in excellent recent form**"),
+                mo_ref.ui.table(
+                    hot_players[hot_columns].round(2),
+                    page_size=8
+                )
+            ])
+        
+        if len(value_players) > 0:
+            value_columns = get_safe_columns(value_players, ['web_name', 'position', 'price', 'xP', 'xP_per_price', 'momentum'])
+            insights.extend([
+                mo_ref.md("### 💎 Form + Value Players (Budget-Friendly Options)"),
+                mo_ref.md(f"**{len(value_players)} players with good form and great value**"),
+                mo_ref.ui.table(
+                    value_players[value_columns].round(3),
+                    page_size=10
+                )
+            ])
+        
+        if len(cold_players) > 0:
+            cold_columns = get_safe_columns(cold_players, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
+            insights.extend([
+                mo_ref.md("### ❄️ Cold Players (Sell Candidates)"),
+                mo_ref.md(f"**{len(cold_players)} players in poor recent form - consider selling**"),
+                mo_ref.ui.table(
+                    cold_players[cold_columns].round(2),
+                    page_size=8
+                )
+            ])
+        
+        if len(expensive_poor) > 0:
+            expensive_columns = get_safe_columns(expensive_poor, ['web_name', 'position', 'price', 'xP', 'recent_points_per_game', 'momentum'])
+            insights.extend([
+                mo_ref.md("### 💸 Expensive Underperformers (Priority Sells)"),
+                mo_ref.md(f"**{len(expensive_poor)} expensive players in poor form - sell to fund transfers**"),
+                mo_ref.ui.table(
+                    expensive_poor[expensive_columns].round(2),
+                    page_size=6
+                )
+            ])
+        
+        # Summary stats
+        if 'form_multiplier' in players_with_xp.columns:
+            momentum_counts = players_with_xp['momentum'].value_counts()
+            avg_multiplier = players_with_xp['form_multiplier'].mean()
+            
+            insights.append(mo_ref.md(f"""
+### 📊 Form Summary
+**Player Distribution:** 🔥 {momentum_counts.get('🔥', 0)} | 📈 {momentum_counts.get('📈', 0)} | ➡️ {momentum_counts.get('➡️', 0)} | 📉 {momentum_counts.get('📉', 0)} | ❄️ {momentum_counts.get('❄️', 0)}
+
+**Average Form Multiplier:** {avg_multiplier:.2f}
+
+**Transfer Strategy:** Target 🔥 hot and 📈 rising players, avoid ❄️ cold and 📉 declining players
+"""))
+        
+        return mo_ref.vstack(insights)
+        
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating form analytics: {e}")
+
+
+def create_squad_form_analysis(current_squad: pd.DataFrame, players_with_xp: pd.DataFrame, mo_ref) -> object:
+    """
+    Create current squad form analysis display
+    
+    Args:
+        current_squad: Current squad DataFrame
+        players_with_xp: DataFrame with form and XP data  
+        mo_ref: Marimo reference for UI components
+        
+    Returns:
+        Marimo UI component with squad form analysis
+    """
+    # Check data availability
+    squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
+    players_available = hasattr(players_with_xp, 'empty') and not players_with_xp.empty
+    momentum_available = hasattr(players_with_xp, 'columns') and 'momentum' in players_with_xp.columns
+    
+    # Create content based on data availability
+    if squad_available and players_available and momentum_available:
+        try:
+            # Merge squad with form data
+            squad_with_form = current_squad.merge(
+                players_with_xp[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
+                on='player_id', 
+                how='left'
+            )
+            
+            if not squad_with_form.empty:
+                # Squad form analysis
+                squad_insights = []
+                
+                # Count momentum distribution in squad
+                squad_momentum = squad_with_form['momentum'].value_counts()
+                squad_avg_form = squad_with_form['form_multiplier'].mean()
+                
+                # Identify problem players in squad
+                problem_players = squad_with_form[
+                    squad_with_form['momentum'].isin(['❄️', '📉'])
+                ].sort_values('form_multiplier')
+                
+                # Identify top performers in squad  
+                top_performers = squad_with_form[
+                    squad_with_form['momentum'].isin(['🔥', '📈'])
+                ].sort_values('xP', ascending=False)
+                
+                squad_insights.append(mo_ref.md("### 🔍 Current Squad Form Analysis"))
+                
+                # Squad overview
+                squad_insights.append(mo_ref.md(f"""
+**Your Squad Form Distribution:**
+- 🔥 Hot: {squad_momentum.get('🔥', 0)} players - 📈 Rising: {squad_momentum.get('📈', 0)} players
+- ➡️ Stable: {squad_momentum.get('➡️', 0)} players - 📉 Declining: {squad_momentum.get('📉', 0)} players - ❄️ Cold: {squad_momentum.get('❄️', 0)} players
+
+**Squad Average Form Multiplier:** {squad_avg_form:.2f}
+"""))
+                
+                # Squad health assessment
+                hot_count = squad_momentum.get('🔥', 0) + squad_momentum.get('📈', 0)
+                cold_count = squad_momentum.get('❄️', 0) + squad_momentum.get('📉', 0)
+                
+                if hot_count >= 8:
+                    health_status = "🔥 EXCELLENT - Squad is in great form, minimal transfers needed"
+                    transfer_priority = "Low"
+                elif hot_count >= 5:
+                    health_status = "📈 GOOD - Squad form is solid, consider tactical transfers"
+                    transfer_priority = "Medium"
+                elif cold_count >= 8:
+                    health_status = "❄️ POOR - Squad struggling, multiple transfers recommended"
+                    transfer_priority = "High"
+                else:
+                    health_status = "➡️ AVERAGE - Squad form is stable, monitor for improvements"
+                    transfer_priority = "Low"
+                
+                squad_insights.append(mo_ref.md("### 🎯 Squad Health Assessment"))
+                squad_insights.append(mo_ref.md(f"""
+{health_status}
+
+**Transfer Priority:** {transfer_priority}
+"""))
+                
+                # Show top performers if any
+                if not top_performers.empty:
+                    top_columns = get_safe_columns(top_performers, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
+                    squad_insights.append(mo_ref.md("### ⭐ Squad Stars (Keep!)"))
+                    squad_insights.append(mo_ref.ui.table(
+                        top_performers[top_columns].round(2),
+                        page_size=5
+                    ))
+                
+                # Show problem players if any
+                if not problem_players.empty:
+                    problem_columns = get_safe_columns(problem_players, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
+                    squad_insights.append(mo_ref.md("### ⚠️ Problem Players (Consider Selling)"))
+                    squad_insights.append(mo_ref.ui.table(
+                        problem_players[problem_columns].round(2),
+                        page_size=5
+                    ))
+                
+                return mo_ref.vstack(squad_insights)
+            else:
+                return mo_ref.md("⚠️ **Could not merge squad with form data**")
+        except Exception as e:
+            return mo_ref.md(f"❌ Error creating squad form analysis: {e}")
+    else:
+        # Debug information for missing data
+        debug_parts = []
+        if not squad_available:
+            debug_parts.append("No squad loaded")
+        if not players_available:
+            debug_parts.append("No player XP data")
+        if not momentum_available:
+            debug_parts.append("No form/momentum data")
+        
+        debug_msg = ", ".join(debug_parts)
+        return mo_ref.md(f"⚠️ **Squad form analysis unavailable**\n\n_{debug_msg}_")

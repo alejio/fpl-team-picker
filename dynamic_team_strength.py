@@ -617,7 +617,7 @@ class DynamicTeamStrength:
         return strength_ratings
 
 
-# Utility functions for backward compatibility
+# Team Strength Calculation Functions
 def get_dynamic_team_strength(target_gameweek: int,
                              teams_data: pd.DataFrame,
                              current_season_data: List[pd.DataFrame] = None,

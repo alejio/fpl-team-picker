@@ -927,7 +927,7 @@ class XPModel:
         return players_df
 
 
-# Utility functions for backward compatibility
+# Expected Points Calculation Functions
 def calculate_expected_points_single_gw(players_data: pd.DataFrame,
                                       teams_data: pd.DataFrame,
                                       xg_rates_data: pd.DataFrame,
