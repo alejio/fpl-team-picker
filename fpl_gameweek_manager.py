@@ -14,20 +14,30 @@ def __():
 def __(mo):
     mo.md(
         r"""
-        # FPL Gameweek Manager (XP-Optimized)
+        # 🎯 FPL Gameweek Manager
+        ## Advanced Weekly Decision Making Tool with Form Analytics
 
-        **Advanced Weekly Decision Making Tool with Form Analytics**
+        Transform your FPL strategy with data-driven weekly optimization and comprehensive form analysis.
         
-        1. Load team for previous gameweek from database
-        2. Calculate form-weighted expected XP for all players
-        3. **NEW**: Form analytics dashboard with hot/cold player insights
-        4. **NEW**: Current squad form analysis and transfer recommendations
-        5. Set constraints and run smart optimization (auto-selects 0-3 transfers)
-        6. Analyze captain and vice-captain options
+        ### 📋 Workflow Overview
+        1. **Configure Gameweek** - Select target gameweek for optimization
+        2. **Team Strength Analysis** - Dynamic strength ratings and venue adjustments  
+        3. **Expected Points Calculation** - Form-weighted XP with 1-GW vs 5-GW comparison
+        4. **Form Analytics Dashboard** - Hot/cold player insights and transfer targets
+        5. **Squad Health Assessment** - Current team form analysis
+        6. **Performance Trends** - Interactive player tracking over time
+        7. **Fixture Analysis** - 5-gameweek difficulty heatmaps
+        8. **Transfer Optimization** - Smart 0-3 transfer scenarios with budget analysis
+        9. **Captain Selection** - Risk-adjusted captaincy recommendations
         
-        *Built with advanced XP modeling, form weighting, and optimization algorithms for competitive advantage!*
+        ### 🔥 Key Features
+        - **Form-weighted predictions**: 70% recent form + 30% season baseline
+        - **Hot/Cold detection**: Player momentum indicators (🔥📈➡️📉❄️)
+        - **Strategic horizon**: Compare 1-GW tactical vs 5-GW strategic decisions
+        - **Premium acquisition planning**: Multi-transfer scenarios for expensive targets
+        - **Budget pool analysis**: Total available funds including sellable squad value
         
-        **🔥 New Features:** Hot/Cold player detection, form multipliers, transfer risk analysis
+        ---
         """
     )
     return
@@ -46,7 +56,17 @@ def __():
 
 @app.cell
 def __(mo):
-    mo.md("## 1. Configure Gameweek")
+    mo.md(
+        r"""
+        ## 1️⃣ Configure Gameweek
+        
+        **Start by selecting your target gameweek for optimization.**
+        
+        The system will load your team from the previous gameweek and analyze transfer opportunities for the upcoming fixtures.
+        
+        ---
+        """
+    )
     return
 
 
@@ -68,9 +88,11 @@ def __(mo):
     )
     
     mo.vstack([
-        mo.md("**Select Target Gameweek:**"),
-        mo.md("_We'll load your team from the previous gameweek and optimize for the target gameweek_"),
-        gameweek_input
+        mo.md("### 📅 Select Target Gameweek"),
+        mo.md("*We'll load your team from the previous gameweek and optimize for the target gameweek*"),
+        mo.md(""),
+        gameweek_input,
+        mo.md("---")
     ])
     
     return (gameweek_input,)
@@ -230,7 +252,20 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
 
 @app.cell
 def __(mo):
-    mo.md("## 2. Team Strength Analysis")
+    mo.md(
+        r"""
+        ## 2️⃣ Team Strength Analysis
+        
+        **Dynamic team strength ratings with seasonal transitions and venue adjustments.**
+        
+        Our model evolves throughout the season:
+        - **Early Season**: Blend 2024-25 baseline with current performance
+        - **GW8+ Focus**: Pure current season form and results
+        - **Home/Away**: Contextual difficulty scaling by venue
+        
+        ---
+        """
+    )
     return
 
 
@@ -252,7 +287,22 @@ def __(gameweek_input, mo, pd):
 
 @app.cell
 def __(mo):
-    mo.md("## 3. Calculate Expected Points (XP) for All Players")
+    mo.md(
+        r"""
+        ## 3️⃣ Expected Points Engine
+        
+        **Form-weighted XP calculations with strategic 1-GW vs 5-GW comparison.**
+        
+        ### Model Features:
+        - **Form Weighting**: 70% recent form + 30% season baseline for responsive predictions
+        - **Statistical Estimation**: Advanced modeling for new transfers and missing data
+        - **Dual Horizons**: Compare immediate (1-GW) vs strategic (5-GW) value
+        - **Enhanced Minutes**: SBP + availability + price-based durability modeling
+        - **Fixture Scaling**: Dynamic difficulty multipliers by opponent strength
+        
+        ---
+        """
+    )
     return
 
 
@@ -498,7 +548,28 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
 
 @app.cell
 def __(mo):
-    mo.md("## 4. Form Analytics Dashboard")
+    mo.md(
+        r"""
+        ## 4️⃣ Form Analytics Dashboard
+        
+        **Advanced form detection with momentum indicators and transfer insights.**
+        
+        ### Player Classification:
+        - 🔥 **Hot Players**: Excellent recent form - prime transfer targets
+        - 📈 **Rising Players**: Improving trend - good value opportunities  
+        - ➡️ **Stable Players**: Consistent performance - reliable options
+        - 📉 **Declining Players**: Concerning trend - monitor closely
+        - ❄️ **Cold Players**: Poor recent form - consider selling
+        
+        ### Analysis Categories:
+        - **Prime Transfer Targets**: Hot players with strong XP projections
+        - **Budget-Friendly Options**: Form + value combinations under £7.5m
+        - **Sell Candidates**: Cold players in poor form
+        - **Priority Sells**: Expensive underperformers (£8m+ in poor form)
+        
+        ---
+        """
+    )
     return
 
 
@@ -719,7 +790,23 @@ def __(current_squad, players_with_xp, mo):
 
 @app.cell
 def __(mo):
-    mo.md("## 5. Player Performance Trends")
+    mo.md(
+        r"""
+        ## 5️⃣ Player Performance Trends
+        
+        **Interactive historical performance tracking and multi-player comparisons.**
+        
+        Visualize how key attributes change over gameweeks:
+        - **Points per gameweek**: Overall performance trends
+        - **Expected goals & assists**: Underlying attacking threat
+        - **Minutes played**: Rotation risk and game time trends
+        - **Value ratios**: Points per £1m efficiency over time
+        
+        *Use the dropdowns below to explore individual players or compare multiple options.*
+        
+        ---
+        """
+    )
     return
 
 
@@ -826,7 +913,22 @@ def __(mo, player_selector, attribute_selector, multi_player_selector, trends_da
 
 @app.cell
 def __(mo):
-    mo.md("## 6. Fixture Difficulty Analysis")
+    mo.md(
+        r"""
+        ## 6️⃣ Fixture Difficulty Analysis
+        
+        **5-gameweek fixture heatmaps with dynamic team strength integration.**
+        
+        ### Difficulty Indicators:
+        - 🟢 **Easy Fixtures** (>1.15): Favorable matchups for attacking returns
+        - 🟡 **Average Fixtures** (0.85-1.15): Neutral difficulty expectations
+        - 🔴 **Hard Fixtures** (<0.85): Challenging opponents, defensive focus
+        
+        *Difficulty scores update dynamically based on current team strength ratings*
+        
+        ---
+        """
+    )
     return
 
 
@@ -849,7 +951,29 @@ def __(gameweek_input, mo, pd):
 
 @app.cell
 def __(mo):
-    mo.md("## 7. Team Optimization & Constraints")
+    mo.md(
+        r"""
+        ## 7️⃣ Strategic Transfer Optimization
+        
+        **Smart 0-3 transfer analysis with advanced budget pool calculations.**
+        
+        ### Optimization Features:
+        - **Intelligent Transfer Count**: Auto-selects optimal 0-3 transfers based on net XP after penalties
+        - **Premium Acquisition Planning**: Multi-transfer scenarios for expensive targets
+        - **Budget Pool Analysis**: Total available funds including sellable squad value
+        - **Constraint Support**: Force include/exclude specific players
+        - **5-GW Strategic Focus**: Decisions based on fixture outlook and form trends
+        
+        ### Transfer Scenarios Analyzed:
+        1. **No Transfers**: Keep current squad (baseline)
+        2. **1 Transfer**: Replace worst 5-GW performer
+        3. **2 Transfers**: Target two weakest links
+        4. **3 Transfers**: Major squad overhaul
+        5. **Premium Scenarios**: Direct upgrades and funded acquisitions
+        
+        ---
+        """
+    )
     return
 
 
@@ -886,17 +1010,31 @@ def __(players_with_xp, mo):
             )
             
             constraints_ui = mo.vstack([
-                mo.md("### 🎯 Player Constraints"),
-                mo.md("**Set constraints before optimization:**"),
+                mo.md("### 🎯 Transfer Constraints"),
+                mo.md("*Optional: Set player constraints before running optimization*"),
+                mo.md(""),
                 must_include_dropdown,
+                mo.md(""),
                 must_exclude_dropdown,
+                mo.md(""),
                 mo.md("---"),
-                mo.md("### 🧠 Strategic 5-GW Optimization"),
-                mo.md("**The optimizer will automatically decide the optimal number of transfers (0-3) based on 5-gameweek net expected points after penalties.**"),
-                optimize_button
+                mo.md("### 🚀 Run Optimization"),
+                mo.md("*The optimizer analyzes all transfer scenarios (0-3 transfers) and recommends the strategy with highest net expected points after penalties.*"),
+                mo.md(""),
+                optimize_button,
+                mo.md("---")
             ])
         else:
-            constraints_ui = mo.md("Calculate XP first to enable optimization")
+            constraints_ui = mo.vstack([
+                mo.md("### ⚠️ Optimization Unavailable"),
+                mo.md("*Please complete the expected points calculation first to enable transfer optimization.*"),
+                mo.md(""),
+                mo.md("**Required Steps:**"),
+                mo.md("1. Select a target gameweek above"),
+                mo.md("2. Wait for XP calculations to complete"),
+                mo.md("3. Return here to run optimization"),
+                mo.md("---")
+            ])
             must_include_dropdown = None
             must_exclude_dropdown = None
             optimize_button = None
@@ -1476,7 +1614,21 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
 
 @app.cell
 def __(mo):
-    mo.md("## 8. Captain Selection")
+    mo.md(
+        r"""
+        ## 8️⃣ Captain Selection
+        
+        **Risk-adjusted captaincy recommendations based on expected points analysis.**
+        
+        Captain selection considers:
+        - **Double Points Potential**: XP × 2 for captain scoring
+        - **Fixture Difficulty**: Opponent strength and venue
+        - **Recent Form**: Hot/cold momentum indicators
+        - **Minutes Certainty**: Start probability and injury risk
+        
+        ---
+        """
+    )
     return
 
 
@@ -1485,7 +1637,17 @@ def __(optimal_starting_11, mo):
     # Captain Selection
     def select_captain():
         if optimal_starting_11.empty:
-            return mo.md("Optimize team first to select captain")
+            return mo.vstack([
+                mo.md(""),
+                mo.md("### 👑 Captain Selection Waiting"),
+                mo.md("**Please complete team optimization first to enable captain selection.**"),
+                mo.md(""),
+                mo.md("🔄 **Required steps:**"),
+                mo.md("1. Run transfer optimization above"),
+                mo.md("2. Wait for starting 11 to be selected"),
+                mo.md("3. Captain recommendations will appear here"),
+                mo.md("---")
+            ])
         
         def get_safe_columns(df, preferred_columns):
             """Get columns that exist in the DataFrame"""
