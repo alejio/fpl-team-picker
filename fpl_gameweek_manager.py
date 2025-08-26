@@ -1,6 +1,5 @@
 import marimo
 
-__generated_with = "0.14.16"
 app = marimo.App(width="medium")
 
 
@@ -48,10 +47,8 @@ def __():
     import pandas as pd
     import numpy as np
     from datetime import datetime
-    import warnings
-    warnings.filterwarnings('ignore')
     
-    return pd, np, datetime, warnings
+    return pd, np, datetime
 
 
 @app.cell
@@ -72,7 +69,6 @@ def __(mo):
 
 @app.cell
 def __(pd):
-    # Import data loading functions from new module
     from fpl_data_loader import fetch_fpl_data, fetch_manager_team, process_current_squad, load_gameweek_datasets
     
     return fetch_fpl_data, fetch_manager_team, process_current_squad, load_gameweek_datasets
@@ -100,31 +96,23 @@ def __(mo):
 
 @app.cell
 def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input, mo, pd):
-    # Load data when gameweek is provided
     if gameweek_input.value:
-        # Load data for target gameweek
         target_gw = gameweek_input.value
         
-        # Handle different gameweek scenarios
         if target_gw == 1:
-            # GW1 - no previous gameweek data available
             previous_gw = None
             team_data = None
             current_squad = pd.DataFrame()
         else:
             previous_gw = target_gw - 1
-            # Load manager team from previous gameweek
             team_data = fetch_manager_team(previous_gw)
             
-            # Special handling for GW2 when it's in progress
             if target_gw == 2 and not team_data:
                 print("⚠️ No GW1 team data found - GW2 may be in progress")
                 print("💡 Try loading GW1 first to see your initial team")
         
-        # Get FPL data and calculate XP for target gameweek
         players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(target_gw)
         
-        # Check what data is available for better guidance
         def check_data_availability():
             """Check what gameweek data is currently available"""
             try:
@@ -132,7 +120,7 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 client = FPLDataClient()
                 
                 available_gws = []
-                for gw in range(1, 6):  # Check first 5 gameweeks
+                for gw in range(1, 6):
                     try:
                         gw_data = client.get_gameweek_live_data(gw)
                         if not gw_data.empty:
@@ -151,24 +139,19 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
             print("⚠️ No gameweek data found in database")
         
         if target_gw == 1:
-            # GW1 - no previous team data available
-            # Check what columns are available in players DataFrame
             available_columns = list(players.columns)
             print(f"🔍 Available columns in players DataFrame: {available_columns}")
             
-            # Select columns that exist for display
             display_columns = []
             for col_name in ['web_name', 'position', 'name', 'price', 'selected_by_percent']:
                 if col_name in available_columns:
                     display_columns.append(col_name)
             
-            # Fallback columns if primary ones don't exist
             if not display_columns:
-                display_columns = available_columns[:5]  # Take first 5 columns as fallback
+                display_columns = available_columns[:5]
             
             print(f"📊 Using columns for display: {display_columns}")
             
-            # Show data availability info for GW1
             data_info = ""
             if available_gameweeks:
                 if 1 in available_gameweeks:
@@ -190,7 +173,6 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 )
             ])
         elif team_data:
-            # Process current squad using the imported function
             current_squad = process_current_squad(team_data, players, teams)
             
             team_display = mo.vstack([
@@ -199,12 +181,11 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 mo.md(f"**Optimizing for GW{target_gw}**"),
                 mo.md("**Current Squad:**"),
                 mo.ui.table(
-                    current_squad[['web_name', 'position', 'price']].round(2),  # Simplified columns to avoid missing ones
+                    current_squad[['web_name', 'position', 'price']].round(2),
                     page_size=15
                 )
             ])
         else:
-            # Handle case where team data couldn't be loaded
             if target_gw == 2:
                 available_info = ""
                 if available_gameweeks:
@@ -271,10 +252,8 @@ def __(mo):
 
 @app.cell
 def __(gameweek_input, mo, pd):
-    # Import visualization function from new module
     from fpl_visualization import create_team_strength_visualization
     
-    # Only show if gameweek is selected
     if gameweek_input.value:
         team_strength_analysis = create_team_strength_visualization(gameweek_input.value, mo)
     else:
@@ -308,7 +287,6 @@ def __(mo):
 
 @app.cell
 def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd):
-    # Import visualization functions from new module
     from fpl_visualization import create_xp_results_display
     
     def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek, live_data_hist=None):
@@ -317,65 +295,42 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md("Select gameweek and load data first"), empty_df
         
-        print(f"🧠 Calculating expected points using improved XP model for GW{target_gameweek}...")
-        print(f"📊 Input data: {len(players_data)} players, {len(teams_data)} teams, {len(fixtures_data)} fixtures")
-        
         try:
-            # Import and use the new XP model
-            print("🔄 Importing XP model...")
             from xp_model import XPModel
             
-            # Initialize model with form weighting enabled
-            print("🔄 Initializing XP model...")
             xp_model = XPModel(
-                form_weight=0.7,  # 70% recent form, 30% season average
-                form_window=5,    # Last 5 gameweeks for form
+                form_weight=0.7,
+                form_window=5,
                 debug=True
             )
-            print("✅ XP model initialized successfully")
             
-            # Calculate both single-GW and 5-GW XP for strategic comparison
-            print("🔮 Calculating single-gameweek XP for tactical analysis...")
             players_1gw = xp_model.calculate_expected_points(
                 players_data=players_data,
                 teams_data=teams_data,
                 xg_rates_data=xg_rates_data,
                 fixtures_data=fixtures_data,
                 target_gameweek=target_gameweek,
-                live_data=live_data_hist,  # Historical form data
+                live_data=live_data_hist,
                 gameweeks_ahead=1
             )
             
-            print("🎯 Calculating 5-gameweek strategic horizon XP...")
             players_5gw = xp_model.calculate_expected_points(
                 players_data=players_data,
                 teams_data=teams_data,
                 xg_rates_data=xg_rates_data,
                 fixtures_data=fixtures_data,
                 target_gameweek=target_gameweek,
-                live_data=live_data_hist,  # Historical form data
+                live_data=live_data_hist,
                 gameweeks_ahead=5
             )
             
             try:
-                # Debug: Check available columns and data integrity
-                print(f"🔍 1-GW columns: {list(players_1gw.columns)}")
-                print(f"🔍 5-GW columns: {list(players_5gw.columns)}")
-                print(f"🔍 1-GW shape: {players_1gw.shape}")
-                print(f"🔍 5-GW shape: {players_5gw.shape}")
-                
-                # Merge both calculations for comparison
-                # First check if player_id column exists in both dataframes
                 if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
-                    # Check which columns are actually available for merging
                     merge_cols = ['player_id']
                     for col_key in ['xP', 'xP_per_price', 'fixture_difficulty']:
                         if col_key in players_5gw.columns:
                             merge_cols.append(col_key)
                     
-                    print(f"🔗 Merging columns: {merge_cols}")
-                    
-                    # Create suffix mapping to avoid conflicts
                     suffix_data = players_5gw[merge_cols].copy()
                     for merge_col in merge_cols:
                         if merge_col != 'player_id':
@@ -387,82 +342,47 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                         on='player_id',
                         how='left'
                     )
-                    print(f"✅ Successfully merged data for {len(players_xp)} players")
                     
                 else:
-                    print("⚠️ Warning: player_id column missing, using single-GW data only")
                     players_xp = players_1gw.copy()
-                    # Add placeholder 5-GW columns
-                    players_xp['xP_5gw'] = players_xp['xP'] * 4.0  # Approximate scaling
+                    players_xp['xP_5gw'] = players_xp['xP'] * 4.0
                     players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
                     players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
                     
             except Exception as e:
-                print(f"⚠️ Error merging 1-GW and 5-GW data: {e}")
-                print("🔧 Using single-GW data with estimated 5-GW projections")
                 players_xp = players_1gw.copy()
-                # Add placeholder 5-GW columns
-                players_xp['xP_5gw'] = players_xp['xP'] * 4.0  # Approximate scaling
+                players_xp['xP_5gw'] = players_xp['xP'] * 4.0
                 players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
                 players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
             
-            # Add strategic metrics with error handling
             try:
-                players_xp['xP_horizon_advantage'] = players_xp['xP_5gw'] - (players_xp['xP'] * 5)  # 5-GW advantage over simple scaling
+                players_xp['xP_horizon_advantage'] = players_xp['xP_5gw'] - (players_xp['xP'] * 5)
                 players_xp['fixture_outlook'] = players_xp['fixture_difficulty_5gw'].apply(
                     lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
                 )
-                print(f"✅ Added strategic metrics to {len(players_xp)} players")
             except Exception as e:
-                print(f"⚠️ Error adding strategic metrics: {e}")
                 players_xp['xP_horizon_advantage'] = 0
                 players_xp['fixture_outlook'] = '🟡 Average'
             
-            # XP calculation complete - display logic now handled by visualization module
-            
-            # Use the new visualization function
             return create_xp_results_display(players_xp, target_gameweek, mo), players_xp
             
         except ImportError as e:
-            print(f"⚠️ New XP model not available: {e}")
-            # Return empty dataframe with basic structure to prevent downstream errors
             empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md("❌ Could not load improved XP model - check xp_model.py"), empty_df
         except Exception as e:
-            print(f"❌ Error calculating XP: {e}")
-            # Return empty dataframe with basic structure to prevent downstream errors
             empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
     
-    # Debug current state
-    print("🔍 XP Calculation Debug:")
-    print(f"  - players.empty: {players.empty if hasattr(players, 'empty') else 'not available'}")
-    print(f"  - gameweek_input.value: {gameweek_input.value if hasattr(gameweek_input, 'value') else 'not available'}")
-    print(f"  - players shape: {players.shape if hasattr(players, 'shape') else 'not available'}")
-    
-    # Only calculate XP if we have valid data
     try:
         if not players.empty and gameweek_input.value:
-            print(f"🚀 Starting XP calculation for {len(players)} players...")
             xp_result, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
-            print(f"✅ XP calculation completed, returned {len(players_with_xp)} players with XP data")
-            print(f"📊 players_with_xp type: {type(players_with_xp)}")
-            print(f"📊 players_with_xp shape: {players_with_xp.shape if hasattr(players_with_xp, 'shape') else 'no shape'}")
         else:
-            print(f"❌ XP calculation skipped - players empty: {players.empty}, gameweek: {gameweek_input.value}")
             xp_result = mo.md("Load gameweek data first")
-            # Create empty dataframe with expected structure to prevent downstream errors
             players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
-            print("⚠️ No data loaded, using empty dataframe")
     except Exception as e:
-        print(f"❌ CRITICAL ERROR in XP calculation cell: {e}")
-        import traceback
-        traceback.print_exc()
         xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
-        # Ensure we always return a valid dataframe
         players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
     
-    # Display the result
     xp_result
     
     return players_with_xp
@@ -497,7 +417,6 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
-    # Form Analytics Dashboard - Using visualization module
     from fpl_visualization import create_form_analytics_display
     
     form_insights_display = create_form_analytics_display(players_with_xp, mo)
@@ -506,7 +425,6 @@ def __(players_with_xp, mo):
 
 @app.cell
 def __(current_squad, players_with_xp, mo):
-    # Current Squad Form Analysis - Using visualization module
     from fpl_visualization import create_squad_form_analysis
     
     squad_form_content = create_squad_form_analysis(current_squad, players_with_xp, mo)
@@ -519,16 +437,13 @@ def __(current_squad, players_with_xp, mo):
         for pref_col in preferred_columns:
             if pref_col in available_columns:
                 safe_columns.append(pref_col)
-        return safe_columns if safe_columns else available_columns[:3]  # Fallback to first 3 columns
+        return safe_columns if safe_columns else available_columns[:3]
     
-    # Check data availability without early returns
     squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
     players_available = hasattr(players_with_xp, 'empty') and not players_with_xp.empty
     momentum_available = hasattr(players_with_xp, 'columns') and 'momentum' in players_with_xp.columns
     
-    # Create content based on data availability
     if squad_available and players_available and momentum_available:
-        # Merge squad with form data
         squad_with_form = current_squad.merge(
             players_with_xp[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
             on='player_id', 
@@ -536,26 +451,21 @@ def __(current_squad, players_with_xp, mo):
         )
         
         if not squad_with_form.empty:
-            # Squad form analysis
             squad_insights = []
             
-            # Count momentum distribution in squad
             squad_momentum = squad_with_form['momentum'].value_counts()
             squad_avg_form = squad_with_form['form_multiplier'].mean()
             
-            # Identify problem players in squad
             problem_players = squad_with_form[
                 squad_with_form['momentum'].isin(['❄️', '📉'])
             ].sort_values('form_multiplier')
             
-            # Identify top performers in squad  
             top_performers = squad_with_form[
                 squad_with_form['momentum'].isin(['🔥', '📈'])
             ].sort_values('xP', ascending=False)
             
             squad_insights.append(mo.md("### 🔍 Current Squad Form Analysis"))
             
-            # Squad overview
             squad_insights.append(mo.md(f"""
             **Your Squad Form Distribution:**
             - 🔥 Hot: {squad_momentum.get('🔥', 0)} players - 📈 Rising: {squad_momentum.get('📈', 0)} players
@@ -564,7 +474,6 @@ def __(current_squad, players_with_xp, mo):
             **Squad Average Form Multiplier:** {squad_avg_form:.2f}
             """))
             
-            # Squad health assessment
             hot_count = squad_momentum.get('🔥', 0) + squad_momentum.get('📈', 0)
             cold_count = squad_momentum.get('❄️', 0) + squad_momentum.get('📉', 0)
             
@@ -588,7 +497,6 @@ def __(current_squad, players_with_xp, mo):
             **Transfer Priority:** {transfer_priority}
             """))
             
-            # Show top performers if any
             if not top_performers.empty:
                 top_columns = get_safe_columns(top_performers, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
                 squad_insights.append(mo.md("### ⭐ Squad Stars (Keep!)"))
@@ -597,7 +505,6 @@ def __(current_squad, players_with_xp, mo):
                     page_size=5
                 ))
             
-            # Show problem players if any
             if not problem_players.empty:
                 problem_columns = get_safe_columns(problem_players, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
                 squad_insights.append(mo.md("### ⚠️ Problem Players (Consider Selling)"))
@@ -610,7 +517,6 @@ def __(current_squad, players_with_xp, mo):
         else:
             squad_form_content = mo.md("⚠️ **Could not merge squad with form data**")
     else:
-        # Debug information for missing data
         debug_parts = []
         if not squad_available:
             debug_parts.append("No squad loaded")
@@ -649,22 +555,14 @@ def __(mo):
 
 @app.cell
 def __(mo, pd, players_with_xp):
-    # Import visualization function from new module
     from fpl_visualization import create_player_trends_visualization
     
-    # Create the trend analysis components - trends are independent of XP calculations
-    # They use live historical data from the API directly
     try:
-        print(f"🔍 Creating trends visualization (loads historical data independently)")
-        
-        # Use players_with_xp if available for names, otherwise use empty DataFrame
         player_data = players_with_xp if hasattr(players_with_xp, 'empty') and not players_with_xp.empty else pd.DataFrame()
         
         player_opts, attr_opts, trends_data = create_player_trends_visualization(player_data)
-        print(f"✅ Trends created: {len(player_opts)} players, {len(attr_opts)} attributes")
         
     except Exception as e:
-        print(f"❌ Error creating trends: {e}")
         player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
     
     return player_opts, attr_opts, trends_data
@@ -672,22 +570,21 @@ def __(mo, pd, players_with_xp):
 
 @app.cell
 def __(mo, player_opts, attr_opts):
-    # Player and attribute selectors
     if player_opts and attr_opts:
         player_selector = mo.ui.dropdown(
-            options=player_opts,  # All players available
+            options=player_opts,
             label="Select Player:",
-            value=None  # Don't set default value to avoid validation issues
+            value=None
         )
         
         attribute_selector = mo.ui.dropdown(
             options=attr_opts,
             label="Select Attribute:",
-            value=None  # Don't set default value to avoid validation issues
+            value=None
         )
         
         multi_player_selector = mo.ui.multiselect(
-            options=player_opts,  # All players available for comparison
+            options=player_opts,
             label="Compare Multiple Players (optional):",
             value=[]
         )
@@ -716,22 +613,14 @@ def __(mo, player_opts, attr_opts):
 
 @app.cell
 def __(mo, player_selector, attribute_selector, multi_player_selector, trends_data, pd):
-    # Import trends chart function from visualization module
     from fpl_visualization import create_trends_chart
     
-    # Generate chart when selectors have values
     if (player_selector is not None and hasattr(player_selector, 'value') and player_selector.value and 
         attribute_selector is not None and hasattr(attribute_selector, 'value') and attribute_selector.value):
         
         multi_values = multi_player_selector.value if multi_player_selector is not None and hasattr(multi_player_selector, 'value') else []
-        # Extract actual values from selectors
         selected_player_id = player_selector.value
         selected_attr_val = attribute_selector.value
-        
-        print(f"🔍 Chart inputs: player={selected_player_id}, attr={selected_attr_val}")
-        print(f"🔍 Player type: {type(selected_player_id)}, Attr type: {type(selected_attr_val)}")
-        print(f"🔍 Trends data shape: {trends_data.shape}")
-        print(f"🔍 Trends data columns: {list(trends_data.columns)}")
         
         trends_chart = create_trends_chart(
             trends_data, 
@@ -771,10 +660,8 @@ def __(mo):
 
 @app.cell
 def __(gameweek_input, mo, pd):
-    # Import fixture difficulty visualization from new module
     from fpl_visualization import create_fixture_difficulty_visualization
     
-    # Only show if gameweek is selected
     if gameweek_input.value:
         fixture_analysis = create_fixture_difficulty_visualization(gameweek_input.value, 5, mo)
     else:
@@ -816,12 +703,9 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
-    # Create player constraint UI and optimization button with error handling
     try:
         if not players_with_xp.empty:
-            # Create options for dropdowns
             player_options = []
-            # Use 5-GW XP if available, otherwise fall back to regular XP
             sort_column = 'xP_5gw' if 'xP_5gw' in players_with_xp.columns else 'xP'
             
             for _, player in players_with_xp.sort_values(['position', sort_column], ascending=[True, False]).iterrows():
@@ -877,7 +761,6 @@ def __(players_with_xp, mo):
             optimize_button = None
             
     except Exception as e:
-        print(f"⚠️ Error creating optimization UI: {e}")
         constraints_ui = mo.md("⚠️ Error creating optimization interface - calculate XP first")
         must_include_dropdown = None
         must_exclude_dropdown = None
@@ -890,23 +773,17 @@ def __(players_with_xp, mo):
 
 @app.cell
 def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_include_dropdown, must_exclude_dropdown):
-    # Import optimization functions from dedicated module
     from fpl_optimization import optimize_team_with_transfers
     
-    # Execute optimization when button is clicked
     optimal_starting_11 = []
     optimization_display = None
     optimal_scenario = {}
     
     if optimize_button is not None and optimize_button.value:
-        # Get constraint sets
         must_include_ids = set(must_include_dropdown.value) if must_include_dropdown is not None and must_include_dropdown.value else set()
         must_exclude_ids = set(must_exclude_dropdown.value) if must_exclude_dropdown is not None and must_exclude_dropdown.value else set()
         
-        print(f"🎯 Starting transfer optimization with {len(must_include_ids)} must-include, {len(must_exclude_ids)} must-exclude")
-        
         try:
-            # Run optimization using the module
             result = optimize_team_with_transfers(
                 current_squad=current_squad,
                 team_data=team_data, 
@@ -915,20 +792,16 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                 must_exclude_ids=must_exclude_ids
             )
             
-            # Unpack the results
             if isinstance(result, tuple) and len(result) == 3:
                 optimization_display, optimal_squad_df, optimal_scenario = result
                 
-                # Extract starting 11 from optimal squad
                 if not optimal_squad_df.empty:
                     from fpl_optimization import get_best_starting_11
                     optimal_starting_11, formation, xp_total = get_best_starting_11(optimal_squad_df)
                     
-                    # Create starting 11 display
                     if optimal_starting_11:
                         starting_11_df = pd.DataFrame(optimal_starting_11)
                         
-                        # Display columns that are likely to exist
                         display_cols = []
                         for disp_col in ['web_name', 'position', 'name', 'price', 'xP', 'xP_5gw', 'fixture_outlook']:
                             if disp_col in starting_11_df.columns:
@@ -947,20 +820,17 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
                 else:
                     optimal_starting_11 = []
             else:
-                # Fallback handling
                 optimization_display = result if result else mo.md("⚠️ Optimization completed but no results returned")
                 optimal_starting_11 = []
                 optimal_scenario = {}
                 
         except Exception as e:
-            print(f"❌ Optimization error: {e}")
             optimization_display = mo.md(f"❌ Optimization failed: {str(e)}")
             optimal_starting_11 = []
             optimal_scenario = {}
     else:
         optimization_display = mo.md("👆 **Click the optimization button above to analyze transfer scenarios**")
     
-    # Display the results
     optimization_display
     
     return optimal_starting_11, optimization_display, optimal_scenario
@@ -988,13 +858,10 @@ def __(mo):
 
 @app.cell
 def __(optimal_starting_11, mo):
-    # Import captain selection function from dedicated module
     from fpl_optimization import select_captain
     
-    # Captain selection with proper header
     if isinstance(optimal_starting_11, list) and len(optimal_starting_11) > 0:
         try:
-            # Add section header
             header = mo.md(
                 r"""
                 ## 8️⃣ Captain Selection
@@ -1006,10 +873,8 @@ def __(optimal_starting_11, mo):
             )
             captain_recommendations = select_captain(optimal_starting_11, mo)
             
-            # Combine header and recommendations
             mo.vstack([header, captain_recommendations])
         except Exception as e:
-            print(f"⚠️ Captain selection error: {e}")
             mo.vstack([
                 mo.md("## 8️⃣ Captain Selection"),
                 mo.md(f"⚠️ **Captain selection error:** {str(e)}")
@@ -1053,14 +918,11 @@ def __(mo):
 
 @app.cell
 def __(mo):
-    # Summary
     mo.md(
         r"""
         ## ✅ Summary
         
         **FPL Gameweek Manager** - Advanced weekly decision making tool
-        
-        **Current Status:** All features restored and operational
         
         **Available Features:**
         - ✅ Gameweek data loading and team analysis
