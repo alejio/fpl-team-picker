@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "marimo>=0.14.16",
+    "marimo>=0.15.2",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",
     "pandas>=2.3.1",
@@ -15,6 +15,7 @@ dependencies = [
     "fpl-dataset-builder",
     "plotly>=6.3.0",
     "ruff>=0.12.10",
+    "fpl-team-picker",
 ]
 
 [dependency-groups]
@@ -26,5 +27,9 @@ dev = [
 fpl-season-planner = "fpl_team_picker.interfaces.season_planner:main"
 fpl-gameweek-manager = "fpl_team_picker.interfaces.gameweek_manager:main"
 
+[tool.uv]
+package = true
+
 [tool.uv.sources]
 fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
+fpl-team-picker = { path = ".", editable = true }
