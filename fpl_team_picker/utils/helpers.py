@@ -8,7 +8,7 @@ Common utility functions used across FPL gameweek management modules including:
 """
 
 import pandas as pd
-from typing import List, Optional, Dict, Any
+from typing import List
 
 
 def get_safe_columns(df: pd.DataFrame, preferred_columns: List[str]) -> List[str]:

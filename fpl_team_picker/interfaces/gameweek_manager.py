@@ -197,7 +197,7 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
             data_info = "⚠️ No gameweek data found in database"
         
         team_display = mo.vstack([
-            mo.md(f"### 🚀 GW1 Team Selection"),
+            mo.md("### 🚀 GW1 Team Selection"),
             mo.md(f"**Optimizing for GW{target_gw}**"),
             mo.md(data_info),
             mo.md("**Note:** No previous team data available for GW1. This will help you select your initial squad."),
@@ -351,7 +351,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             xp_result = create_xp_results_display(players_with_xp, gameweek_input.value, mo)
         else:
             xp_result = mo.md("Load gameweek data first")
-    except ImportError as e:
+    except ImportError:
         xp_result = mo.md("❌ Could not load XPModel - check xp_model.py")
     except Exception as e:
         xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")

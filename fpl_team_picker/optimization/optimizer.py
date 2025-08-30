@@ -523,8 +523,8 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
         mo.md(strategic_summary),
         mo.ui.table(scenarios_df, page_size=config.visualization.scenario_page_size),
         mo.md("---"),
-        mo.md(f"### 🏆 Optimal Starting 11 (Strategic):"),
-        mo.md(f"*Shows both 1-GW and 5-GW XP with fixture outlook*")
+        mo.md("### 🏆 Optimal Starting 11 (Strategic):"),
+        mo.md("*Shows both 1-GW and 5-GW XP with fixture outlook*")
     ])
     
     optimal_squad = best_scenario.get('squad', current_squad_with_xp)

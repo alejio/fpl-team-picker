@@ -88,26 +88,26 @@ def print_config_summary(config: FPLConfig) -> None:
     print("🔧 FPL Configuration Summary")
     print("=" * 50)
     
-    print(f"📊 XP Model:")
+    print("📊 XP Model:")
     print(f"  • Form Weight: {config.xp_model.form_weight:.1%} recent form")
     print(f"  • Form Window: {config.xp_model.form_window} gameweeks")
     print(f"  • Debug Mode: {'On' if config.xp_model.debug else 'Off'}")
     
-    print(f"\n💪 Team Strength:")
+    print("\n💪 Team Strength:")
     print(f"  • Historical Transition: GW{config.team_strength.historical_transition_gw}+")
     print(f"  • Rolling Window: {config.team_strength.rolling_window_size} games")
     print(f"  • Strength Range: {config.team_strength.min_strength:.1f} - {config.team_strength.max_strength:.1f}")
     
-    print(f"\n🔄 Optimization:")
+    print("\n🔄 Optimization:")
     print(f"  • Transfer Cost: {config.optimization.transfer_cost} points")
     print(f"  • Max Transfers: {config.optimization.max_transfers}")
     print(f"  • Premium Threshold: £{config.optimization.premium_player_threshold:.1f}m")
     
-    print(f"\n📈 Visualization:")
+    print("\n📈 Visualization:")
     print(f"  • Default Page Size: {config.visualization.default_page_size}")
     print(f"  • Chart Size: {config.visualization.chart_width}x{config.visualization.chart_height}")
     
-    print(f"\n⚽ Minutes Model:")
+    print("\n⚽ Minutes Model:")
     print(f"  • GKP Full Game Prob: {config.minutes_model.gkp_full_game_prob:.1%}")
     print(f"  • Premium Threshold: £{config.minutes_model.premium_price_threshold:.1f}m")
     
