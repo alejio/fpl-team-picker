@@ -11,7 +11,7 @@ def __():
 
 
 @app.cell
-def __():
+def __(mo):
     mo.md(
         r"""
         # FPL Expected Points (xP) Model
@@ -141,7 +141,6 @@ def __(np):
         Calculate expected minutes using probabilistic scenarios
         with correct availability_status codes from DATASET.md
         """
-        player_id = row['player_id']
         sbp = row.get('selected_by_percentage', 0)
         availability = row.get('availability_status', 'a')
         
@@ -496,7 +495,7 @@ def __(mo, difficulty_matrix, teams, multi_gw_fixtures, pd):
                 
                 # Format: "🟢 Chelsea (A) [0.826]"
                 return f"{indicator} {val}"
-            except:
+            except Exception:
                 return val
         return val
     
@@ -1719,7 +1718,7 @@ def __(constrained_team, pd, mo):
     # Display only constrained transfer risk analysis (after rerun button) with all rows
     if constrained_team and len(constrained_team) > 0:
         _df = pd.DataFrame(constrained_team)
-        _risk = _df[_df.get('transfer_risk', False) == True][
+        _risk = _df[_df.get('transfer_risk', False)][
             ['web_name', 'position', 'name', 'price_gbp', 'xP', 'transfer_risk']
         ].sort_values('price_gbp', ascending=False).round(3)
         mo.ui.table(_risk, page_size=15) if len(_risk) > 0 else "No players in your constrained team are flagged as high transfer risk - excellent squad stability!"

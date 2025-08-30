@@ -157,11 +157,11 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                         gw_data = client.get_gameweek_live_data(gw)
                         if not gw_data.empty:
                             available_gws.append(gw)
-                    except:
+                    except Exception:
                         continue
                 
                 return available_gws
-            except:
+            except Exception:
                 return []
         
         available_gameweeks = check_data_availability()

@@ -38,7 +38,7 @@ def validate_config_file(config_path: Path) -> List[str]:
         List of validation messages (empty if valid)
     """
     try:
-        config = load_config(config_path=config_path)
+        load_config(config_path=config_path)
         print("✅ Configuration file is valid!")
         return []
     except Exception as e:

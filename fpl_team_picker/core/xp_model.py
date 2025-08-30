@@ -14,11 +14,12 @@ Key Features:
 
 import pandas as pd
 import numpy as np
-from typing import Dict
 import warnings
-warnings.filterwarnings('ignore')
+from typing import Dict
 
 from fpl_team_picker.config import config
+
+warnings.filterwarnings('ignore')
 
 
 class XPModel:

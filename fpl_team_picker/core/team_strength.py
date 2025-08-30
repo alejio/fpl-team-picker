@@ -11,11 +11,12 @@ to current season performance once sufficient data is available.
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List
 import warnings
-warnings.filterwarnings('ignore')
+from typing import Dict, List
 
 from fpl_team_picker.config import config
+
+warnings.filterwarnings('ignore')
 
 
 class DynamicTeamStrength:
