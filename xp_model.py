@@ -980,3 +980,46 @@ def calculate_expected_points_multi_gw(players_data: pd.DataFrame,
         live_data=None,
         gameweeks_ahead=gameweeks_ahead
     )
+
+
+def merge_1gw_5gw_results(players_1gw: pd.DataFrame, players_5gw: pd.DataFrame) -> pd.DataFrame:
+    """
+    Merge 1GW and 5GW XP results with derived metrics
+    
+    Args:
+        players_1gw: DataFrame with 1-gameweek XP calculations
+        players_5gw: DataFrame with 5-gameweek XP calculations
+        
+    Returns:
+        DataFrame with merged results and derived metrics
+    """
+    if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
+        merge_cols = ['player_id'] + [col for col in ['xP', 'xP_per_price', 'fixture_difficulty'] if col in players_5gw.columns]
+        
+        # Create 5GW suffixed columns
+        suffix_data = players_5gw[merge_cols].copy()
+        for col in merge_cols:
+            if col != 'player_id':
+                suffix_data[f"{col}_5gw"] = suffix_data[col]
+                suffix_data = suffix_data.drop(col, axis=1)
+        
+        players_merged = players_1gw.merge(suffix_data, on='player_id', how='left')
+    else:
+        # Fallback: estimate 5GW from 1GW
+        players_merged = players_1gw.copy()
+        players_merged['xP_5gw'] = players_merged['xP'] * 4.0
+        players_merged['xP_per_price_5gw'] = players_merged.get('xP_per_price', players_merged['xP']) * 4.0
+        players_merged['fixture_difficulty_5gw'] = players_merged.get('fixture_difficulty', 1.0)
+    
+    # Add derived metrics
+    players_merged['xP_horizon_advantage'] = players_merged['xP_5gw'] - (players_merged['xP'] * 5)
+    
+    # Add fixture outlook if fixture_difficulty_5gw column exists
+    if 'fixture_difficulty_5gw' in players_merged.columns:
+        players_merged['fixture_outlook'] = players_merged['fixture_difficulty_5gw'].apply(
+            lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+        )
+    else:
+        players_merged['fixture_outlook'] = '🟡 Average'
+    
+    return players_merged

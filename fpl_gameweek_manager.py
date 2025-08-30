@@ -313,33 +313,6 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
     XP_FORM_WINDOW = 5    # 5 gameweek form window
     XP_DEBUG = True       # Enable debug logging
     
-    def merge_1gw_5gw_results(players_1gw, players_5gw):
-        """Merge 1GW and 5GW XP results with derived metrics"""
-        if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
-            merge_cols = ['player_id'] + [col for col in ['xP', 'xP_per_price', 'fixture_difficulty'] if col in players_5gw.columns]
-            
-            # Create 5GW suffixed columns
-            suffix_data = players_5gw[merge_cols].copy()
-            for col in merge_cols:
-                if col != 'player_id':
-                    suffix_data[f"{col}_5gw"] = suffix_data[col]
-                    suffix_data = suffix_data.drop(col, axis=1)
-            
-            players_merged = players_1gw.merge(suffix_data, on='player_id', how='left')
-        else:
-            # Fallback: estimate 5GW from 1GW
-            players_merged = players_1gw.copy()
-            players_merged['xP_5gw'] = players_merged['xP'] * 4.0
-            players_merged['xP_per_price_5gw'] = players_merged.get('xP_per_price', players_merged['xP']) * 4.0
-            players_merged['fixture_difficulty_5gw'] = players_merged.get('fixture_difficulty', 1.0)
-        
-        # Add derived metrics
-        players_merged['xP_horizon_advantage'] = players_merged['xP_5gw'] - (players_merged['xP'] * 5)
-        players_merged['fixture_outlook'] = players_merged['fixture_difficulty_5gw'].apply(
-            lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
-        )
-        
-        return players_merged
     
     # XP calculation logic moved to direct XPModel usage
     
@@ -348,7 +321,7 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
     
     try:
         if not players.empty and gameweek_input.value:
-            from xp_model import XPModel
+            from xp_model import XPModel, merge_1gw_5gw_results
             
             xp_model = XPModel(
                 form_weight=XP_FORM_WEIGHT,
