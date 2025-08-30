@@ -18,6 +18,8 @@ from typing import Dict
 import warnings
 warnings.filterwarnings('ignore')
 
+from fpl_team_picker.config import config
+
 
 class XPModel:
     """
@@ -31,20 +33,21 @@ class XPModel:
     """
     
     def __init__(self, 
-                 form_weight: float = 0.7,
-                 form_window: int = 5,
-                 debug: bool = False):
+                 form_weight: float = None,
+                 form_window: int = None,
+                 debug: bool = None):
         """
         Initialize XP Model
         
         Args:
-            form_weight: Weight given to recent form vs season average (0.7 = 70% form)
-            form_window: Number of recent gameweeks to consider for form (5 = last 5 GWs)
-            debug: Enable debug logging
+            form_weight: Weight given to recent form vs season average (defaults to config)
+            form_window: Number of recent gameweeks to consider for form (defaults to config)
+            debug: Enable debug logging (defaults to config)
         """
-        self.form_weight = form_weight
-        self.form_window = form_window
-        self.debug = debug
+        # Use config defaults if not provided
+        self.form_weight = form_weight if form_weight is not None else config.xp_model.form_weight
+        self.form_window = form_window if form_window is not None else config.xp_model.form_window
+        self.debug = debug if debug is not None else config.xp_model.debug
         
         # Model components
         self._team_strength_cache = {}
@@ -158,7 +161,7 @@ class XPModel:
         - GW8+: Pure current season performance (ignoring historical)
         """
         try:
-            from dynamic_team_strength import DynamicTeamStrength, load_historical_gameweek_data
+            from .team_strength import DynamicTeamStrength, load_historical_gameweek_data
             
             # Initialize dynamic team strength calculator
             calculator = DynamicTeamStrength(debug=self.debug)
@@ -309,7 +312,7 @@ class XPModel:
                 if player_id_col and raw_id_col:
                     # Select available columns from raw data
                     available_cols = [raw_id_col]
-                    for col in ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat']:
+                    for col in ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat', 'selected_by_percent']:
                         if col in raw_players.columns:
                             available_cols.append(col)
                     
@@ -318,10 +321,16 @@ class XPModel:
                         left_on=player_id_col, right_on=raw_id_col, how='left'
                     )
                     
+                    # Convert string columns to numeric to avoid division errors
+                    numeric_cols = ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat', 'selected_by_percent']
+                    for col in numeric_cols:
+                        if col in enhanced_data.columns:
+                            enhanced_data[col] = pd.to_numeric(enhanced_data[col], errors='coerce')
+                    
                     if self.debug:
                         print(f"✅ Enhanced estimation with raw data fields for {len(enhanced_data)} players")
                     
-                    # Use additional fields in estimation if available
+                    # Use additional fields in estimation if available (already converted to numeric above)
                     if 'ict_index' in enhanced_data.columns:
                         estimates['ict_factor'] = enhanced_data['ict_index'].fillna(0) / 100.0  # Normalize ICT
                     if 'creativity' in enhanced_data.columns:
@@ -371,20 +380,24 @@ class XPModel:
             
             # Price adjustment
             price = row[price_col]
-            if price >= 8.0:  # Premium players
-                price_multiplier = 1.4 + (price - 8.0) * 0.15
-            elif price >= 6.0:  # Mid-tier players
-                price_multiplier = 1.1 + (price - 6.0) * 0.15
-            elif price >= 4.5:  # Budget options
-                price_multiplier = 0.8 + (price - 4.5) * 0.2
+            cfg = config.statistical_estimation
+            if price >= cfg.premium_price_threshold:  # Premium players
+                price_multiplier = cfg.xg_premium_base_multiplier + (price - cfg.premium_price_threshold) * cfg.xg_premium_scale_factor
+            elif price >= cfg.mid_tier_price_threshold:  # Mid-tier players
+                price_multiplier = cfg.xg_mid_tier_base_multiplier + (price - cfg.mid_tier_price_threshold) * cfg.xg_mid_tier_scale_factor
+            elif price >= cfg.budget_price_threshold:  # Budget options
+                price_multiplier = cfg.xg_budget_base_multiplier + (price - cfg.budget_price_threshold) * cfg.xg_budget_scale_factor
             else:  # Very cheap players
-                price_multiplier = 0.5 + (price - 4.0) * 0.6
+                price_multiplier = cfg.xg_min_base_multiplier + (price - cfg.min_price_threshold) * cfg.xg_min_scale_factor
             
             # Team strength adjustment
-            team_multiplier = 0.7 + (row['team_strength'] - 0.7) * 0.8
+            team_multiplier = config.team_strength.min_strength + (row['team_strength'] - config.team_strength.min_strength) * config.statistical_estimation.xg_team_strength_factor
             
             # SBP adjustment
-            sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.3
+            sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
+            if pd.isna(sbp_value):
+                sbp_value = position_sbp_defaults.get(row['position'], 8.0)
+            sbp_multiplier = 1.0 + (sbp_value / 100) * config.statistical_estimation.xg_sbp_influence
             
             # Enhanced: ICT and threat factor adjustments for xG
             threat_multiplier = 1.0 + row.get('threat_factor', 0) * 0.4  # Threat strongly correlates with xG
@@ -403,18 +416,22 @@ class XPModel:
             
             # Price adjustment for creativity
             price = row[price_col]
-            if price >= 7.5:  # Premium creative players
-                price_multiplier = 1.5 + (price - 7.5) * 0.2
-            elif price >= 5.5:  # Mid-tier
-                price_multiplier = 1.0 + (price - 5.5) * 0.25
+            cfg = config.statistical_estimation
+            if price >= cfg.xa_premium_price_threshold:  # Premium creative players
+                price_multiplier = cfg.xa_premium_base_multiplier + (price - cfg.xa_premium_price_threshold) * cfg.xa_premium_scale_factor
+            elif price >= cfg.xa_mid_tier_price_threshold:  # Mid-tier
+                price_multiplier = cfg.xa_mid_tier_base_multiplier + (price - cfg.xa_mid_tier_price_threshold) * cfg.xa_mid_tier_scale_factor
             else:  # Budget players
-                price_multiplier = 0.6 + (price - 4.0) * 0.25
+                price_multiplier = cfg.xa_budget_base_multiplier + (price - cfg.min_price_threshold) * cfg.xa_budget_scale_factor
             
             # Team strength matters more for assists
-            team_multiplier = 0.6 + (row['team_strength'] - 0.7) * 1.0
+            team_multiplier = 0.6 + (row['team_strength'] - config.team_strength.min_strength) * config.statistical_estimation.xa_team_strength_factor
             
             # SBP adjustment
-            sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.25
+            sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
+            if pd.isna(sbp_value):
+                sbp_value = position_sbp_defaults.get(row['position'], 8.0)
+            sbp_multiplier = 1.0 + (sbp_value / 100) * 0.25
             
             # Enhanced: Creativity and influence factor adjustments for xA
             creativity_multiplier = 1.0 + row.get('creativity_factor', 0) * 0.5  # Creativity strongly correlates with xA
@@ -927,44 +944,44 @@ class XPModel:
         return players_df
 
 
-# Utility functions for backward compatibility
-def calculate_expected_points_single_gw(players_data: pd.DataFrame,
-                                      teams_data: pd.DataFrame,
-                                      xg_rates_data: pd.DataFrame,
-                                      fixtures_data: pd.DataFrame,
-                                      target_gameweek: int,
-                                      live_data: pd.DataFrame = None) -> pd.DataFrame:
+def merge_1gw_5gw_results(players_1gw: pd.DataFrame, players_5gw: pd.DataFrame) -> pd.DataFrame:
     """
-    Calculate expected points for single gameweek (backward compatibility)
+    Merge 1GW and 5GW XP results with derived metrics
+    
+    Args:
+        players_1gw: DataFrame with 1-gameweek XP calculations
+        players_5gw: DataFrame with 5-gameweek XP calculations
+        
+    Returns:
+        DataFrame with merged results and derived metrics
     """
-    model = XPModel(debug=False)
-    return model.calculate_expected_points(
-        players_data=players_data,
-        teams_data=teams_data,
-        xg_rates_data=xg_rates_data,
-        fixtures_data=fixtures_data,
-        target_gameweek=target_gameweek,
-        live_data=live_data,
-        gameweeks_ahead=1
-    )
-
-
-def calculate_expected_points_multi_gw(players_data: pd.DataFrame,
-                                     teams_data: pd.DataFrame,
-                                     xg_rates_data: pd.DataFrame,
-                                     fixtures_data: pd.DataFrame,
-                                     target_gameweek: int,
-                                     gameweeks_ahead: int = 5) -> pd.DataFrame:
-    """
-    Calculate expected points for multiple gameweeks (backward compatibility)
-    """
-    model = XPModel(debug=False)
-    return model.calculate_expected_points(
-        players_data=players_data,
-        teams_data=teams_data,
-        xg_rates_data=xg_rates_data,
-        fixtures_data=fixtures_data,
-        target_gameweek=target_gameweek,
-        live_data=None,
-        gameweeks_ahead=gameweeks_ahead
-    )
+    if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
+        merge_cols = ['player_id'] + [col for col in ['xP', 'xP_per_price', 'fixture_difficulty'] if col in players_5gw.columns]
+        
+        # Create 5GW suffixed columns
+        suffix_data = players_5gw[merge_cols].copy()
+        for col in merge_cols:
+            if col != 'player_id':
+                suffix_data[f"{col}_5gw"] = suffix_data[col]
+                suffix_data = suffix_data.drop(col, axis=1)
+        
+        players_merged = players_1gw.merge(suffix_data, on='player_id', how='left')
+    else:
+        # Fallback: estimate 5GW from 1GW
+        players_merged = players_1gw.copy()
+        players_merged['xP_5gw'] = players_merged['xP'] * 4.0
+        players_merged['xP_per_price_5gw'] = players_merged.get('xP_per_price', players_merged['xP']) * 4.0
+        players_merged['fixture_difficulty_5gw'] = players_merged.get('fixture_difficulty', 1.0)
+    
+    # Add derived metrics
+    players_merged['xP_horizon_advantage'] = players_merged['xP_5gw'] - (players_merged['xP'] * 5)
+    
+    # Add fixture outlook if fixture_difficulty_5gw column exists
+    if 'fixture_difficulty_5gw' in players_merged.columns:
+        players_merged['fixture_outlook'] = players_merged['fixture_difficulty_5gw'].apply(
+            lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+        )
+    else:
+        players_merged['fixture_outlook'] = '🟡 Average'
+    
+    return players_merged

@@ -15,6 +15,8 @@ from typing import Dict, List
 import warnings
 warnings.filterwarnings('ignore')
 
+from fpl_team_picker.config import config
+
 
 class DynamicTeamStrength:
     """
@@ -27,20 +29,20 @@ class DynamicTeamStrength:
     - Home/away venue-specific adjustments
     """
     
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = None):
         """
         Initialize dynamic team strength calculator
         
         Args:
-            debug: Enable debug logging
+            debug: Enable debug logging (defaults to config)
         """
-        self.debug = debug
+        self.debug = debug if debug is not None else config.team_strength.debug
         self._historical_cache = {}
         self._current_season_cache = {}
         
-        # Transition parameters
-        self.HISTORICAL_TRANSITION_GW = 8  # GW8+ = current season only
-        self.ROLLING_WINDOW_SIZE = 6  # Games for current season rolling average
+        # Transition parameters from config
+        self.HISTORICAL_TRANSITION_GW = config.team_strength.historical_transition_gw
+        self.ROLLING_WINDOW_SIZE = config.team_strength.rolling_window_size
         
         if debug:
             print(f"🏟️ DynamicTeamStrength initialized - Transition at GW{self.HISTORICAL_TRANSITION_GW}")
@@ -464,129 +466,6 @@ class DynamicTeamStrength:
                 'form': 0.25       # Increased - crucial for late season
             }
 
-    def _aggregate_current_season_stats(self, 
-                                       gameweek_data_list: List[pd.DataFrame],
-                                       teams_data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Aggregate team statistics from current season gameweek data
-        """
-        if not gameweek_data_list:
-            return pd.DataFrame()
-        
-        try:
-            # Combine all gameweek data
-            all_gw_data = pd.concat(gameweek_data_list, ignore_index=True)
-            
-            # Get player-team mapping from current players
-            from client import FPLDataClient
-            client = FPLDataClient()
-            players = client.get_current_players()
-            
-            # Merge gameweek data with team info
-            gw_with_teams = all_gw_data.merge(
-                players[['player_id', 'team_id']], 
-                on='player_id', 
-                how='left'
-            )
-            
-            # Aggregate by team
-            team_stats = gw_with_teams.groupby('team_id').agg({
-                'goals_scored': 'sum',
-                'goals_conceded': 'sum',
-                'expected_goals': 'sum',
-                'expected_goals_conceded': 'sum',
-                'clean_sheets': 'sum',
-                'total_points': 'sum',
-                'event': 'nunique'  # Number of gameweeks
-            }).round(3)
-            
-            # Calculate per-game averages
-            team_stats['xG_per_game'] = team_stats['expected_goals'] / team_stats['event']
-            team_stats['xGA_per_game'] = team_stats['expected_goals_conceded'] / team_stats['event']
-            team_stats['goals_per_game'] = team_stats['goals_scored'] / team_stats['event']
-            team_stats['goals_conceded_per_game'] = team_stats['goals_conceded'] / team_stats['event']
-            
-            # Add team names
-            team_stats = team_stats.reset_index()
-            
-            # Handle different team_id column naming
-            if 'team_id' in teams_data.columns:
-                team_stats = team_stats.merge(
-                    teams_data[['team_id', 'name']], 
-                    left_on='team_id', 
-                    right_on='team_id', 
-                    how='left'
-                )
-            else:
-                # Fallback: create team name mapping
-                team_names = {
-                    1: 'Arsenal', 2: 'Aston Villa', 3: 'Burnley', 4: 'Bournemouth', 5: 'Brentford',
-                    6: 'Brighton', 7: 'Chelsea', 8: 'Crystal Palace', 9: 'Everton', 10: 'Fulham',
-                    11: 'Leeds', 12: 'Liverpool', 13: 'Man City', 14: 'Man Utd', 15: 'Newcastle',
-                    16: "Nott'm Forest", 17: 'Sunderland', 18: 'Spurs', 19: 'West Ham', 20: 'Wolves'
-                }
-                team_stats['name'] = team_stats['team_id'].map(team_names)
-            
-            if self.debug:
-                print(f"📊 Current season stats aggregated for {len(team_stats)} teams over {team_stats['event'].max()} gameweeks")
-            
-            return team_stats
-            
-        except Exception as e:
-            if self.debug:
-                print(f"⚠️ Error aggregating current season data: {e}")
-            return pd.DataFrame()
-    
-    def _calculate_strength_from_stats(self, team_stats: pd.DataFrame, is_current_season: bool = True) -> Dict[str, float]:
-        """
-        Calculate team strength ratings from aggregated statistics
-        
-        Uses xG and xGA per game as primary indicators with actual goals as secondary
-        """
-        if team_stats.empty:
-            return self._get_static_fallback_ratings()
-        
-        strength_ratings = {}
-        
-        # Use xG/xGA if available, otherwise fall back to actual goals
-        if 'xG_per_game' in team_stats.columns and 'xGA_per_game' in team_stats.columns:
-            attack_metric = 'xG_per_game'
-            defense_metric = 'xGA_per_game'
-        else:
-            attack_metric = 'goals_per_game'
-            defense_metric = 'goals_conceded_per_game'
-        
-        # Calculate league averages for normalization
-        league_avg_attack = team_stats[attack_metric].mean()
-        league_avg_defense = team_stats[defense_metric].mean()
-        
-        for _, team in team_stats.iterrows():
-            team_name = team['name']
-            
-            # Attack strength (relative to league average)
-            attack_ratio = team[attack_metric] / league_avg_attack if league_avg_attack > 0 else 1.0
-            
-            # Defense strength (inverse - lower xGA = stronger defense)
-            defense_ratio = league_avg_defense / team[defense_metric] if team[defense_metric] > 0 else 1.0
-            
-            # Combined strength (average of attack and defense)
-            combined_strength = (attack_ratio + defense_ratio) / 2
-            
-            # Normalize to [0.7, 1.3] range
-            # Map [0.5, 1.5] to [0.7, 1.3] with clipping for outliers
-            normalized_strength = 0.7 + (combined_strength - 0.5) * (1.3 - 0.7) / (1.5 - 0.5)
-            normalized_strength = np.clip(normalized_strength, 0.7, 1.3)
-            
-            strength_ratings[team_name] = round(normalized_strength, 3)
-        
-        if self.debug:
-            strongest = max(strength_ratings.items(), key=lambda x: x[1])
-            weakest = min(strength_ratings.items(), key=lambda x: x[1])
-            print(f"🏆 Strongest: {strongest[0]} ({strongest[1]})")
-            print(f"📉 Weakest: {weakest[0]} ({weakest[1]})")
-        
-        return strength_ratings
-    
     def _get_static_fallback_ratings(self) -> Dict[str, float]:
         """
         Fallback to static 2023-24 final table ratings if dynamic calculation fails
@@ -615,27 +494,6 @@ class DynamicTeamStrength:
             print("⚠️ Using static fallback ratings")
         
         return strength_ratings
-
-
-# Utility functions for backward compatibility
-def get_dynamic_team_strength(target_gameweek: int,
-                             teams_data: pd.DataFrame,
-                             current_season_data: List[pd.DataFrame] = None,
-                             debug: bool = False) -> Dict[str, float]:
-    """
-    Get dynamic team strength ratings for target gameweek
-    
-    Args:
-        target_gameweek: Target gameweek for strength calculation
-        teams_data: Team reference data
-        current_season_data: List of current season gameweek DataFrames
-        debug: Enable debug logging
-        
-    Returns:
-        Dict mapping team name to strength rating [0.7, 1.3]
-    """
-    calculator = DynamicTeamStrength(debug=debug)
-    return calculator.get_team_strength(target_gameweek, teams_data, current_season_data)
 
 
 def load_historical_gameweek_data(start_gw: int = 1, end_gw: int = None) -> List[pd.DataFrame]:

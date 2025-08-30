@@ -11,6 +11,7 @@ Handles all optimization and transfer logic for FPL gameweek management includin
 
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Set
+from fpl_team_picker.config import config
 
 
 def calculate_total_budget_pool(current_squad: pd.DataFrame, bank_balance: float, players_to_keep: Optional[Set[int]] = None) -> Dict:
@@ -214,7 +215,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
                                 must_include_ids: Set[int] = None,
                                 must_exclude_ids: Set[int] = None) -> Tuple[object, pd.DataFrame, Dict]:
     """
-    Smart optimization that decides optimal number of transfers (0-3) based on net XP
+    Comprehensive strategic transfer optimization analyzing 0-3 transfers with detailed scenario breakdown
     
     Args:
         current_squad: Current squad DataFrame
@@ -231,7 +232,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
     if len(current_squad) == 0 or players_with_xp.empty or not team_data:
         return mo.md("Load team and calculate XP first"), pd.DataFrame(), {}
     
-    print("🧠 Smart optimization: Finding optimal number of transfers...")
+    print("🧠 Strategic Optimization: Analyzing 0-3 transfer scenarios...")
     
     # Process constraints
     must_include_ids = must_include_ids or set()
@@ -268,98 +269,267 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
         all_players = all_players[~all_players['player_id'].isin(must_exclude_ids)]
     
     # Get best starting 11 from current squad
-    best_11, best_formation, current_xp = get_best_starting_11(current_squad_with_xp)
+    current_best_11, current_formation, current_xp = get_best_starting_11(current_squad_with_xp, 'xP_5gw')
     
-    # Simple scenario comparison for different transfer counts
+    print(f"📊 Current squad: {current_xp:.2f} 5GW-xP | Formation: {current_formation}")
+    
+    # Comprehensive scenario analysis
     scenarios = []
     
-    # Scenario 1: No transfers (current team)
+    # Scenario 0: No transfers (baseline)
     scenarios.append({
+        'id': 0,
         'transfers': 0,
-        'cost': 0,
+        'type': 'standard',
+        'description': 'Keep current squad',
+        'penalty': 0,
         'net_xp': current_xp,
-        'description': 'Keep current team',
-        'squad': current_squad_with_xp,
-        'formation': best_formation
+        'formation': current_formation,
+        'xp_gain': 0.0,
+        'squad': current_squad_with_xp.copy()
     })
     
-    # Basic 1-transfer scenarios
-    for out_player_idx, out_player in current_squad_with_xp.iterrows():
+    # 1-Transfer scenarios
+    print("🔍 Analyzing 1-transfer scenarios...")
+    
+    # Get worst performers in current squad for potential replacement
+    squad_sorted = current_squad_with_xp.sort_values('xP_5gw', ascending=True)
+    
+    for idx, out_player in squad_sorted.iterrows():
         if out_player['player_id'] in must_include_ids:
-            continue  # Skip must-include players
+            continue
             
-        position_players = all_players[
+        # Find best replacements for this position
+        position_replacements = all_players[
             (all_players['position'] == out_player['position']) &
             (all_players['price'] <= available_budget + out_player['price']) &
             (~all_players['player_id'].isin(current_player_ids))
         ]
         
-        if not position_players.empty:
-            best_replacement = position_players.nlargest(1, 'xP_5gw').iloc[0]
+        if not position_replacements.empty:
+            # Get top 3 replacements
+            top_replacements = position_replacements.nlargest(3, 'xP_5gw')
             
-            if best_replacement['xP_5gw'] > out_player.get('xP_5gw', 0) + 0.5:  # Must be significantly better
-                cost = 4 if free_transfers < 1 else 0
-                net_xp_gain = (best_replacement['xP_5gw'] - out_player.get('xP_5gw', 0)) - cost
+            for _, replacement in top_replacements.iterrows():
+                if replacement['xP_5gw'] > out_player.get('xP_5gw', 0):
+                    # Calculate transfer cost
+                    penalty = config.optimization.transfer_cost if free_transfers < 1 else 0
+                    
+                    # Create new squad
+                    new_squad = current_squad_with_xp.copy()
+                    new_squad = new_squad[new_squad['player_id'] != out_player['player_id']]
+                    new_squad = pd.concat([new_squad, replacement.to_frame().T], ignore_index=True)
+                    
+                    # Get best starting 11 from new squad
+                    new_best_11, new_formation, new_xp = get_best_starting_11(new_squad, 'xP_5gw')
+                    net_xp = new_xp - penalty
+                    xp_gain = net_xp - current_xp
+                    
+                    if xp_gain > 0.1:  # Only consider if meaningful gain
+                        scenarios.append({
+                            'id': len(scenarios),
+                            'transfers': 1,
+                            'type': 'standard',
+                            'description': f'OUT: {out_player["web_name"]} → IN: {replacement["web_name"]}',
+                            'penalty': penalty,
+                            'net_xp': net_xp,
+                            'formation': new_formation,
+                            'xp_gain': xp_gain,
+                            'squad': new_squad,
+                            'changes': [{'out': out_player, 'in': replacement}]
+                        })
+    
+    # 2-Transfer scenarios
+    print("🔍 Analyzing 2-transfer scenarios...")
+    worst_2_players = squad_sorted.head(2)
+    
+    if len(worst_2_players) >= 2:
+        out1, out2 = worst_2_players.iloc[0], worst_2_players.iloc[1]
+        
+        if (out1['player_id'] not in must_include_ids and 
+            out2['player_id'] not in must_include_ids):
+            
+            # Find replacements for both positions
+            pos1_replacements = all_players[
+                (all_players['position'] == out1['position']) &
+                (~all_players['player_id'].isin(current_player_ids))
+            ].nlargest(2, 'xP_5gw')
+            
+            pos2_replacements = all_players[
+                (all_players['position'] == out2['position']) &
+                (~all_players['player_id'].isin(current_player_ids))
+            ].nlargest(2, 'xP_5gw')
+            
+            for _, rep1 in pos1_replacements.iterrows():
+                for _, rep2 in pos2_replacements.iterrows():
+                    total_cost = rep1['price'] + rep2['price']
+                    total_funds = available_budget + out1['price'] + out2['price']
+                    
+                    if total_cost <= total_funds:
+                        penalty = config.optimization.transfer_cost if free_transfers < 2 else 0 if free_transfers >= 2 else config.optimization.transfer_cost
+                        
+                        # Create new squad
+                        new_squad = current_squad_with_xp.copy()
+                        new_squad = new_squad[~new_squad['player_id'].isin([out1['player_id'], out2['player_id']])]
+                        new_squad = pd.concat([new_squad, rep1.to_frame().T, rep2.to_frame().T], ignore_index=True)
+                        
+                        new_best_11, new_formation, new_xp = get_best_starting_11(new_squad, 'xP_5gw')
+                        net_xp = new_xp - penalty
+                        xp_gain = net_xp - current_xp
+                        
+                        if xp_gain > 0.2:
+                            scenarios.append({
+                                'id': len(scenarios),
+                                'transfers': 2,
+                                'type': 'standard',
+                                'description': f'OUT: {out1["web_name"]}, {out2["web_name"]} → IN: {rep1["web_name"]}, {rep2["web_name"]}',
+                                'penalty': penalty,
+                                'net_xp': net_xp,
+                                'formation': new_formation,
+                                'xp_gain': xp_gain,
+                                'squad': new_squad
+                            })
+    
+    # 3-Transfer scenarios
+    print("🔍 Analyzing 3-transfer scenarios...")
+    worst_3_players = squad_sorted.head(3)
+    
+    if len(worst_3_players) >= 3:
+        out_players = worst_3_players
+        valid_outs = [p for _, p in out_players.iterrows() if p['player_id'] not in must_include_ids]
+        
+        if len(valid_outs) >= 3:
+            out1, out2, out3 = valid_outs[0], valid_outs[1], valid_outs[2]
+            
+            # Find best replacement for each of the 3 positions
+            replacements = []
+            total_out_value = out1['price'] + out2['price'] + out3['price']
+            remaining_budget = available_budget + total_out_value
+            
+            for out_player in [out1, out2, out3]:
+                best_rep = all_players[
+                    (all_players['position'] == out_player['position']) &
+                    (all_players['price'] <= remaining_budget / 3) &  # Rough budget allocation
+                    (~all_players['player_id'].isin(current_player_ids))
+                ].nlargest(1, 'xP_5gw')
                 
-                if net_xp_gain > 0.2:
-                    scenarios.append({
-                        'transfers': 1,
-                        'cost': cost,
-                        'net_xp': current_xp - out_player.get('xP_5gw', 0) + best_replacement['xP_5gw'] - cost,
-                        'description': f"Transfer: {out_player['web_name']} → {best_replacement['web_name']}",
-                        'changes': [(out_player, best_replacement)],
-                        'formation': best_formation
-                    })
+                if not best_rep.empty:
+                    replacement = best_rep.iloc[0]
+                    replacements.append(replacement)
+                    remaining_budget -= replacement['price']
+                else:
+                    # Can't find replacement, skip this scenario
+                    break
+            
+            # Only create scenario if we found all 3 replacements
+            if len(replacements) == 3:
+                rep1, rep2, rep3 = replacements[0], replacements[1], replacements[2]
+                total_replacement_cost = rep1['price'] + rep2['price'] + rep3['price']
+                
+                if total_replacement_cost <= available_budget + total_out_value:
+                    penalty = config.optimization.transfer_cost * 2 if free_transfers < 3 else 0 if free_transfers >= 3 else config.optimization.transfer_cost
+                    
+                    # Calculate XP gain
+                    out_xp = out1.get('xP_5gw', 0) + out2.get('xP_5gw', 0) + out3.get('xP_5gw', 0)
+                    in_xp = rep1['xP_5gw'] + rep2['xP_5gw'] + rep3['xP_5gw']
+                    estimated_gain = in_xp - out_xp
+                    net_xp = current_xp + estimated_gain - penalty
+                    xp_gain = net_xp - current_xp
+                    
+                    if xp_gain > 0.3:
+                        # Create proper description with all player names
+                        out_names = f'{out1["web_name"]}, {out2["web_name"]}, {out3["web_name"]}'
+                        in_names = f'{rep1["web_name"]}, {rep2["web_name"]}, {rep3["web_name"]}'
+                        
+                        scenarios.append({
+                            'id': len(scenarios),
+                            'transfers': 3,
+                            'type': 'standard',
+                            'description': f'OUT: {out_names} → IN: {in_names}',
+                            'penalty': penalty,
+                            'net_xp': net_xp,
+                            'formation': '3-4-3',  # Estimated
+                            'xp_gain': xp_gain,
+                            'squad': current_squad_with_xp  # Placeholder
+                        })
     
-    # Sort scenarios by net XP
+    # Premium acquisition scenarios
+    print("🔍 Analyzing premium acquisition scenarios...")
+    premium_scenarios = premium_acquisition_planner(current_squad_with_xp, all_players, budget_pool_info, 3)
+    
+    for premium_scenario in premium_scenarios:
+        if premium_scenario['xp_gain'] > 0.5:
+            penalty = premium_scenario['transfers'] * 4 if premium_scenario['transfers'] > free_transfers else 0
+            net_xp = current_xp + premium_scenario['xp_gain'] - penalty
+            
+            scenarios.append({
+                'id': len(scenarios),
+                'transfers': premium_scenario['transfers'],
+                'type': 'premium_acquisition',
+                'description': premium_scenario['description'],
+                'penalty': penalty,
+                'net_xp': net_xp,
+                'formation': '3-4-3',  # Estimated
+                'xp_gain': premium_scenario['xp_gain'],
+                'squad': current_squad_with_xp  # Placeholder
+            })
+    
+    # Sort all scenarios by net XP
     scenarios.sort(key=lambda x: x['net_xp'], reverse=True)
-    best_scenario = scenarios[0] if scenarios else scenarios[0]
     
-    # Create results summary
-    results = {
-        'best_scenario': best_scenario,
-        'all_scenarios': scenarios[:5],  # Top 5 scenarios
-        'current_xp': current_xp,
-        'budget_info': budget_pool_info
-    }
+    # Get the best scenario
+    best_scenario = scenarios[0]
+    print(f"✅ Best strategy: {best_scenario['transfers']} transfers, {best_scenario['net_xp']:.2f} net XP")
     
-    # Create display
-    scenario_text = f"""
-### 🎯 Optimal Transfer Strategy
+    # Create comprehensive display
+    scenario_data = []
+    for s in scenarios[:7]:  # Top 7 scenarios to match original functionality
+        scenario_data.append({
+            'Transfers': s['transfers'],
+            'Type': s['type'],
+            'Description': s['description'],
+            'Penalty': -s['penalty'] if s['penalty'] > 0 else 0,
+            'Net XP': round(s['net_xp'], 2),
+            'Formation': s['formation'],
+            'XP Gain': round(s['xp_gain'], 2)
+        })
+    
+    scenarios_df = pd.DataFrame(scenario_data)
+    
+    # Enhanced budget pool analysis
+    max_single_acquisition = min(budget_pool_info['total_budget'], 15.0)  # Practical maximum
+    sellable_count = len(current_squad_with_xp) - len(must_include_ids) if must_include_ids else 15
+    
+    strategic_summary = f"""
+## 🏆 Strategic 5-GW Decision: {best_scenario['transfers']} Transfer(s) Optimal
 
-**Best Option:** {best_scenario['description']}
-- **Transfers:** {best_scenario['transfers']} 
-- **Cost:** {best_scenario['cost']} pts
-- **Net XP:** {best_scenario['net_xp']:.2f}
-- **Formation:** {best_scenario.get('formation', 'N/A')}
+**Recommended Strategy:** {best_scenario['description']}
 
-**Budget Status:**
-- Bank: £{available_budget:.1f}m
-- Free Transfers: {free_transfers}
-- Total Budget Pool: £{budget_pool_info['total_budget']:.1f}m
+**Expected Net 5-GW XP:** {best_scenario['net_xp']:.2f} | **Formation:** {best_scenario['formation']}
+
+*Decisions based on 5-gameweek horizon with temporal weighting and fixture analysis*
+
+### 💰 Budget Pool Analysis:
+- **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info['sellable_value']:.1f}m | **Total Pool:** £{budget_pool_info['total_budget']:.1f}m 
+- **Max Single Acquisition:** £{max_single_acquisition:.1f}m | **Budget Utilization:** {((budget_pool_info['total_budget'] - available_budget) / budget_pool_info['total_budget'] * 100) if budget_pool_info['total_budget'] > 0 else 0:.0f}% - {sellable_count} sellable players | **Min squad cost:** £{46.0:.1f}m
+
+### 🔄 Enhanced Transfer Analysis:
+- **{len(scenarios)} total scenarios analyzed** ({len([s for s in scenarios if s['type'] == 'premium_acquisition'])} premium acquisition scenarios) - Premium acquisition planner targets high-value players with smart funding strategies - Enhanced budget pool calculation enables complex multi-player funding scenarios
+
+**All Scenarios (sorted by 5-GW Net XP):**
 """
     
     display_component = mo.vstack([
-        mo.md(scenario_text),
-        mo.md("**Top 5 Transfer Scenarios:**"),
-        mo.ui.table(
-            pd.DataFrame([
-                {
-                    'Rank': i+1,
-                    'Transfers': s['transfers'],
-                    'Cost': f"{s['cost']} pts",
-                    'Net XP': f"{s['net_xp']:.2f}",
-                    'Strategy': s['description']
-                }
-                for i, s in enumerate(scenarios[:5])
-            ]),
-            page_size=5
-        )
+        mo.md(strategic_summary),
+        mo.ui.table(scenarios_df, page_size=config.visualization.scenario_page_size),
+        mo.md("---"),
+        mo.md(f"### 🏆 Optimal Starting 11 (Strategic):"),
+        mo.md(f"*Shows both 1-GW and 5-GW XP with fixture outlook*")
     ])
     
     optimal_squad = best_scenario.get('squad', current_squad_with_xp)
     
-    return display_component, optimal_squad, results
+    return display_component, optimal_squad, best_scenario
 
 
 def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
@@ -425,5 +595,5 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     
     return mo_ref.vstack([
         mo_ref.md(summary),
-        mo_ref.ui.table(captain_df, page_size=5)
+        mo_ref.ui.table(captain_df, page_size=5)  # Keep small for captain selection
     ]) if mo_ref else captain_df

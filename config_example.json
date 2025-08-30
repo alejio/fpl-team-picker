@@ -1,0 +1,20 @@
+{
+  "xp_model": {
+    "form_weight": 0.7,
+    "form_window": 5,
+    "debug": true
+  },
+  "team_strength": {
+    "historical_transition_gw": 8,
+    "rolling_window_size": 6,
+    "debug": false
+  },
+  "optimization": {
+    "transfer_cost": 4.0,
+    "max_transfers": 3
+  },
+  "visualization": {
+    "default_page_size": 15,
+    "large_table_page_size": 20
+  }
+}

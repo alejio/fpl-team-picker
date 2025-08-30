@@ -1829,5 +1829,9 @@ def __(mo):
     """)
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for fpl-season-planner command."""
     app.run()
+
+if __name__ == "__main__":
+    main()
