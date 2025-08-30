@@ -384,7 +384,10 @@ class XPModel:
             team_multiplier = 0.7 + (row['team_strength'] - 0.7) * 0.8
             
             # SBP adjustment
-            sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.3
+            sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
+            if pd.isna(sbp_value):
+                sbp_value = position_sbp_defaults.get(row['position'], 8.0)
+            sbp_multiplier = 1.0 + (sbp_value / 100) * 0.3
             
             # Enhanced: ICT and threat factor adjustments for xG
             threat_multiplier = 1.0 + row.get('threat_factor', 0) * 0.4  # Threat strongly correlates with xG
@@ -414,7 +417,10 @@ class XPModel:
             team_multiplier = 0.6 + (row['team_strength'] - 0.7) * 1.0
             
             # SBP adjustment
-            sbp_multiplier = 1.0 + (row[sbp_col] / 100) * 0.25
+            sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
+            if pd.isna(sbp_value):
+                sbp_value = position_sbp_defaults.get(row['position'], 8.0)
+            sbp_multiplier = 1.0 + (sbp_value / 100) * 0.25
             
             # Enhanced: Creativity and influence factor adjustments for xA
             creativity_multiplier = 1.0 + row.get('creativity_factor', 0) * 0.5  # Creativity strongly correlates with xA

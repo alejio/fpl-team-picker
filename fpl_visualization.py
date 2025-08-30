@@ -235,9 +235,22 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         all_data['xa_per_90'] = (all_data['expected_assists'] / all_data['minutes'].replace(0, 1)) * 90
         
         # Value ratio - only calculate if we have price data
+        price_col = None
         if 'now_cost' in all_data.columns:
-            all_data['now_cost'] = pd.to_numeric(all_data['now_cost'], errors='coerce')
-            all_data['value_ratio'] = all_data['total_points'] / (all_data['now_cost'] / 10).replace(0, 1)  # Points per £1m
+            price_col = 'now_cost'
+        elif 'price_gbp' in all_data.columns:
+            price_col = 'price_gbp'
+        elif 'price' in all_data.columns:
+            price_col = 'price'
+            
+        if price_col:
+            all_data[price_col] = pd.to_numeric(all_data[price_col], errors='coerce')
+            # Handle different price formats (tenths vs pounds)
+            if price_col == 'now_cost':
+                price_divisor = all_data[price_col] / 10  # FPL API uses tenths
+            else:
+                price_divisor = all_data[price_col]  # Already in pounds
+            all_data['value_ratio'] = all_data['total_points'] / price_divisor.replace(0, 1)  # Points per £1m
         else:
             print("⚠️ No price data available, skipping value ratio calculation")
             all_data['value_ratio'] = 0
