@@ -939,49 +939,6 @@ class XPModel:
         return players_df
 
 
-# Expected Points Calculation Functions
-def calculate_expected_points_single_gw(players_data: pd.DataFrame,
-                                      teams_data: pd.DataFrame,
-                                      xg_rates_data: pd.DataFrame,
-                                      fixtures_data: pd.DataFrame,
-                                      target_gameweek: int,
-                                      live_data: pd.DataFrame = None) -> pd.DataFrame:
-    """
-    Calculate expected points for single gameweek (backward compatibility)
-    """
-    model = XPModel(debug=False)
-    return model.calculate_expected_points(
-        players_data=players_data,
-        teams_data=teams_data,
-        xg_rates_data=xg_rates_data,
-        fixtures_data=fixtures_data,
-        target_gameweek=target_gameweek,
-        live_data=live_data,
-        gameweeks_ahead=1
-    )
-
-
-def calculate_expected_points_multi_gw(players_data: pd.DataFrame,
-                                     teams_data: pd.DataFrame,
-                                     xg_rates_data: pd.DataFrame,
-                                     fixtures_data: pd.DataFrame,
-                                     target_gameweek: int,
-                                     gameweeks_ahead: int = 5) -> pd.DataFrame:
-    """
-    Calculate expected points for multiple gameweeks (backward compatibility)
-    """
-    model = XPModel(debug=False)
-    return model.calculate_expected_points(
-        players_data=players_data,
-        teams_data=teams_data,
-        xg_rates_data=xg_rates_data,
-        fixtures_data=fixtures_data,
-        target_gameweek=target_gameweek,
-        live_data=None,
-        gameweeks_ahead=gameweeks_ahead
-    )
-
-
 def merge_1gw_5gw_results(players_1gw: pd.DataFrame, players_5gw: pd.DataFrame) -> pd.DataFrame:
     """
     Merge 1GW and 5GW XP results with derived metrics

@@ -18,7 +18,9 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = []
+dev = [
+    "vulture>=2.14",
+]
 
 [tool.uv.sources]
 fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
