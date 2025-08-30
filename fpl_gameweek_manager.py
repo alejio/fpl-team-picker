@@ -1,5 +1,6 @@
 import marimo
 
+__generated_with = "0.14.16"
 app = marimo.App(width="medium")
 
 
@@ -96,7 +97,8 @@ def __(mo):
 
 @app.cell
 def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input, mo, pd):
-    # Initialize variables
+    # Initialize all variables with defaults first to avoid marimo dependency issues
+    target_gw = gameweek_input.value if gameweek_input.value else None
     team_data = None
     current_squad = pd.DataFrame()
     players = pd.DataFrame()
@@ -104,15 +106,17 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
     xg_rates = pd.DataFrame()
     fixtures = pd.DataFrame()
     live_data_historical = pd.DataFrame()
-    team_display = None  # Initialize once
     
-    if gameweek_input.value:
-        target_gw = gameweek_input.value
+    if target_gw:
         
+        # Load core FPL data first
+        players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(target_gw)
+        
+        # Handle team data based on gameweek
         if target_gw == 1:
             previous_gw = None
-            # team_data already initialized as None
-            # current_squad already initialized as empty DataFrame
+            # team_data remains None from initialization
+            # current_squad remains empty from initialization
         else:
             previous_gw = target_gw - 1
             team_data = fetch_manager_team(previous_gw)
@@ -121,8 +125,7 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 print("⚠️ No GW1 team data found - GW2 may be in progress")
                 print("💡 Try loading GW1 first to see your initial team")
         
-        players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(target_gw)
-        
+        # Check data availability
         def check_data_availability():
             """Check what gameweek data is currently available"""
             try:
@@ -148,80 +151,79 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
         else:
             print("⚠️ No gameweek data found in database")
         
-        if target_gw == 1:
-            available_columns = list(players.columns)
-            print(f"🔍 Available columns in players DataFrame: {available_columns}")
-            
-            display_columns = []
-            for col_name in ['web_name', 'position', 'name', 'price', 'selected_by_percent']:
-                if col_name in available_columns:
-                    display_columns.append(col_name)
-            
-            if not display_columns:
-                display_columns = available_columns[:5]
-            
-            print(f"📊 Using columns for display: {display_columns}")
-            
-            data_info = ""
-            if available_gameweeks:
-                if 1 in available_gameweeks:
-                    data_info = "✅ GW1 data available for analysis"
-                else:
-                    data_info = f"⚠️ GW1 data not found. Available: GW{', GW'.join(map(str, available_gameweeks))}"
-            else:
-                data_info = "⚠️ No gameweek data found in database"
-            
-            team_display = mo.vstack([
-                mo.md(f"### 🚀 GW1 Team Selection"),
-                mo.md(f"**Optimizing for GW{target_gw}**"),
-                mo.md(data_info),
-                mo.md("**Note:** No previous team data available for GW1. This will help you select your initial squad."),
-                mo.md("**Available Players:**"),
-                mo.ui.table(
-                    players[display_columns].head(20).round(2),
-                    page_size=20
-                )
-            ])
-        elif team_data:
-            current_squad = process_current_squad(team_data, players, teams)
-            
-            team_display = mo.vstack([
-                mo.md(f"### ✅ {team_data['entry_name']} (from GW{previous_gw})"),
-                mo.md(f"**Previous Points:** {team_data['total_points']:,} | **Bank:** £{team_data['bank']:.1f}m | **Value:** £{team_data['team_value']:.1f}m | **Free Transfers:** {team_data['free_transfers']}"),
-                mo.md(f"**Optimizing for GW{target_gw}**"),
-                mo.md("**Current Squad:**"),
-                mo.ui.table(
-                    current_squad[['web_name', 'position', 'price']].round(2),
-                    page_size=15
-                )
-            ])
-        else:
-            if target_gw == 2:
-                available_info = ""
-                if available_gameweeks:
-                    available_info = f"**Available data:** GW{', GW'.join(map(str, available_gameweeks))}"
-                else:
-                    available_info = "**Available data:** None found"
-                
-                team_display = mo.vstack([
-                    mo.md("### ⚠️ GW2 Team Data Unavailable"),
-                    mo.md(available_info),
-                    mo.md(""),
-                    mo.md("**Possible reasons:**"),
-                    mo.md("• GW2 is currently in progress"),
-                    mo.md("• No GW1 team data has been saved yet"),
-                    mo.md("• Database connection issue"),
-                    mo.md(""),
-                    mo.md("**Suggestions:**"),
-                    mo.md("• Try selecting GW1 to see available players"),
-                    mo.md("• Check if your GW1 team has been saved"),
-                    mo.md("• Wait for GW2 to complete and data to be updated")
-                ])
-            else:
-                team_display = mo.md("❌ Could not load team data")
+    # Create team display - initialize with default first
+    team_display = mo.md("Select target gameweek above to load team")
     
-    if team_display is None:
-        team_display = mo.md("Select target gameweek above to load team")
+    if target_gw == 1:
+        available_columns = list(players.columns)
+        print(f"🔍 Available columns in players DataFrame: {available_columns}")
+        
+        display_columns = []
+        for col_name in ['web_name', 'position', 'name', 'price', 'selected_by_percent']:
+            if col_name in available_columns:
+                display_columns.append(col_name)
+        
+        if not display_columns:
+            display_columns = available_columns[:5]
+        
+        print(f"📊 Using columns for display: {display_columns}")
+        
+        data_info = ""
+        if available_gameweeks:
+            if 1 in available_gameweeks:
+                data_info = "✅ GW1 data available for analysis"
+            else:
+                data_info = f"⚠️ GW1 data not found. Available: GW{', GW'.join(map(str, available_gameweeks))}"
+        else:
+            data_info = "⚠️ No gameweek data found in database"
+        
+        team_display = mo.vstack([
+            mo.md(f"### 🚀 GW1 Team Selection"),
+            mo.md(f"**Optimizing for GW{target_gw}**"),
+            mo.md(data_info),
+            mo.md("**Note:** No previous team data available for GW1. This will help you select your initial squad."),
+            mo.md("**Available Players:**"),
+            mo.ui.table(
+                players[display_columns].head(20).round(2),
+                page_size=20
+            )
+        ])
+    elif team_data:
+        current_squad = process_current_squad(team_data, players, teams)
+        
+        team_display = mo.vstack([
+            mo.md(f"### ✅ {team_data['entry_name']} (from GW{previous_gw})"),
+            mo.md(f"**Previous Points:** {team_data['total_points']:,} | **Bank:** £{team_data['bank']:.1f}m | **Value:** £{team_data['team_value']:.1f}m | **Free Transfers:** {team_data['free_transfers']}"),
+            mo.md(f"**Optimizing for GW{target_gw}**"),
+            mo.md("**Current Squad:**"),
+            mo.ui.table(
+                current_squad[['web_name', 'position', 'price']].round(2),
+                page_size=15
+            )
+        ])
+    elif target_gw == 2:
+        available_info = ""
+        if available_gameweeks:
+            available_info = f"**Available data:** GW{', GW'.join(map(str, available_gameweeks))}"
+        else:
+            available_info = "**Available data:** None found"
+        
+        team_display = mo.vstack([
+            mo.md("### ⚠️ GW2 Team Data Unavailable"),
+            mo.md(available_info),
+            mo.md(""),
+            mo.md("**Possible reasons:**"),
+            mo.md("• GW2 is currently in progress"),
+            mo.md("• No GW1 team data has been saved yet"),
+            mo.md("• Database connection issue"),
+            mo.md(""),
+            mo.md("**Suggestions:**"),
+            mo.md("• Try selecting GW1 to see available players"),
+            mo.md("• Check if your GW1 team has been saved"),
+            mo.md("• Wait for GW2 to complete and data to be updated")
+        ])
+    elif target_gw:
+        team_display = mo.md("❌ Could not load team data")
     
     team_display
     
@@ -457,23 +459,30 @@ def __(mo):
 def __(mo, pd, players_with_xp):
     from fpl_visualization import create_player_trends_visualization
     
+    # Initialize defaults first to avoid marimo dependency issues
+    player_opts = []
+    attr_opts = []
+    trends_data = pd.DataFrame()
+    
     try:
         player_data = players_with_xp if hasattr(players_with_xp, 'empty') and not players_with_xp.empty else pd.DataFrame()
         
-        player_opts, attr_opts, trends_data = create_player_trends_visualization(player_data)
+        if not player_data.empty:
+            player_opts, attr_opts, trends_data = create_player_trends_visualization(player_data)
         
     except Exception as e:
-        player_opts, attr_opts, trends_data = [], [], pd.DataFrame()
+        # Defaults already set above
+        pass
     
     return player_opts, attr_opts, trends_data
 
 
 @app.cell
 def __(mo, player_opts, attr_opts):
-    # Initialize variables once
-    player_selector = None
-    attribute_selector = None
-    multi_player_selector = None
+    # Initialize variables with safe defaults to avoid marimo dependency issues
+    player_selector = mo.ui.dropdown(options=[], value=None)
+    attribute_selector = mo.ui.dropdown(options=[], value=None)
+    multi_player_selector = mo.ui.multiselect(options=[], value=[])
     
     if player_opts and attr_opts:
         player_selector = mo.ui.dropdown(
@@ -613,10 +622,10 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
-    # Initialize variables once
-    must_include_dropdown = None
-    must_exclude_dropdown = None
-    optimize_button = None
+    # Initialize variables with safe defaults to avoid marimo dependency issues
+    must_include_dropdown = mo.ui.multiselect(options=[], value=[])
+    must_exclude_dropdown = mo.ui.multiselect(options=[], value=[]) 
+    optimize_button = mo.ui.run_button(label="Loading...", disabled=True)
     
     try:
         if not players_with_xp.empty:
@@ -674,6 +683,10 @@ def __(players_with_xp, mo):
             
     except Exception:
         constraints_ui = mo.md("⚠️ Error creating optimization interface - calculate XP first")
+        # Ensure variables are never None to avoid dependency issues
+        must_include_dropdown = mo.ui.multiselect(options=[], value=[])
+        must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
+        optimize_button = mo.ui.run_button(label="Optimization Unavailable", disabled=True)
     
     constraints_ui
     
@@ -788,14 +801,14 @@ def __(optimal_starting_11, mo):
             )
             captain_recommendations = select_captain(optimal_starting_11, mo)
             
-            mo.vstack([header, captain_recommendations])
+            captain_display = mo.vstack([header, captain_recommendations])
         except Exception as e:
-            mo.vstack([
+            captain_display = mo.vstack([
                 mo.md("## 8️⃣ Captain Selection"),
                 mo.md(f"⚠️ **Captain selection error:** {str(e)}")
             ])
     else:
-        mo.vstack([
+        captain_display = mo.vstack([
             mo.md("## 8️⃣ Captain Selection"),
             mo.md(
                 r"""
@@ -811,7 +824,9 @@ def __(optimal_starting_11, mo):
                 """
             )
         ])
-        
+    
+    captain_display
+    
     return
 
 

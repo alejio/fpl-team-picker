@@ -309,7 +309,7 @@ class XPModel:
                 if player_id_col and raw_id_col:
                     # Select available columns from raw data
                     available_cols = [raw_id_col]
-                    for col in ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat']:
+                    for col in ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat', 'selected_by_percent']:
                         if col in raw_players.columns:
                             available_cols.append(col)
                     
@@ -318,10 +318,16 @@ class XPModel:
                         left_on=player_id_col, right_on=raw_id_col, how='left'
                     )
                     
+                    # Convert string columns to numeric to avoid division errors
+                    numeric_cols = ['form', 'points_per_game', 'ict_index', 'influence', 'creativity', 'threat', 'selected_by_percent']
+                    for col in numeric_cols:
+                        if col in enhanced_data.columns:
+                            enhanced_data[col] = pd.to_numeric(enhanced_data[col], errors='coerce')
+                    
                     if self.debug:
                         print(f"✅ Enhanced estimation with raw data fields for {len(enhanced_data)} players")
                     
-                    # Use additional fields in estimation if available
+                    # Use additional fields in estimation if available (already converted to numeric above)
                     if 'ict_index' in enhanced_data.columns:
                         estimates['ict_factor'] = enhanced_data['ict_index'].fillna(0) / 100.0  # Normalize ICT
                     if 'creativity' in enhanced_data.columns:
