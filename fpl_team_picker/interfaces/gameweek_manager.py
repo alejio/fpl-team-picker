@@ -308,13 +308,8 @@ def __(mo):
 
 @app.cell
 def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd, create_xp_results_display):
-    # XP Model Configuration Constants
-    XP_FORM_WEIGHT = 0.7  # 70% recent form, 30% season baseline
-    XP_FORM_WINDOW = 5    # 5 gameweek form window
-    XP_DEBUG = True       # Enable debug logging
-    
-    
-    # XP calculation logic moved to direct XPModel usage
+    # Import global configuration
+    from fpl_team_picker.config import config
     
     # Initialize variables
     players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
@@ -324,9 +319,9 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
             
             xp_model = XPModel(
-                form_weight=XP_FORM_WEIGHT,
-                form_window=XP_FORM_WINDOW,
-                debug=XP_DEBUG
+                form_weight=config.xp_model.form_weight,
+                form_window=config.xp_model.form_window,
+                debug=config.xp_model.debug
             )
             
             # Calculate 1GW and 5GW expected points

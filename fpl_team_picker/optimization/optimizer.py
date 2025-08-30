@@ -11,6 +11,7 @@ Handles all optimization and transfer logic for FPL gameweek management includin
 
 import pandas as pd
 from typing import Dict, List, Tuple, Optional, Set
+from fpl_team_picker.config import config
 
 
 def calculate_total_budget_pool(current_squad: pd.DataFrame, bank_balance: float, players_to_keep: Optional[Set[int]] = None) -> Dict:
@@ -312,7 +313,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
             for _, replacement in top_replacements.iterrows():
                 if replacement['xP_5gw'] > out_player.get('xP_5gw', 0):
                     # Calculate transfer cost
-                    penalty = 4 if free_transfers < 1 else 0
+                    penalty = config.optimization.transfer_cost if free_transfers < 1 else 0
                     
                     # Create new squad
                     new_squad = current_squad_with_xp.copy()
@@ -365,7 +366,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
                     total_funds = available_budget + out1['price'] + out2['price']
                     
                     if total_cost <= total_funds:
-                        penalty = 4 if free_transfers < 2 else 0 if free_transfers >= 2 else 4
+                        penalty = config.optimization.transfer_cost if free_transfers < 2 else 0 if free_transfers >= 2 else config.optimization.transfer_cost
                         
                         # Create new squad
                         new_squad = current_squad_with_xp.copy()
@@ -426,7 +427,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
                 total_replacement_cost = rep1['price'] + rep2['price'] + rep3['price']
                 
                 if total_replacement_cost <= available_budget + total_out_value:
-                    penalty = 8 if free_transfers < 3 else 0 if free_transfers >= 3 else 4
+                    penalty = config.optimization.transfer_cost * 2 if free_transfers < 3 else 0 if free_transfers >= 3 else config.optimization.transfer_cost
                     
                     # Calculate XP gain
                     out_xp = out1.get('xP_5gw', 0) + out2.get('xP_5gw', 0) + out3.get('xP_5gw', 0)
@@ -520,7 +521,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
     
     display_component = mo.vstack([
         mo.md(strategic_summary),
-        mo.ui.table(scenarios_df, page_size=7),
+        mo.ui.table(scenarios_df, page_size=config.visualization.scenario_page_size),
         mo.md("---"),
         mo.md(f"### 🏆 Optimal Starting 11 (Strategic):"),
         mo.md(f"*Shows both 1-GW and 5-GW XP with fixture outlook*")
@@ -594,5 +595,5 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     
     return mo_ref.vstack([
         mo_ref.md(summary),
-        mo_ref.ui.table(captain_df, page_size=5)
+        mo_ref.ui.table(captain_df, page_size=5)  # Keep small for captain selection
     ]) if mo_ref else captain_df

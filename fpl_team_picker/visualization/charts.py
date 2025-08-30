@@ -11,6 +11,7 @@ Handles all visualization functions for FPL gameweek management including:
 import pandas as pd
 from typing import Tuple, List, Dict, Optional
 from ..utils.helpers import get_safe_columns, create_display_dataframe
+from fpl_team_picker.config import config
 
 
 def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
@@ -33,7 +34,7 @@ def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
         teams = client.get_current_teams()
         
         # Get dynamic team strength ratings for the target gameweek
-        calculator = DynamicTeamStrength(debug=False)
+        calculator = DynamicTeamStrength()  # Uses config default
         current_season_data = load_historical_gameweek_data(start_gw=1, end_gw=target_gameweek-1)
         team_strength = calculator.get_team_strength(
             target_gameweek=target_gameweek,
@@ -87,7 +88,7 @@ def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
             mo_ref.md(f"**Strongest:** {strongest_team['Team']} ({strongest_team['Strength']:.3f}) | **Weakest:** {weakest_team['Team']} ({weakest_team['Strength']:.3f}) | **Average:** {avg_strength:.3f}"),
             mo_ref.md("*Higher strength = better team = harder opponent when playing against them*"),
             mo_ref.md("**📊 Dynamic Team Strength Table:**"),
-            mo_ref.ui.table(display_df, page_size=20),
+            mo_ref.ui.table(display_df, page_size=config.visualization.large_table_page_size),
             mo_ref.md("""
             **💡 How to Use This:**
             - **🔴 Very Strong teams**: Avoid their opponents (hard fixtures) 
@@ -682,7 +683,7 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
             mo_ref.as_html(fig),
             mo_ref.md("### 📋 Detailed Fixture Matrix"),
             mo_ref.md("*Teams sorted by average difficulty (easiest first)*"),
-            mo_ref.ui.table(display_df, page_size=20)
+            mo_ref.ui.table(display_df, page_size=config.visualization.large_table_page_size)
         ]) if mo_ref else display_df
         
     except Exception as e:

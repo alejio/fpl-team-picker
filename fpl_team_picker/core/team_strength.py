@@ -15,6 +15,8 @@ from typing import Dict, List
 import warnings
 warnings.filterwarnings('ignore')
 
+from fpl_team_picker.config import config
+
 
 class DynamicTeamStrength:
     """
@@ -27,20 +29,20 @@ class DynamicTeamStrength:
     - Home/away venue-specific adjustments
     """
     
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = None):
         """
         Initialize dynamic team strength calculator
         
         Args:
-            debug: Enable debug logging
+            debug: Enable debug logging (defaults to config)
         """
-        self.debug = debug
+        self.debug = debug if debug is not None else config.team_strength.debug
         self._historical_cache = {}
         self._current_season_cache = {}
         
-        # Transition parameters
-        self.HISTORICAL_TRANSITION_GW = 8  # GW8+ = current season only
-        self.ROLLING_WINDOW_SIZE = 6  # Games for current season rolling average
+        # Transition parameters from config
+        self.HISTORICAL_TRANSITION_GW = config.team_strength.historical_transition_gw
+        self.ROLLING_WINDOW_SIZE = config.team_strength.rolling_window_size
         
         if debug:
             print(f"🏟️ DynamicTeamStrength initialized - Transition at GW{self.HISTORICAL_TRANSITION_GW}")

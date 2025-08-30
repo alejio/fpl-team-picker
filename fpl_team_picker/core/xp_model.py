@@ -18,6 +18,8 @@ from typing import Dict
 import warnings
 warnings.filterwarnings('ignore')
 
+from fpl_team_picker.config import config
+
 
 class XPModel:
     """
@@ -31,20 +33,21 @@ class XPModel:
     """
     
     def __init__(self, 
-                 form_weight: float = 0.7,
-                 form_window: int = 5,
-                 debug: bool = False):
+                 form_weight: float = None,
+                 form_window: int = None,
+                 debug: bool = None):
         """
         Initialize XP Model
         
         Args:
-            form_weight: Weight given to recent form vs season average (0.7 = 70% form)
-            form_window: Number of recent gameweeks to consider for form (5 = last 5 GWs)
-            debug: Enable debug logging
+            form_weight: Weight given to recent form vs season average (defaults to config)
+            form_window: Number of recent gameweeks to consider for form (defaults to config)
+            debug: Enable debug logging (defaults to config)
         """
-        self.form_weight = form_weight
-        self.form_window = form_window
-        self.debug = debug
+        # Use config defaults if not provided
+        self.form_weight = form_weight if form_weight is not None else config.xp_model.form_weight
+        self.form_window = form_window if form_window is not None else config.xp_model.form_window
+        self.debug = debug if debug is not None else config.xp_model.debug
         
         # Model components
         self._team_strength_cache = {}
@@ -377,23 +380,24 @@ class XPModel:
             
             # Price adjustment
             price = row[price_col]
-            if price >= 8.0:  # Premium players
-                price_multiplier = 1.4 + (price - 8.0) * 0.15
-            elif price >= 6.0:  # Mid-tier players
-                price_multiplier = 1.1 + (price - 6.0) * 0.15
-            elif price >= 4.5:  # Budget options
-                price_multiplier = 0.8 + (price - 4.5) * 0.2
+            cfg = config.statistical_estimation
+            if price >= cfg.premium_price_threshold:  # Premium players
+                price_multiplier = cfg.xg_premium_base_multiplier + (price - cfg.premium_price_threshold) * cfg.xg_premium_scale_factor
+            elif price >= cfg.mid_tier_price_threshold:  # Mid-tier players
+                price_multiplier = cfg.xg_mid_tier_base_multiplier + (price - cfg.mid_tier_price_threshold) * cfg.xg_mid_tier_scale_factor
+            elif price >= cfg.budget_price_threshold:  # Budget options
+                price_multiplier = cfg.xg_budget_base_multiplier + (price - cfg.budget_price_threshold) * cfg.xg_budget_scale_factor
             else:  # Very cheap players
-                price_multiplier = 0.5 + (price - 4.0) * 0.6
+                price_multiplier = cfg.xg_min_base_multiplier + (price - cfg.min_price_threshold) * cfg.xg_min_scale_factor
             
             # Team strength adjustment
-            team_multiplier = 0.7 + (row['team_strength'] - 0.7) * 0.8
+            team_multiplier = config.team_strength.min_strength + (row['team_strength'] - config.team_strength.min_strength) * config.statistical_estimation.xg_team_strength_factor
             
             # SBP adjustment
             sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
             if pd.isna(sbp_value):
                 sbp_value = position_sbp_defaults.get(row['position'], 8.0)
-            sbp_multiplier = 1.0 + (sbp_value / 100) * 0.3
+            sbp_multiplier = 1.0 + (sbp_value / 100) * config.statistical_estimation.xg_sbp_influence
             
             # Enhanced: ICT and threat factor adjustments for xG
             threat_multiplier = 1.0 + row.get('threat_factor', 0) * 0.4  # Threat strongly correlates with xG
@@ -412,15 +416,16 @@ class XPModel:
             
             # Price adjustment for creativity
             price = row[price_col]
-            if price >= 7.5:  # Premium creative players
-                price_multiplier = 1.5 + (price - 7.5) * 0.2
-            elif price >= 5.5:  # Mid-tier
-                price_multiplier = 1.0 + (price - 5.5) * 0.25
+            cfg = config.statistical_estimation
+            if price >= cfg.xa_premium_price_threshold:  # Premium creative players
+                price_multiplier = cfg.xa_premium_base_multiplier + (price - cfg.xa_premium_price_threshold) * cfg.xa_premium_scale_factor
+            elif price >= cfg.xa_mid_tier_price_threshold:  # Mid-tier
+                price_multiplier = cfg.xa_mid_tier_base_multiplier + (price - cfg.xa_mid_tier_price_threshold) * cfg.xa_mid_tier_scale_factor
             else:  # Budget players
-                price_multiplier = 0.6 + (price - 4.0) * 0.25
+                price_multiplier = cfg.xa_budget_base_multiplier + (price - cfg.min_price_threshold) * cfg.xa_budget_scale_factor
             
             # Team strength matters more for assists
-            team_multiplier = 0.6 + (row['team_strength'] - 0.7) * 1.0
+            team_multiplier = 0.6 + (row['team_strength'] - config.team_strength.min_strength) * config.statistical_estimation.xa_team_strength_factor
             
             # SBP adjustment
             sbp_value = pd.to_numeric(row[sbp_col], errors='coerce')
