@@ -251,6 +251,9 @@ def __(mo):
 def __(gameweek_input, mo, pd):
     from fpl_visualization import create_team_strength_visualization
     
+    # Initialize once
+    team_strength_analysis = None
+    
     if gameweek_input.value:
         team_strength_analysis = create_team_strength_visualization(gameweek_input.value, mo)
     else:
@@ -516,6 +519,9 @@ def __(mo, player_opts, attr_opts):
 def __(mo, player_selector, attribute_selector, multi_player_selector, trends_data, pd):
     from fpl_visualization import create_trends_chart
     
+    # Initialize once
+    trends_chart = None
+    
     if (player_selector is not None and hasattr(player_selector, 'value') and player_selector.value and 
         attribute_selector is not None and hasattr(attribute_selector, 'value') and attribute_selector.value):
         
@@ -562,6 +568,9 @@ def __(mo):
 @app.cell
 def __(gameweek_input, mo, pd):
     from fpl_visualization import create_fixture_difficulty_visualization
+    
+    # Initialize once
+    fixture_analysis = None
     
     if gameweek_input.value:
         fixture_analysis = create_fixture_difficulty_visualization(gameweek_input.value, 5, mo)
