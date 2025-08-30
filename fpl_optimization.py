@@ -400,40 +400,57 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
         if len(valid_outs) >= 3:
             out1, out2, out3 = valid_outs[0], valid_outs[1], valid_outs[2]
             
-            # Simplified 3-transfer: get best replacement for each position
-            for position in [out1['position'], out2['position'], out3['position']]:
-                pos_players = out_players[out_players['position'] == position]
-                if not pos_players.empty:
-                    best_rep = all_players[
-                        (all_players['position'] == position) &
-                        (~all_players['player_id'].isin(current_player_ids))
-                    ].nlargest(1, 'xP_5gw')
+            # Find best replacement for each of the 3 positions
+            replacements = []
+            total_out_value = out1['price'] + out2['price'] + out3['price']
+            remaining_budget = available_budget + total_out_value
+            
+            for out_player in [out1, out2, out3]:
+                best_rep = all_players[
+                    (all_players['position'] == out_player['position']) &
+                    (all_players['price'] <= remaining_budget / 3) &  # Rough budget allocation
+                    (~all_players['player_id'].isin(current_player_ids))
+                ].nlargest(1, 'xP_5gw')
+                
+                if not best_rep.empty:
+                    replacement = best_rep.iloc[0]
+                    replacements.append(replacement)
+                    remaining_budget -= replacement['price']
+                else:
+                    # Can't find replacement, skip this scenario
+                    break
+            
+            # Only create scenario if we found all 3 replacements
+            if len(replacements) == 3:
+                rep1, rep2, rep3 = replacements[0], replacements[1], replacements[2]
+                total_replacement_cost = rep1['price'] + rep2['price'] + rep3['price']
+                
+                if total_replacement_cost <= available_budget + total_out_value:
+                    penalty = 8 if free_transfers < 3 else 0 if free_transfers >= 3 else 4
                     
-                    if not best_rep.empty:
-                        rep = best_rep.iloc[0]
+                    # Calculate XP gain
+                    out_xp = out1.get('xP_5gw', 0) + out2.get('xP_5gw', 0) + out3.get('xP_5gw', 0)
+                    in_xp = rep1['xP_5gw'] + rep2['xP_5gw'] + rep3['xP_5gw']
+                    estimated_gain = in_xp - out_xp
+                    net_xp = current_xp + estimated_gain - penalty
+                    xp_gain = net_xp - current_xp
+                    
+                    if xp_gain > 0.3:
+                        # Create proper description with all player names
+                        out_names = f'{out1["web_name"]}, {out2["web_name"]}, {out3["web_name"]}'
+                        in_names = f'{rep1["web_name"]}, {rep2["web_name"]}, {rep3["web_name"]}'
                         
-                        # Calculate rough budget check
-                        total_out_value = out1['price'] + out2['price'] + out3['price']
-                        if rep['price'] * 3 <= available_budget + total_out_value:  # Rough estimate
-                            penalty = 8 if free_transfers < 3 else 0 if free_transfers >= 3 else 4
-                            
-                            estimated_gain = (rep['xP_5gw'] * 3) - (out1.get('xP_5gw', 0) + out2.get('xP_5gw', 0) + out3.get('xP_5gw', 0))
-                            net_xp = current_xp + estimated_gain - penalty
-                            xp_gain = net_xp - current_xp
-                            
-                            if xp_gain > 0.3:
-                                scenarios.append({
-                                    'id': len(scenarios),
-                                    'transfers': 3,
-                                    'type': 'standard',
-                                    'description': f'OUT: {out1["web_name"]}, {out2["web_name"]}, {out3["web_name"]} → IN: {rep["web_name"]}, etc.',
-                                    'penalty': penalty,
-                                    'net_xp': net_xp,
-                                    'formation': '3-4-3',  # Estimated
-                                    'xp_gain': xp_gain,
-                                    'squad': current_squad_with_xp  # Placeholder
-                                })
-                            break
+                        scenarios.append({
+                            'id': len(scenarios),
+                            'transfers': 3,
+                            'type': 'standard',
+                            'description': f'OUT: {out_names} → IN: {in_names}',
+                            'penalty': penalty,
+                            'net_xp': net_xp,
+                            'formation': '3-4-3',  # Estimated
+                            'xp_gain': xp_gain,
+                            'squad': current_squad_with_xp  # Placeholder
+                        })
     
     # Premium acquisition scenarios
     print("🔍 Analyzing premium acquisition scenarios...")

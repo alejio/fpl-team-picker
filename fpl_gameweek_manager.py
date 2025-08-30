@@ -96,13 +96,23 @@ def __(mo):
 
 @app.cell
 def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input, mo, pd):
+    # Initialize variables
+    team_data = None
+    current_squad = pd.DataFrame()
+    players = pd.DataFrame()
+    teams = pd.DataFrame() 
+    xg_rates = pd.DataFrame()
+    fixtures = pd.DataFrame()
+    live_data_historical = pd.DataFrame()
+    team_display = None  # Initialize once
+    
     if gameweek_input.value:
         target_gw = gameweek_input.value
         
         if target_gw == 1:
             previous_gw = None
-            team_data = None
-            current_squad = pd.DataFrame()
+            # team_data already initialized as None
+            # current_squad already initialized as empty DataFrame
         else:
             previous_gw = target_gw - 1
             team_data = fetch_manager_team(previous_gw)
@@ -209,22 +219,9 @@ def __(fetch_fpl_data, fetch_manager_team, process_current_squad, gameweek_input
                 ])
             else:
                 team_display = mo.md("❌ Could not load team data")
-            
-            current_squad = pd.DataFrame()
-            team_data = None
-            players = pd.DataFrame()
-            teams = pd.DataFrame() 
-            xg_rates = pd.DataFrame()
-            fixtures = pd.DataFrame()
-    else:
+    
+    if team_display is None:
         team_display = mo.md("Select target gameweek above to load team")
-        current_squad = pd.DataFrame()
-        team_data = None
-        players = pd.DataFrame()
-        teams = pd.DataFrame() 
-        xg_rates = pd.DataFrame()
-        fixtures = pd.DataFrame()
-        live_data_historical = pd.DataFrame()
     
     team_display
     
@@ -291,8 +288,9 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
     
     def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek, live_data_hist=None):
         """Calculate expected points for all players using improved XP model with form weighting"""
+        empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
+        
         if players_data.empty or not target_gameweek:
-            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md("Select gameweek and load data first"), empty_df
         
         try:
@@ -367,21 +365,20 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             return create_xp_results_display(players_xp, target_gameweek, mo), players_xp
             
         except ImportError as e:
-            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md("❌ Could not load improved XP model - check xp_model.py"), empty_df
         except Exception as e:
-            empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
             return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
+    
+    # Initialize variables
+    players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
     
     try:
         if not players.empty and gameweek_input.value:
             xp_result, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
         else:
             xp_result = mo.md("Load gameweek data first")
-            players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
     except Exception as e:
         xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
-        players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
     
     xp_result
     
@@ -429,106 +426,6 @@ def __(current_squad, players_with_xp, mo):
     
     squad_form_content = create_squad_form_analysis(current_squad, players_with_xp, mo)
     squad_form_content
-    
-    def get_safe_columns(df, preferred_columns):
-        """Get columns that exist in the DataFrame"""
-        available_columns = list(df.columns)
-        safe_columns = []
-        for pref_col in preferred_columns:
-            if pref_col in available_columns:
-                safe_columns.append(pref_col)
-        return safe_columns if safe_columns else available_columns[:3]
-    
-    squad_available = hasattr(current_squad, 'empty') and not current_squad.empty
-    players_available = hasattr(players_with_xp, 'empty') and not players_with_xp.empty
-    momentum_available = hasattr(players_with_xp, 'columns') and 'momentum' in players_with_xp.columns
-    
-    if squad_available and players_available and momentum_available:
-        squad_with_form = current_squad.merge(
-            players_with_xp[['player_id', 'xP', 'momentum', 'form_multiplier', 'recent_points_per_game']], 
-            on='player_id', 
-            how='left'
-        )
-        
-        if not squad_with_form.empty:
-            squad_insights = []
-            
-            squad_momentum = squad_with_form['momentum'].value_counts()
-            squad_avg_form = squad_with_form['form_multiplier'].mean()
-            
-            problem_players = squad_with_form[
-                squad_with_form['momentum'].isin(['❄️', '📉'])
-            ].sort_values('form_multiplier')
-            
-            top_performers = squad_with_form[
-                squad_with_form['momentum'].isin(['🔥', '📈'])
-            ].sort_values('xP', ascending=False)
-            
-            squad_insights.append(mo.md("### 🔍 Current Squad Form Analysis"))
-            
-            squad_insights.append(mo.md(f"""
-            **Your Squad Form Distribution:**
-            - 🔥 Hot: {squad_momentum.get('🔥', 0)} players - 📈 Rising: {squad_momentum.get('📈', 0)} players
-            - ➡️ Stable: {squad_momentum.get('➡️', 0)} players - 📉 Declining: {squad_momentum.get('📉', 0)} players - ❄️ Cold: {squad_momentum.get('❄️', 0)} players
-            
-            **Squad Average Form Multiplier:** {squad_avg_form:.2f}
-            """))
-            
-            hot_count = squad_momentum.get('🔥', 0) + squad_momentum.get('📈', 0)
-            cold_count = squad_momentum.get('❄️', 0) + squad_momentum.get('📉', 0)
-            
-            if hot_count >= 8:
-                health_status = "🔥 EXCELLENT - Squad is in great form, minimal transfers needed"
-                transfer_priority = "Low"
-            elif hot_count >= 5:
-                health_status = "📈 GOOD - Squad form is solid, consider tactical transfers"
-                transfer_priority = "Medium"
-            elif cold_count >= 8:
-                health_status = "❄️ POOR - Squad struggling, multiple transfers recommended"
-                transfer_priority = "High"
-            else:
-                health_status = "➡️ AVERAGE - Squad form is stable, monitor for improvements"
-                transfer_priority = "Low"
-            
-            squad_insights.append(mo.md("### 🎯 Squad Health Assessment"))
-            squad_insights.append(mo.md(f"""
-            {health_status}
-            
-            **Transfer Priority:** {transfer_priority}
-            """))
-            
-            if not top_performers.empty:
-                top_columns = get_safe_columns(top_performers, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
-                squad_insights.append(mo.md("### ⭐ Squad Stars (Keep!)"))
-                squad_insights.append(mo.ui.table(
-                    top_performers[top_columns].round(2),
-                    page_size=5
-                ))
-            
-            if not problem_players.empty:
-                problem_columns = get_safe_columns(problem_players, ['web_name', 'position', 'momentum', 'recent_points_per_game', 'xP'])
-                squad_insights.append(mo.md("### ⚠️ Problem Players (Consider Selling)"))
-                squad_insights.append(mo.ui.table(
-                    problem_players[problem_columns].round(2),
-                    page_size=5
-                ))
-            
-            squad_form_content = mo.vstack(squad_insights)
-        else:
-            squad_form_content = mo.md("⚠️ **Could not merge squad with form data**")
-    else:
-        debug_parts = []
-        if not squad_available:
-            debug_parts.append("No squad loaded")
-        if not players_available:
-            debug_parts.append("No player XP data")
-        if not momentum_available:
-            debug_parts.append("No form/momentum data")
-        
-        debug_msg = ", ".join(debug_parts)
-        squad_form_content = mo.md(f"⚠️ **Squad form analysis unavailable**\n\n_{debug_msg}_")
-    
-    squad_form_content
 
 
 @app.cell
@@ -570,6 +467,11 @@ def __(mo, pd, players_with_xp):
 
 @app.cell
 def __(mo, player_opts, attr_opts):
+    # Initialize variables once
+    player_selector = None
+    attribute_selector = None
+    multi_player_selector = None
+    
     if player_opts and attr_opts:
         player_selector = mo.ui.dropdown(
             options=player_opts,
@@ -589,22 +491,21 @@ def __(mo, player_opts, attr_opts):
             value=[]
         )
         
-        trends_ui = mo.vstack([
+        trends_content = [
             mo.md("### 📈 Player Performance Trends"),
             mo.md("*Track how players' attributes change over gameweeks*"),
             mo.hstack([player_selector, attribute_selector]),
             multi_player_selector,
             mo.md("---")
-        ])
+        ]
     else:
-        trends_ui = mo.vstack([
+        trends_content = [
             mo.md("### 📈 Player Performance Trends"),
             mo.md("⚠️ **Loading historical data...**"),
             mo.md("*This section loads live gameweek data directly from the API to show trends*")
-        ])
-        player_selector = None
-        attribute_selector = None
-        multi_player_selector = None
+        ]
+    
+    trends_ui = mo.vstack(trends_content)
     
     trends_ui
     
@@ -703,6 +604,11 @@ def __(mo):
 
 @app.cell
 def __(players_with_xp, mo):
+    # Initialize variables once
+    must_include_dropdown = None
+    must_exclude_dropdown = None
+    optimize_button = None
+    
     try:
         if not players_with_xp.empty:
             player_options = []
@@ -756,15 +662,9 @@ def __(players_with_xp, mo):
                 mo.md("3. Return here to run optimization"),
                 mo.md("---")
             ])
-            must_include_dropdown = None
-            must_exclude_dropdown = None
-            optimize_button = None
             
-    except Exception as e:
+    except Exception:
         constraints_ui = mo.md("⚠️ Error creating optimization interface - calculate XP first")
-        must_include_dropdown = None
-        must_exclude_dropdown = None
-        optimize_button = None
     
     constraints_ui
     
@@ -776,8 +676,8 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
     from fpl_optimization import optimize_team_with_transfers
     
     optimal_starting_11 = []
-    optimization_display = None
     optimal_scenario = {}
+    optimization_display = None  # Initialize once
     
     if optimize_button is not None and optimize_button.value:
         must_include_ids = set(must_include_dropdown.value) if must_include_dropdown is not None and must_include_dropdown.value else set()
@@ -793,7 +693,12 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
             )
             
             if isinstance(result, tuple) and len(result) == 3:
-                optimization_display, optimal_squad_df, optimal_scenario = result
+                optimization_display, optimal_squad_df, best_scenario = result
+                # Convert best_scenario to the expected optimal_scenario format for compatibility
+                optimal_scenario = {
+                    'best_scenario': best_scenario,
+                    'squad': optimal_squad_df
+                }
                 
                 if not optimal_squad_df.empty:
                     from fpl_optimization import get_best_starting_11
@@ -828,7 +733,8 @@ def __(current_squad, team_data, players_with_xp, mo, pd, optimize_button, must_
             optimization_display = mo.md(f"❌ Optimization failed: {str(e)}")
             optimal_starting_11 = []
             optimal_scenario = {}
-    else:
+    
+    if optimization_display is None:
         optimization_display = mo.md("👆 **Click the optimization button above to analyze transfer scenarios**")
     
     optimization_display
