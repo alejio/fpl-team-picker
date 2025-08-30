@@ -11,6 +11,25 @@ def __():
 
 
 @app.cell
+def __():
+    # Consolidated FPL visualization imports
+    from fpl_visualization import (
+        create_xp_results_display,
+        create_form_analytics_display,
+        create_player_trends_visualization,
+        create_trends_chart,
+        create_fixture_difficulty_visualization
+    )
+    return (
+        create_xp_results_display,
+        create_form_analytics_display,
+        create_player_trends_visualization,
+        create_trends_chart,
+        create_fixture_difficulty_visualization,
+    )
+
+
+@app.cell
 def __(mo):
     mo.md(
         r"""
@@ -288,8 +307,39 @@ def __(mo):
 
 
 @app.cell
-def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd):
-    from fpl_visualization import create_xp_results_display
+def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd, create_xp_results_display):
+    # XP Model Configuration Constants
+    XP_FORM_WEIGHT = 0.7  # 70% recent form, 30% season baseline
+    XP_FORM_WINDOW = 5    # 5 gameweek form window
+    XP_DEBUG = True       # Enable debug logging
+    
+    def merge_1gw_5gw_results(players_1gw, players_5gw):
+        """Merge 1GW and 5GW XP results with derived metrics"""
+        if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
+            merge_cols = ['player_id'] + [col for col in ['xP', 'xP_per_price', 'fixture_difficulty'] if col in players_5gw.columns]
+            
+            # Create 5GW suffixed columns
+            suffix_data = players_5gw[merge_cols].copy()
+            for col in merge_cols:
+                if col != 'player_id':
+                    suffix_data[f"{col}_5gw"] = suffix_data[col]
+                    suffix_data = suffix_data.drop(col, axis=1)
+            
+            players_merged = players_1gw.merge(suffix_data, on='player_id', how='left')
+        else:
+            # Fallback: estimate 5GW from 1GW
+            players_merged = players_1gw.copy()
+            players_merged['xP_5gw'] = players_merged['xP'] * 4.0
+            players_merged['xP_per_price_5gw'] = players_merged.get('xP_per_price', players_merged['xP']) * 4.0
+            players_merged['fixture_difficulty_5gw'] = players_merged.get('fixture_difficulty', 1.0)
+        
+        # Add derived metrics
+        players_merged['xP_horizon_advantage'] = players_merged['xP_5gw'] - (players_merged['xP'] * 5)
+        players_merged['fixture_outlook'] = players_merged['fixture_difficulty_5gw'].apply(
+            lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+        )
+        
+        return players_merged
     
     # XP calculation logic moved to direct XPModel usage
     
@@ -301,9 +351,9 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
             from xp_model import XPModel
             
             xp_model = XPModel(
-                form_weight=0.7,
-                form_window=5,
-                debug=True
+                form_weight=XP_FORM_WEIGHT,
+                form_window=XP_FORM_WINDOW,
+                debug=XP_DEBUG
             )
             
             # Calculate 1GW and 5GW expected points
@@ -327,35 +377,8 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                 gameweeks_ahead=5
             )
             
-            # Merge 1GW and 5GW results
-            if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
-                merge_cols = ['player_id']
-                for col_key in ['xP', 'xP_per_price', 'fixture_difficulty']:
-                    if col_key in players_5gw.columns:
-                        merge_cols.append(col_key)
-                
-                suffix_data = players_5gw[merge_cols].copy()
-                for merge_col in merge_cols:
-                    if merge_col != 'player_id':
-                        suffix_data[f"{merge_col}_5gw"] = suffix_data[merge_col]
-                        suffix_data = suffix_data.drop(merge_col, axis=1)
-                
-                players_with_xp = players_1gw.merge(
-                    suffix_data,
-                    on='player_id',
-                    how='left'
-                )
-            else:
-                players_with_xp = players_1gw.copy()
-                players_with_xp['xP_5gw'] = players_with_xp['xP'] * 4.0
-                players_with_xp['xP_per_price_5gw'] = players_with_xp.get('xP_per_price', players_with_xp['xP']) * 4.0
-                players_with_xp['fixture_difficulty_5gw'] = players_with_xp.get('fixture_difficulty', 1.0)
-            
-            # Add derived metrics
-            players_with_xp['xP_horizon_advantage'] = players_with_xp['xP_5gw'] - (players_with_xp['xP'] * 5)
-            players_with_xp['fixture_outlook'] = players_with_xp['fixture_difficulty_5gw'].apply(
-                lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
-            )
+            # Merge 1GW and 5GW results with derived metrics
+            players_with_xp = merge_1gw_5gw_results(players_1gw, players_5gw)
             
             xp_result = create_xp_results_display(players_with_xp, gameweek_input.value, mo)
         else:
@@ -398,9 +421,7 @@ def __(mo):
 
 
 @app.cell
-def __(players_with_xp, mo):
-    from fpl_visualization import create_form_analytics_display
-    
+def __(players_with_xp, mo, create_form_analytics_display):
     form_insights_display = create_form_analytics_display(players_with_xp, mo)
     form_insights_display
 
@@ -436,8 +457,7 @@ def __(mo):
 
 
 @app.cell
-def __(mo, pd, players_with_xp):
-    from fpl_visualization import create_player_trends_visualization
+def __(mo, pd, players_with_xp, create_player_trends_visualization):
     
     # Initialize defaults first to avoid marimo dependency issues
     player_opts = []
@@ -505,9 +525,7 @@ def __(mo, player_opts, attr_opts):
 
 
 @app.cell
-def __(mo, player_selector, attribute_selector, multi_player_selector, trends_data, pd):
-    from fpl_visualization import create_trends_chart
-    
+def __(mo, player_selector, attribute_selector, multi_player_selector, trends_data, pd, create_trends_chart):
     # Initialize once
     trends_chart = None
     
@@ -555,8 +573,7 @@ def __(mo):
 
 
 @app.cell
-def __(gameweek_input, mo, pd):
-    from fpl_visualization import create_fixture_difficulty_visualization
+def __(gameweek_input, mo, pd, create_fixture_difficulty_visualization):
     
     # Initialize once
     fixture_analysis = None
