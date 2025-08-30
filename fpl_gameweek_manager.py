@@ -291,14 +291,13 @@ def __(mo):
 def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input, mo, pd):
     from fpl_visualization import create_xp_results_display
     
-    def calculate_expected_points_all_players(players_data, teams_data, xg_rates_data, fixtures_data, target_gameweek, live_data_hist=None):
-        """Calculate expected points for all players using improved XP model with form weighting"""
-        empty_df = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw'])
-        
-        if players_data.empty or not target_gameweek:
-            return mo.md("Select gameweek and load data first"), empty_df
-        
-        try:
+    # XP calculation logic moved to direct XPModel usage
+    
+    # Initialize variables
+    players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
+    
+    try:
+        if not players.empty and gameweek_input.value:
             from xp_model import XPModel
             
             xp_model = XPModel(
@@ -307,81 +306,62 @@ def __(players, teams, xg_rates, fixtures, live_data_historical, gameweek_input,
                 debug=True
             )
             
+            # Calculate 1GW and 5GW expected points
             players_1gw = xp_model.calculate_expected_points(
-                players_data=players_data,
-                teams_data=teams_data,
-                xg_rates_data=xg_rates_data,
-                fixtures_data=fixtures_data,
-                target_gameweek=target_gameweek,
-                live_data=live_data_hist,
+                players_data=players,
+                teams_data=teams,
+                xg_rates_data=xg_rates,
+                fixtures_data=fixtures,
+                target_gameweek=gameweek_input.value,
+                live_data=live_data_historical,
                 gameweeks_ahead=1
             )
             
             players_5gw = xp_model.calculate_expected_points(
-                players_data=players_data,
-                teams_data=teams_data,
-                xg_rates_data=xg_rates_data,
-                fixtures_data=fixtures_data,
-                target_gameweek=target_gameweek,
-                live_data=live_data_hist,
+                players_data=players,
+                teams_data=teams,
+                xg_rates_data=xg_rates,
+                fixtures_data=fixtures,
+                target_gameweek=gameweek_input.value,
+                live_data=live_data_historical,
                 gameweeks_ahead=5
             )
             
-            try:
-                if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
-                    merge_cols = ['player_id']
-                    for col_key in ['xP', 'xP_per_price', 'fixture_difficulty']:
-                        if col_key in players_5gw.columns:
-                            merge_cols.append(col_key)
-                    
-                    suffix_data = players_5gw[merge_cols].copy()
-                    for merge_col in merge_cols:
-                        if merge_col != 'player_id':
-                            suffix_data[f"{merge_col}_5gw"] = suffix_data[merge_col]
-                            suffix_data = suffix_data.drop(merge_col, axis=1)
-                    
-                    players_xp = players_1gw.merge(
-                        suffix_data,
-                        on='player_id',
-                        how='left'
-                    )
-                    
-                else:
-                    players_xp = players_1gw.copy()
-                    players_xp['xP_5gw'] = players_xp['xP'] * 4.0
-                    players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
-                    players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
-                    
-            except Exception as e:
-                players_xp = players_1gw.copy()
-                players_xp['xP_5gw'] = players_xp['xP'] * 4.0
-                players_xp['xP_per_price_5gw'] = players_xp.get('xP_per_price', players_xp['xP']) * 4.0
-                players_xp['fixture_difficulty_5gw'] = players_xp.get('fixture_difficulty', 1.0)
-            
-            try:
-                players_xp['xP_horizon_advantage'] = players_xp['xP_5gw'] - (players_xp['xP'] * 5)
-                players_xp['fixture_outlook'] = players_xp['fixture_difficulty_5gw'].apply(
-                    lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+            # Merge 1GW and 5GW results
+            if 'player_id' in players_1gw.columns and 'player_id' in players_5gw.columns:
+                merge_cols = ['player_id']
+                for col_key in ['xP', 'xP_per_price', 'fixture_difficulty']:
+                    if col_key in players_5gw.columns:
+                        merge_cols.append(col_key)
+                
+                suffix_data = players_5gw[merge_cols].copy()
+                for merge_col in merge_cols:
+                    if merge_col != 'player_id':
+                        suffix_data[f"{merge_col}_5gw"] = suffix_data[merge_col]
+                        suffix_data = suffix_data.drop(merge_col, axis=1)
+                
+                players_with_xp = players_1gw.merge(
+                    suffix_data,
+                    on='player_id',
+                    how='left'
                 )
-            except Exception as e:
-                players_xp['xP_horizon_advantage'] = 0
-                players_xp['fixture_outlook'] = '🟡 Average'
+            else:
+                players_with_xp = players_1gw.copy()
+                players_with_xp['xP_5gw'] = players_with_xp['xP'] * 4.0
+                players_with_xp['xP_per_price_5gw'] = players_with_xp.get('xP_per_price', players_with_xp['xP']) * 4.0
+                players_with_xp['fixture_difficulty_5gw'] = players_with_xp.get('fixture_difficulty', 1.0)
             
-            return create_xp_results_display(players_xp, target_gameweek, mo), players_xp
+            # Add derived metrics
+            players_with_xp['xP_horizon_advantage'] = players_with_xp['xP_5gw'] - (players_with_xp['xP'] * 5)
+            players_with_xp['fixture_outlook'] = players_with_xp['fixture_difficulty_5gw'].apply(
+                lambda x: '🟢 Easy' if x >= 1.15 else '🟡 Average' if x >= 0.85 else '🔴 Hard'
+            )
             
-        except ImportError as e:
-            return mo.md("❌ Could not load improved XP model - check xp_model.py"), empty_df
-        except Exception as e:
-            return mo.md(f"❌ Error calculating expected points: {e}"), empty_df
-    
-    # Initialize variables
-    players_with_xp = pd.DataFrame(columns=['web_name', 'position', 'name', 'price', 'player_id', 'xP', 'xP_5gw', 'fixture_outlook'])
-    
-    try:
-        if not players.empty and gameweek_input.value:
-            xp_result, players_with_xp = calculate_expected_points_all_players(players, teams, xg_rates, fixtures, gameweek_input.value, live_data_historical)
+            xp_result = create_xp_results_display(players_with_xp, gameweek_input.value, mo)
         else:
             xp_result = mo.md("Load gameweek data first")
+    except ImportError as e:
+        xp_result = mo.md("❌ Could not load XPModel - check xp_model.py")
     except Exception as e:
         xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
     
