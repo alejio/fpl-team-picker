@@ -22,5 +22,9 @@ dev = [
     "vulture>=2.14",
 ]
 
+[project.scripts]
+fpl-season-planner = "fpl_team_picker.interfaces.season_planner:main"
+fpl-gameweek-manager = "fpl_team_picker.interfaces.gameweek_manager:main"
+
 [tool.uv.sources]
 fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
