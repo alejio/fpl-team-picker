@@ -689,29 +689,6 @@ def create_fixture_difficulty_visualization(start_gw: int, num_gws: int = 5, mo_
         return mo_ref.md(f"❌ **Could not create fixture difficulty analysis:** {e}") if mo_ref else None
 
 
-def _get_attribute_options() -> List[Dict]:
-    """Helper function to get attribute options for labeling"""
-    return [
-        {"label": "Total Points", "value": "total_points"},
-        {"label": "Points Per Game", "value": "points_per_game"},
-        {"label": "Minutes Played", "value": "minutes"},
-        {"label": "Goals Scored", "value": "goals_scored"},
-        {"label": "Assists", "value": "assists"},
-        {"label": "Expected Goals (xG)", "value": "expected_goals"},
-        {"label": "Expected Assists (xA)", "value": "expected_assists"},
-        {"label": "xG per 90", "value": "xg_per_90"},
-        {"label": "xA per 90", "value": "xa_per_90"},
-        {"label": "Clean Sheets", "value": "clean_sheets"},
-        {"label": "Yellow Cards", "value": "yellow_cards"},
-        {"label": "Red Cards", "value": "red_cards"},
-        {"label": "Bonus Points", "value": "bonus"},
-        {"label": "ICT Index", "value": "ict_index"},
-        {"label": "Price (£m)", "value": "now_cost"},
-        {"label": "Selected By %", "value": "selected_by_percent"},
-        {"label": "Value Ratio (pts/£1m)", "value": "value_ratio"}
-    ]
-
-
 def create_xp_results_display(players_xp: pd.DataFrame, target_gameweek: int, mo_ref) -> object:
     """
     Create comprehensive XP results display with form analysis and strategic insights
