@@ -202,8 +202,8 @@ def fetch_manager_team(previous_gameweek: int) -> Optional[Dict]:
             "manager_id": manager_info.get('manager_id', 0),
             "entry_name": manager_info.get('entry_name', 'My Team'),
             "total_points": manager_info.get('summary_overall_points', 0),
-            "bank": manager_info.get('bank', 0),
-            "team_value": manager_info.get('value', 100.0),
+            "bank": manager_info.get('bank', 0) / 10.0,  # Convert from 0.1M units to millions
+            "team_value": manager_info.get('team_value', 1000) / 10.0,  # Convert from 0.1M units to millions
             "picks": picks,
             "free_transfers": 1  # Default to 1 free transfer
         }
