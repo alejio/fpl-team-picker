@@ -325,7 +325,7 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
 
 def create_trends_chart(data: pd.DataFrame, selected_player: int, selected_attr: str, multi_players: Optional[List[int]] = None, mo_ref=None) -> object:
     """
-    Create interactive trends chart
+    Create interactive trends chart with multi-player comparison support
     
     Args:
         data: Historical data DataFrame
@@ -368,49 +368,82 @@ def create_trends_chart(data: pd.DataFrame, selected_player: int, selected_attr:
                 print(f"❌ Could not convert player_id to int: {player_id}")
                 return mo_ref.md("❌ **Invalid player selection**") if mo_ref else None
         
-        # Filter data for selected player
-        player_data = data[data['player_id'] == player_id].copy()
-        
-        if player_data.empty:
-            return mo_ref.md(f"❌ **No data found for player ID {player_id}**") if mo_ref else None
-            
-        # Check if attribute exists
-        if attr_name not in player_data.columns:
+        # Check if attribute exists in data
+        if attr_name not in data.columns:
             return mo_ref.md(f"❌ **Attribute '{attr_name}' not available**") if mo_ref else None
         
-        # Create a simple chart with error handling
+        # Create a chart with error handling
         import plotly.graph_objects as go
         
         fig = go.Figure()
         
-        # Get player name
-        player_name = player_data['web_name'].iloc[0] if 'web_name' in player_data.columns else f"Player {player_id}"
+        # Collect all player IDs to plot (primary + multi-selection)
+        all_player_ids = [player_id]
+        if multi_players:
+            # Handle different multi_players formats
+            if isinstance(multi_players, list):
+                for mp in multi_players:
+                    mp_id = mp.get('value', mp) if isinstance(mp, dict) else mp
+                    if mp_id and mp_id != player_id:  # Avoid duplicates
+                        try:
+                            all_player_ids.append(int(mp_id))
+                        except (ValueError, TypeError):
+                            continue
         
-        # Sort by gameweek and clean data
-        player_data = player_data.sort_values('gameweek')
+        # Color palette for multiple players
+        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf']
         
-        # Add trace with error handling
-        try:
-            fig.add_trace(go.Scatter(
-                x=player_data['gameweek'],
-                y=player_data[attr_name],
-                mode='lines+markers',
-                name=player_name,
-                line=dict(width=3),
-                marker=dict(size=8)
-            ))
-        except Exception as trace_error:
-            print(f"❌ Error adding trace: {trace_error}")
-            return mo_ref.md(f"❌ **Error plotting data for {player_name}**") if mo_ref else None
+        # Plot each player
+        for i, pid in enumerate(all_player_ids):
+            player_data = data[data['player_id'] == pid].copy()
+            
+            if player_data.empty:
+                continue
+            
+            # Get player name
+            player_name = player_data['web_name'].iloc[0] if 'web_name' in player_data.columns else f"Player {pid}"
+            
+            # Sort by gameweek and clean data
+            player_data = player_data.sort_values('gameweek')
+            
+            # Add trace with error handling
+            try:
+                fig.add_trace(go.Scatter(
+                    x=player_data['gameweek'],
+                    y=player_data[attr_name],
+                    mode='lines+markers',
+                    name=player_name,
+                    line=dict(width=3, color=colors[i % len(colors)]),
+                    marker=dict(size=8, color=colors[i % len(colors)])
+                ))
+            except Exception as trace_error:
+                print(f"❌ Error adding trace for {player_name}: {trace_error}")
+                continue
         
-        # Simple layout
+        # Check if we successfully added any traces
+        if not fig.data:
+            return mo_ref.md("❌ **No valid data found for selected player(s)**") if mo_ref else None
+        
+        # Update layout
         attr_label = attr_name.replace('_', ' ').title()
+        if len(all_player_ids) > 1:
+            title = f"Player Comparison: {attr_label} Over Time"
+        else:
+            main_player_name = fig.data[0].name if fig.data else "Player"
+            title = f"{main_player_name}: {attr_label} Over Time"
+        
         fig.update_layout(
-            title=f"{player_name}: {attr_label} Over Time",
+            title=title,
             xaxis_title="Gameweek",
             yaxis_title=attr_label,
-            height=400,
-            showlegend=True
+            height=500,
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=0.99,
+                xanchor="left",
+                x=1.01
+            )
         )
         
         # Return using marimo's plotly support
