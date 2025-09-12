@@ -155,13 +155,13 @@ def premium_acquisition_planner(current_squad: pd.DataFrame, all_players: pd.Dat
     return scenarios[:top_n]
 
 
-def get_best_starting_11(squad_df: pd.DataFrame, xp_column: str = 'xP_5gw') -> Tuple[List[Dict], str, float]:
+def get_best_starting_11(squad_df: pd.DataFrame, xp_column: str = 'xP') -> Tuple[List[Dict], str, float]:
     """
     Get best starting 11 from squad using specified XP column
     
     Args:
         squad_df: Squad DataFrame
-        xp_column: Column to use for XP sorting ('xP' or 'xP_5gw')
+        xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_5gw' for strategic)
         
     Returns:
         Tuple of (best_11_list, formation_name, total_xp)
@@ -169,8 +169,8 @@ def get_best_starting_11(squad_df: pd.DataFrame, xp_column: str = 'xP_5gw') -> T
     if len(squad_df) < 11:
         return [], "", 0
     
-    # Fallback to regular XP if 5GW not available
-    sort_col = xp_column if xp_column in squad_df.columns else 'xP'
+    # Default to current gameweek XP, fallback to 5GW if current not available
+    sort_col = xp_column if xp_column in squad_df.columns else ('xP_5gw' if 'xP_5gw' in squad_df.columns else 'xP')
     
     # Group by position and sort by XP
     by_position = {'GKP': [], 'DEF': [], 'MID': [], 'FWD': []}
@@ -268,7 +268,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
     if must_exclude_ids:
         all_players = all_players[~all_players['player_id'].isin(must_exclude_ids)]
     
-    # Get best starting 11 from current squad
+    # Get best starting 11 from current squad (use 5GW for strategic transfer planning)
     current_best_11, current_formation, current_xp = get_best_starting_11(current_squad_with_xp, 'xP_5gw')
     
     print(f"📊 Current squad: {current_xp:.2f} 5GW-xP | Formation: {current_formation}")
@@ -534,7 +534,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
 
 def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     """
-    Select captain from starting 11 based on XP and risk factors
+    Select captain from starting 11 based on current gameweek XP and risk factors
     
     Args:
         starting_11: List of starting 11 player dictionaries
@@ -546,33 +546,55 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     if not starting_11:
         return mo_ref.md("⚠️ **No starting 11 available for captain selection**") if mo_ref else None
     
-    # Sort by 5-GW XP (strategic captain choice)
-    captain_candidates = sorted(starting_11, key=lambda p: p.get('xP_5gw', p.get('xP', 0)), reverse=True)
+    # Sort by 1-GW XP (immediate gameweek captain choice)
+    captain_candidates = sorted(starting_11, key=lambda p: p.get('xP', 0), reverse=True)
     
     captain_analysis = []
     
     for i, player in enumerate(captain_candidates[:5]):  # Top 5 candidates
-        xp_5gw = player.get('xP_5gw', 0)
         xp_1gw = player.get('xP', 0)
         fixture_outlook = player.get('fixture_outlook', '🟡 Average')
         
-        # Risk assessment
+        # Enhanced risk assessment for immediate gameweek
+        risk_factors = []
+        risk_level = "🟢 Low"
+        
+        # Injury/availability risk
         if player.get('status') in ['i', 'd']:
-            risk = "🔴 High (injury risk)"
-        elif fixture_outlook == '🔴 Hard':
-            risk = "🟡 Medium (hard fixture)"
+            risk_factors.append("injury risk")
+            risk_level = "🔴 High"
+        
+        # Fixture difficulty risk
+        if 'Hard' in fixture_outlook or '🔴' in fixture_outlook:
+            risk_factors.append("hard fixture")
+            if risk_level == "🟢 Low":
+                risk_level = "🟡 Medium"
+        
+        # Minutes certainty
+        expected_mins = player.get('expected_minutes', 90)
+        if expected_mins < 60:
+            risk_factors.append("rotation risk")
+            risk_level = "🟡 Medium" if risk_level == "🟢 Low" else risk_level
+        
+        # Combine risk description
+        if risk_factors:
+            risk_desc = f"{risk_level} ({', '.join(risk_factors)})"
         else:
-            risk = "🟢 Low"
+            risk_desc = risk_level
+        
+        # Calculate captaincy potential (XP * 2 for double points)
+        captain_potential = xp_1gw * 2
         
         captain_analysis.append({
             'Rank': i + 1,
             'Player': player['web_name'],
             'Position': player['position'],
             'Price': f"£{player['price']:.1f}m",
-            '1GW XP': f"{xp_1gw:.2f}",
-            '5GW XP': f"{xp_5gw:.2f}",
-            'Fixtures': fixture_outlook,
-            'Risk': risk,
+            'GW XP': f"{xp_1gw:.2f}",
+            'Captain Pts': f"{captain_potential:.1f}",
+            'Minutes': f"{expected_mins:.0f}",
+            'Fixture': fixture_outlook.replace('🟢 Easy', '🟢').replace('🟡 Average', '🟡').replace('🔴 Hard', '🔴'),
+            'Risk': risk_desc,
             'Recommendation': '👑 Captain' if i == 0 else '(VC)' if i == 1 else ''
         })
     
@@ -581,19 +603,29 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     captain_pick = captain_candidates[0]
     vice_pick = captain_candidates[1] if len(captain_candidates) > 1 else captain_candidates[0]
     
+    # Calculate captaincy upside
+    captain_upside = captain_pick.get('xP', 0) * 2
+    vice_upside = vice_pick.get('xP', 0) * 2
+    differential = captain_upside - vice_upside
+    
     summary = f"""
-### 👑 Captain Selection
+### 👑 Captain Selection (Current Gameweek Focus)
 
 **Recommended Captain:** {captain_pick['web_name']} ({captain_pick['position']})
-- **5-GW XP:** {captain_pick.get('xP_5gw', 0):.2f}
-- **Fixtures:** {captain_pick.get('fixture_outlook', 'Unknown')}
+- **Expected Points:** {captain_pick.get('xP', 0):.2f} → **{captain_upside:.1f} as captain**
+- **Minutes:** {captain_pick.get('expected_minutes', 90):.0f}' expected
+- **Fixture:** {captain_pick.get('fixture_outlook', 'Unknown')}
 
 **Vice Captain:** {vice_pick['web_name']} ({vice_pick['position']})
+- **Expected Points:** {vice_pick.get('xP', 0):.2f} → **{vice_upside:.1f} as captain**
 
-**Captain Analysis:**
+**Captain Advantage:** +{differential:.1f} points over vice captain
+
+**Current Gameweek Analysis:**
+*Captain selection optimized for immediate fixture only - can be changed weekly*
 """
     
     return mo_ref.vstack([
         mo_ref.md(summary),
-        mo_ref.ui.table(captain_df, page_size=5)  # Keep small for captain selection
+        mo_ref.ui.table(captain_df, page_size=5)
     ]) if mo_ref else captain_df

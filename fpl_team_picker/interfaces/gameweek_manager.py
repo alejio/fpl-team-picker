@@ -731,7 +731,8 @@ def _(
 
                 if not optimal_squad_df.empty:
                     from fpl_team_picker.optimization.optimizer import get_best_starting_11
-                    optimal_starting_11, formation, xp_total = get_best_starting_11(optimal_squad_df)
+                    # Use current gameweek XP for starting 11 selection (can change weekly)
+                    optimal_starting_11, formation, xp_total = get_best_starting_11(optimal_squad_df, 'xP')
 
                     if optimal_starting_11:
                         starting_11_df = pd.DataFrame(optimal_starting_11)
@@ -744,8 +745,8 @@ def _(
                         starting_11_display = mo.vstack([
                             optimization_display,
                             mo.md("---"),
-                            mo.md(f"### 🏆 Optimal Starting 11 ({formation})"),
-                            mo.md(f"**Total 5-GW XP:** {xp_total:.2f}"),
+                            mo.md(f"### 🏆 Optimal Starting 11 - Current Gameweek ({formation})"),
+                            mo.md(f"**Total Current GW XP:** {xp_total:.2f} | *Optimized for this gameweek only*"),
                             mo.ui.table(starting_11_df[display_cols].round(2) if display_cols else starting_11_df, page_size=11)
                         ])
                         optimization_display = starting_11_display
