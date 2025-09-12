@@ -344,8 +344,8 @@ class DynamicTeamStrength:
     def _calculate_reputation_strength(self, all_teams: List[str]) -> Dict[str, float]:
         """Factor 3: Reputation (20% weight) - Historical success over 3-5 seasons"""
         reputation_ratings = {
-            # Big 6 - traditional top teams
-            'Manchester City': 1.3, 'Liverpool': 1.25, 'Arsenal': 1.25,
+            # Big 6 - traditional top teams (Liverpool updated for 2024-25 championship)
+            'Liverpool': 1.3, 'Manchester City': 1.25, 'Arsenal': 1.25,
             'Chelsea': 1.2, 'Manchester United': 1.15, 'Tottenham': 1.15,
             
             # Strong teams - recent success
