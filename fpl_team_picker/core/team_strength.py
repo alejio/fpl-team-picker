@@ -30,6 +30,19 @@ class DynamicTeamStrength:
     - Home/away venue-specific adjustments
     """
     
+    # 2024-25 Premier League final standings
+    HISTORICAL_POSITIONS = {
+        'Liverpool': 1, 'Arsenal': 2, 'Manchester City': 3, 'Chelsea': 4,
+        'Newcastle United': 5, 'Aston Villa': 6, 'Nottingham Forest': 7, 'Brighton & Hove Albion': 8,
+        'Bournemouth': 9, 'Brentford': 10, 'Fulham': 11, 'Crystal Palace': 12,
+        'Everton': 13, 'West Ham United': 14, 'Manchester United': 15, 'Wolverhampton Wanderers': 16,
+        'Tottenham Hotspur': 17, 'Leicester City': 18, 'Ipswich Town': 19, 'Southampton': 20,
+        # Handle common team name variations
+        'Newcastle': 5, 'Brighton': 8, 'West Ham': 14, 'Man Utd': 15, 'Manchester Utd': 15,
+        'Wolves': 16, 'Spurs': 17, 'Tottenham': 17, 'Leicester': 18, 'Ipswich': 19,
+        'Man City': 3, "Nott'm Forest": 7
+    }
+    
     def __init__(self, debug: bool = None):
         """
         Initialize dynamic team strength calculator
@@ -245,33 +258,9 @@ class DynamicTeamStrength:
     def _calculate_position_strength(self, target_gameweek: int, all_teams: List[str]) -> Dict[str, float]:
         """Factor 1: League Position (25% weight)"""
         try:
-            # For historical baseline, use static 2023-24 final positions
-            # In future: get actual current season league table
-            
-            historical_positions = {
-                'Manchester City': 1, 'Arsenal': 2, 'Liverpool': 3, 'Aston Villa': 4,
-                'Tottenham': 5, 'Chelsea': 6, 'Newcastle': 7, 'Manchester United': 8,
-                'West Ham': 9, 'Crystal Palace': 10, 'Brighton': 11, 'Bournemouth': 12,
-                'Fulham': 13, 'Wolves': 14, 'Everton': 15, 'Brentford': 16,
-                'Nottingham Forest': 17, 'Luton': 18, 'Burnley': 19, 'Sheffield United': 20,
-                # Current season teams
-                'Leicester': 16, 'Southampton': 18, 'Ipswich': 20
-            }
-            
             position_strengths = {}
             for team_name in all_teams:
-                # Handle team name variations
-                lookup_name = team_name
-                if team_name == 'Man City':
-                    lookup_name = 'Manchester City'
-                elif team_name == 'Man Utd':
-                    lookup_name = 'Manchester United'
-                elif team_name == "Nott'm Forest":
-                    lookup_name = 'Nottingham Forest'
-                elif team_name == 'Spurs':
-                    lookup_name = 'Tottenham'
-                
-                position = historical_positions.get(lookup_name, 15)  # Default to mid-table
+                position = self.HISTORICAL_POSITIONS.get(team_name, 15)  # Default to mid-table
                 
                 # Convert position to strength [0.7, 1.3] - higher position = lower number = higher strength
                 strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
@@ -469,22 +458,10 @@ class DynamicTeamStrength:
 
     def _get_static_fallback_ratings(self) -> Dict[str, float]:
         """
-        Fallback to static 2023-24 final table ratings if dynamic calculation fails
+        Fallback to static 2024-25 final table ratings if dynamic calculation fails
         """
-        team_positions = {
-            'Manchester City': 1, 'Arsenal': 2, 'Liverpool': 3, 'Aston Villa': 4,
-            'Tottenham': 5, 'Chelsea': 6, 'Newcastle': 7, 'Manchester Utd': 8,
-            'West Ham': 9, 'Crystal Palace': 10, 'Brighton': 11, 'Bournemouth': 12,
-            'Fulham': 13, 'Wolves': 14, 'Everton': 15, 'Brentford': 16,
-            'Nottingham Forest': 17, 'Luton': 18, 'Burnley': 19, 'Sheffield Utd': 20,
-            # Handle team name variations
-            'Man City': 1, 'Man Utd': 8, "Nott'm Forest": 17, 'Spurs': 5,
-            # Current season promoted teams (conservative ratings)
-            'Leicester': 16, 'Southampton': 18, 'Ipswich': 20
-        }
-        
         strength_ratings = {}
-        for team, position in team_positions.items():
+        for team, position in self.HISTORICAL_POSITIONS.items():
             if position <= 20:
                 strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
             else:
