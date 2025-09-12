@@ -730,7 +730,7 @@ def _(
                 }
 
                 if not optimal_squad_df.empty:
-                    from fpl_team_picker.optimization.optimizer import get_best_starting_11
+                    from fpl_team_picker.optimization.optimizer import get_best_starting_11, get_bench_players
                     # Use current gameweek XP for starting 11 selection (can change weekly)
                     optimal_starting_11, formation, xp_total = get_best_starting_11(optimal_squad_df, 'xP')
 
@@ -742,13 +742,33 @@ def _(
                             if disp_col in starting_11_df.columns:
                                 display_cols.append(disp_col)
 
+                        # Get bench players
+                        bench_players = get_bench_players(optimal_squad_df, optimal_starting_11, 'xP')
+                        bench_components = []
+                        
+                        if bench_players:
+                            bench_df = pd.DataFrame(bench_players)
+                            bench_xp_total = sum(p.get('xP', 0) for p in bench_players)
+                            
+                            bench_display_cols = []
+                            for disp_col in ['web_name', 'position', 'name', 'price', 'xP', 'xP_5gw', 'fixture_outlook']:
+                                if disp_col in bench_df.columns:
+                                    bench_display_cols.append(disp_col)
+                            
+                            bench_components.extend([
+                                mo.md("---"),
+                                mo.md(f"### 🪑 Bench - Current Gameweek"),
+                                mo.md(f"**Total Bench GW XP:** {bench_xp_total:.2f} | *Ordered by expected points*"),
+                                mo.ui.table(bench_df[bench_display_cols].round(2) if bench_display_cols else bench_df, page_size=4)
+                            ])
+
                         starting_11_display = mo.vstack([
                             optimization_display,
                             mo.md("---"),
                             mo.md(f"### 🏆 Optimal Starting 11 - Current Gameweek ({formation})"),
                             mo.md(f"**Total Current GW XP:** {xp_total:.2f} | *Optimized for this gameweek only*"),
                             mo.ui.table(starting_11_df[display_cols].round(2) if display_cols else starting_11_df, page_size=11)
-                        ])
+                        ] + bench_components)
                         optimization_display = starting_11_display
                     else:
                         optimal_starting_11 = []

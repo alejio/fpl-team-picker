@@ -209,6 +209,38 @@ def get_best_starting_11(squad_df: pd.DataFrame, xp_column: str = 'xP') -> Tuple
     return best_11, best_formation, best_xp
 
 
+def get_bench_players(squad_df: pd.DataFrame, starting_11: List[Dict], xp_column: str = 'xP') -> List[Dict]:
+    """
+    Get bench players (remaining 4 players) from squad ordered by XP
+    
+    Args:
+        squad_df: Squad DataFrame
+        starting_11: List of starting 11 player dictionaries
+        xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_5gw' for strategic)
+        
+    Returns:
+        List of bench player dictionaries ordered by XP (highest first)
+    """
+    if len(squad_df) < 15:
+        return []
+    
+    # Get player IDs from starting 11
+    starting_11_ids = {player['player_id'] for player in starting_11}
+    
+    # Get remaining players (bench)
+    bench_players = []
+    sort_col = xp_column if xp_column in squad_df.columns else ('xP_5gw' if 'xP_5gw' in squad_df.columns else 'xP')
+    
+    for _, player in squad_df.iterrows():
+        if player['player_id'] not in starting_11_ids:
+            bench_players.append(player.to_dict())
+    
+    # Sort bench by XP (highest first)
+    bench_players.sort(key=lambda p: p.get(sort_col, 0), reverse=True)
+    
+    return bench_players[:4]  # Maximum 4 bench players
+
+
 def optimize_team_with_transfers(current_squad: pd.DataFrame, 
                                 team_data: Dict, 
                                 players_with_xp: pd.DataFrame,
