@@ -6,10 +6,118 @@ Handles all data loading operations for FPL gameweek management including:
 - Historical form data collection
 - Manager team data fetching
 - Data preprocessing and standardization
+- Automatic gameweek detection based on fixture dates
 """
 
 import pandas as pd
+from datetime import datetime
 from typing import Dict, Tuple, Optional
+
+
+def get_current_gameweek_info() -> Dict:
+    """
+    Automatically detect current gameweek based on fixture dates and data availability.
+    
+    Returns:
+        Dictionary containing:
+        - current_gameweek: The gameweek we should be preparing for
+        - status: 'upcoming', 'in_progress', 'completed', or 'unknown'
+        - available_data: List of gameweeks with live data available
+        - message: Human-readable status message
+    """
+    from client import FPLDataClient
+    
+    client = FPLDataClient()
+    
+    try:
+        # Get fixture data to determine current gameweek
+        fixtures = client.get_fixtures_normalized()
+        if fixtures.empty:
+            return {
+                'current_gameweek': 1,
+                'status': 'unknown',
+                'available_data': [],
+                'message': '⚠️ No fixture data available'
+            }
+        
+        # Convert kickoff times to dates
+        fixtures['kickoff_datetime'] = pd.to_datetime(fixtures['kickoff_utc'])
+        fixtures['kickoff_date'] = fixtures['kickoff_datetime'].dt.date
+        today = datetime.now().date()
+        
+        # Find the current/next gameweek based on fixture dates
+        upcoming_fixtures = fixtures[fixtures['kickoff_date'] >= today].sort_values('kickoff_datetime')
+        
+        if not upcoming_fixtures.empty:
+            target_gameweek = int(upcoming_fixtures.iloc[0]['event'])
+        else:
+            # All fixtures are in the past - get the latest gameweek
+            past_fixtures = fixtures[fixtures['kickoff_date'] < today].sort_values('kickoff_datetime', ascending=False)
+            if not past_fixtures.empty:
+                target_gameweek = int(past_fixtures.iloc[0]['event']) + 1
+            else:
+                target_gameweek = 1
+        
+        # Check what gameweek data is available
+        available_gws = []
+        for gw in range(1, min(target_gameweek + 2, 39)):  # Check up to 2 gameweeks ahead
+            try:
+                gw_data = client.get_gameweek_live_data(gw)
+                if not gw_data.empty:
+                    available_gws.append(gw)
+            except Exception:
+                continue
+        
+        # Determine status based on fixture timing and data availability
+        current_gw_fixtures = fixtures[fixtures['event'] == target_gameweek]
+        if not current_gw_fixtures.empty:
+            earliest_kickoff = current_gw_fixtures['kickoff_datetime'].min()
+            latest_kickoff = current_gw_fixtures['kickoff_datetime'].max()
+            
+            now = datetime.now()
+            
+            # Check if we're in the middle of the gameweek
+            if earliest_kickoff <= now <= latest_kickoff + pd.Timedelta(hours=2):
+                status = 'in_progress'
+                message = f"🕐 GW{target_gameweek} is currently in progress"
+            elif now > latest_kickoff + pd.Timedelta(hours=2):
+                # Gameweek completed, prepare for next
+                if target_gameweek in available_gws:
+                    status = 'completed'
+                    message = f"✅ GW{target_gameweek} completed, data available"
+                    target_gameweek += 1  # Move to next gameweek
+                else:
+                    status = 'completed'
+                    message = f"⏳ GW{target_gameweek} completed, waiting for data update"
+            else:
+                # Gameweek is upcoming
+                if target_gameweek == 1:
+                    status = 'upcoming'
+                    message = f"🚀 Preparing for GW{target_gameweek} (Season start)"
+                elif (target_gameweek - 1) in available_gws:
+                    status = 'upcoming'
+                    message = f"📋 Preparing for GW{target_gameweek}"
+                else:
+                    status = 'upcoming'
+                    message = f"⚠️ Preparing for GW{target_gameweek} - previous gameweek data not yet available"
+        else:
+            status = 'unknown'
+            message = f"❓ Unable to determine status for GW{target_gameweek}"
+        
+        return {
+            'current_gameweek': target_gameweek,
+            'status': status,
+            'available_data': available_gws,
+            'message': message
+        }
+        
+    except Exception as e:
+        return {
+            'current_gameweek': 1,
+            'status': 'unknown',
+            'available_data': [],
+            'message': f'❌ Error detecting gameweek: {str(e)[:50]}'
+        }
 
 
 def fetch_fpl_data(target_gameweek: int, form_window: int = 5) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, int, pd.DataFrame]:

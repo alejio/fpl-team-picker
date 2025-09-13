@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.14.16"
+__generated_with = "0.15.2"
 app = marimo.App(width="medium")
 
 
@@ -38,23 +38,6 @@ def _(mo):
 
     Transform your FPL strategy with data-driven weekly optimization and comprehensive form analysis.
 
-    ### 📋 Workflow Overview
-    1. **Configure Gameweek** - Select target gameweek for optimization
-    2. **Team Strength Analysis** - Dynamic strength ratings and venue adjustments  
-    3. **Expected Points Calculation** - Form-weighted XP with 1-GW vs 5-GW comparison
-    4. **Form Analytics Dashboard** - Hot/cold player insights and transfer targets
-    5. **Squad Health Assessment** - Current team form analysis
-    6. **Performance Trends** - Interactive player tracking over time
-    7. **Fixture Analysis** - 5-gameweek difficulty heatmaps
-    8. **Transfer Optimization** - Smart 0-3 transfer scenarios with budget analysis
-    9. **Captain Selection** - Risk-adjusted captaincy recommendations
-
-    ### 🔥 Key Features
-    - **Form-weighted predictions**: 70% recent form + 30% season baseline
-    - **Hot/Cold detection**: Player momentum indicators (🔥📈➡️📉❄️)
-    - **Strategic horizon**: Compare 1-GW tactical vs 5-GW strategic decisions
-    - **Premium acquisition planning**: Multi-transfer scenarios for expensive targets
-    - **Budget pool analysis**: Total available funds including sellable squad value
 
     ---
     """
@@ -65,9 +48,6 @@ def _(mo):
 @app.cell
 def _():
     import pandas as pd
-    import numpy as np
-    from datetime import datetime
-
     return (pd,)
 
 
@@ -89,40 +69,55 @@ def _(mo):
 
 @app.cell
 def _():
-    from fpl_team_picker.core.data_loader import fetch_fpl_data, fetch_manager_team, process_current_squad, load_gameweek_datasets
-
+    from fpl_team_picker.core.data_loader import fetch_fpl_data, fetch_manager_team, process_current_squad
     return fetch_fpl_data, fetch_manager_team, process_current_squad
 
 
 @app.cell
 def _(mo):
+    from fpl_team_picker.core.data_loader import get_current_gameweek_info
+
+    # Automatically detect current gameweek
+    gw_info = get_current_gameweek_info()
+    current_gw = gw_info['current_gameweek']
+    status_message = gw_info['message']
+    available_data = gw_info['available_data']
+
+    # Still provide manual override option
     gameweek_input = mo.ui.number(
-        value=2,
+        value=current_gw,
         start=1,
         stop=38,
-        label="Target Gameweek (we'll optimize for this GW using data from previous GW)"
+        label="Target Gameweek (auto-detected, but you can override)"
     )
 
-    mo.vstack([
-        mo.md("### 📅 Select Target Gameweek"),
-        mo.md("*We'll load your team from the previous gameweek and optimize for the target gameweek*"),
+    # Display status information
+    status_display = mo.vstack([
+        mo.md("### 📅 Current Gameweek Status"),
+        mo.md(status_message),
+        mo.md(f"**Available data:** GW{', GW'.join(map(str, available_data)) if available_data else 'None'}"),
         mo.md(""),
+        mo.md("**Target Gameweek:**"),
         gameweek_input,
         mo.md("---")
     ])
 
-    return (gameweek_input,)
+    status_display
+    return (gameweek_input, available_data, gw_info)
 
 
 @app.cell
 def _(
+    available_data,
     fetch_fpl_data,
     fetch_manager_team,
     gameweek_input,
+    gw_info,
     mo,
     pd,
     process_current_squad,
 ):
+
     # Initialize all variables with defaults first to avoid marimo dependency issues
     target_gw = gameweek_input.value if gameweek_input.value else None
     team_data = None
@@ -147,42 +142,12 @@ def _(
             previous_gw = target_gw - 1
             team_data = fetch_manager_team(previous_gw)
 
-            if target_gw == 2 and not team_data:
-                print("⚠️ No GW1 team data found - GW2 may be in progress")
-                print("💡 Try loading GW1 first to see your initial team")
-
-        # Check data availability
-        def check_data_availability():
-            """Check what gameweek data is currently available"""
-            try:
-                from client import FPLDataClient
-                client = FPLDataClient()
-
-                available_gws = []
-                for gw in range(1, 6):
-                    try:
-                        gw_data = client.get_gameweek_live_data(gw)
-                        if not gw_data.empty:
-                            available_gws.append(gw)
-                    except Exception:
-                        continue
-
-                return available_gws
-            except Exception:
-                return []
-
-        available_gameweeks = check_data_availability()
-        if available_gameweeks:
-            print(f"📊 Available gameweek data: {available_gameweeks}")
-        else:
-            print("⚠️ No gameweek data found in database")
-
-    # Create team display - initialize with default first
-    team_display = mo.md("Select target gameweek above to load team")
+    # Create team display based on gameweek and data availability
+    team_display = mo.md("Configure target gameweek above to load team data")
 
     if target_gw == 1:
+        # GW1 - Season start scenario
         available_columns = list(players.columns)
-        print(f"🔍 Available columns in players DataFrame: {available_columns}")
 
         display_columns = []
         for col_name in ['web_name', 'position', 'name', 'price', 'selected_by_percent']:
@@ -192,29 +157,20 @@ def _(
         if not display_columns:
             display_columns = available_columns[:5]
 
-        print(f"📊 Using columns for display: {display_columns}")
-
-        data_info = ""
-        if available_gameweeks:
-            if 1 in available_gameweeks:
-                data_info = "✅ GW1 data available for analysis"
-            else:
-                data_info = f"⚠️ GW1 data not found. Available: GW{', GW'.join(map(str, available_gameweeks))}"
-        else:
-            data_info = "⚠️ No gameweek data found in database"
-
         team_display = mo.vstack([
-            mo.md("### 🚀 GW1 Team Selection"),
+            mo.md("### 🚀 GW1 - Season Start"),
             mo.md(f"**Optimizing for GW{target_gw}**"),
-            mo.md(data_info),
-            mo.md("**Note:** No previous team data available for GW1. This will help you select your initial squad."),
+            mo.md("**Note:** This is the season start - no previous team data is expected."),
+            mo.md("Use this interface to analyze player options for your initial squad selection."),
             mo.md("**Available Players:**"),
             mo.ui.table(
-                players[display_columns].head(20).round(2),
+                players[display_columns].head(20).round(2) if not players.empty else pd.DataFrame(),
                 page_size=20
             )
         ])
-    elif team_data:
+
+    elif target_gw and team_data:
+        # Successfully loaded previous team data
         current_squad = process_current_squad(team_data, players, teams)
 
         team_display = mo.vstack([
@@ -223,36 +179,43 @@ def _(
             mo.md(f"**Optimizing for GW{target_gw}**"),
             mo.md("**Current Squad:**"),
             mo.ui.table(
-                current_squad[['web_name', 'position', 'price']].round(2),
+                current_squad[['web_name', 'position', 'price']].round(2) if not current_squad.empty else pd.DataFrame(),
                 page_size=15
             )
         ])
-    elif target_gw == 2:
-        available_info = ""
-        if available_gameweeks:
-            available_info = f"**Available data:** GW{', GW'.join(map(str, available_gameweeks))}"
-        else:
-            available_info = "**Available data:** None found"
 
-        team_display = mo.vstack([
-            mo.md("### ⚠️ GW2 Team Data Unavailable"),
-            mo.md(available_info),
-            mo.md(""),
-            mo.md("**Possible reasons:**"),
-            mo.md("• GW2 is currently in progress"),
-            mo.md("• No GW1 team data has been saved yet"),
-            mo.md("• Database connection issue"),
-            mo.md(""),
-            mo.md("**Suggestions:**"),
-            mo.md("• Try selecting GW1 to see available players"),
-            mo.md("• Check if your GW1 team has been saved"),
-            mo.md("• Wait for GW2 to complete and data to be updated")
-        ])
-    elif target_gw:
-        team_display = mo.md("❌ Could not load team data")
+    elif target_gw and not team_data:
+        # No team data available for previous gameweek
+        # Use already imported function and data from gameweek input cell
+        # gw_info and available_data should be available from that cell
+
+        # Provide context-specific messaging
+        if target_gw == 2:
+            team_display = mo.vstack([
+                mo.md("### ⚠️ GW2 - Previous Team Data Missing"),
+                mo.md(f"**Available data:** GW{', GW'.join(map(str, available_data)) if available_data else 'None'}"),
+                mo.md(""),
+                mo.md("**This usually happens when:**"),
+                mo.md("• GW1 hasn't completed yet, or"),
+                mo.md("• Your GW1 team data hasn't been saved to the database"),
+                mo.md(""),
+                mo.md("**Next steps:**"),
+                mo.md("• Wait for GW1 to complete and data to be updated, or"),
+                mo.md("• Use GW1 mode to analyze initial team selection")
+            ])
+        else:
+            team_display = mo.vstack([
+                mo.md(f"### ⚠️ GW{target_gw} - Previous Team Data Missing"),
+                mo.md(f"**Available data:** GW{', GW'.join(map(str, available_data)) if available_data else 'None'}"),
+                mo.md(""),
+                mo.md(f"Cannot load team data from GW{previous_gw}. This may be because:"),
+                mo.md(f"• GW{previous_gw} data isn't available yet, or"),
+                mo.md("• Database hasn't been updated with your team information"),
+                mo.md(""),
+                mo.md("**Suggestion:** Try selecting a gameweek where your previous team data is available.")
+            ])
 
     team_display
-
     return (
         current_squad,
         fixtures,
@@ -296,7 +259,6 @@ def _(gameweek_input, mo):
         team_strength_analysis = mo.md("Select target gameweek to see team strength analysis")
 
     team_strength_analysis
-
     return
 
 
@@ -382,7 +344,6 @@ def _(
         xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
 
     xp_result
-
     return (players_with_xp,)
 
 
@@ -468,7 +429,6 @@ def _(create_player_trends_visualization, pd, players_with_xp):
     except Exception:
         # Defaults already set above
         pass
-
     return attr_opts, player_opts, trends_data
 
 
@@ -515,7 +475,6 @@ def _(attr_opts, mo, player_opts):
     trends_ui = mo.vstack(trends_content)
 
     trends_ui
-
     return attribute_selector, multi_player_selector, player_selector
 
 
@@ -549,7 +508,6 @@ def _(
         trends_chart = mo.md("👆 **Select a player and attribute above to view trends**")
 
     trends_chart
-
     return
 
 
@@ -586,7 +544,6 @@ def _(create_fixture_difficulty_visualization, gameweek_input, mo):
         fixture_analysis = mo.md("Select target gameweek to see fixture difficulty analysis")
 
     fixture_analysis
-
     return
 
 
@@ -687,7 +644,6 @@ def _(mo, players_with_xp):
         optimize_button = mo.ui.run_button(label="Optimization Unavailable", disabled=True)
 
     constraints_ui
-
     return must_exclude_dropdown, must_include_dropdown, optimize_button
 
 
@@ -705,7 +661,6 @@ def _(
     from fpl_team_picker.optimization.optimizer import optimize_team_with_transfers
 
     optimal_starting_11 = []
-    optimal_scenario = {}
     optimization_display = None  # Initialize once
 
     if optimize_button is not None and optimize_button.value:
@@ -724,10 +679,6 @@ def _(
             if isinstance(result, tuple) and len(result) == 3:
                 optimization_display, optimal_squad_df, best_scenario = result
                 # Convert best_scenario to the expected optimal_scenario format for compatibility
-                optimal_scenario = {
-                    'best_scenario': best_scenario,
-                    'squad': optimal_squad_df
-                }
 
                 if not optimal_squad_df.empty:
                     from fpl_team_picker.optimization.optimizer import get_best_starting_11, get_bench_players
@@ -745,19 +696,19 @@ def _(
                         # Get bench players
                         bench_players = get_bench_players(optimal_squad_df, optimal_starting_11, 'xP')
                         bench_components = []
-                        
+
                         if bench_players:
                             bench_df = pd.DataFrame(bench_players)
                             bench_xp_total = sum(p.get('xP', 0) for p in bench_players)
-                            
+
                             bench_display_cols = []
                             for disp_col in ['web_name', 'position', 'name', 'price', 'xP', 'xP_5gw', 'fixture_outlook']:
                                 if disp_col in bench_df.columns:
                                     bench_display_cols.append(disp_col)
-                            
+
                             bench_components.extend([
                                 mo.md("---"),
-                                mo.md(f"### 🪑 Bench - Current Gameweek"),
+                                mo.md("### 🪑 Bench - Current Gameweek"),
                                 mo.md(f"**Total Bench GW XP:** {bench_xp_total:.2f} | *Ordered by expected points*"),
                                 mo.ui.table(bench_df[bench_display_cols].round(2) if bench_display_cols else bench_df, page_size=4)
                             ])
@@ -777,18 +728,15 @@ def _(
             else:
                 optimization_display = result if result else mo.md("⚠️ Optimization completed but no results returned")
                 optimal_starting_11 = []
-                optimal_scenario = {}
 
         except Exception as e:
             optimization_display = mo.md(f"❌ Optimization failed: {str(e)}")
             optimal_starting_11 = []
-            optimal_scenario = {}
 
     if optimization_display is None:
         optimization_display = mo.md("👆 **Click the optimization button above to analyze transfer scenarios**")
 
     optimization_display
-
     return (optimal_starting_11,)
 
 
@@ -854,7 +802,6 @@ def _(mo, optimal_starting_11):
         ])
 
     captain_display
-
     return
 
 
