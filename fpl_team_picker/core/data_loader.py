@@ -178,21 +178,49 @@ def fetch_fpl_data(target_gameweek: int, form_window: int = 5) -> Tuple[pd.DataF
     else:
         live_data_historical = pd.DataFrame()
         print("⚠️  No historical form data available")
-    
+
     # Try to get current gameweek live data with enhanced methods
     try:
         # Try detailed gameweek performance first
         current_live_data = client.get_gameweek_performance(target_gameweek)
         if not current_live_data.empty:
             print(f"✅ Found detailed live data for GW{target_gameweek} ({len(current_live_data)} players)")
+            # Standardize column names for compatibility
+            if 'gameweek' in current_live_data.columns and 'event' not in current_live_data.columns:
+                current_live_data['event'] = current_live_data['gameweek']
+            elif 'event' not in current_live_data.columns:
+                current_live_data['event'] = target_gameweek
         else:
             # Fallback to legacy live data
             current_live_data = client.get_gameweek_live_data(target_gameweek)
             if not current_live_data.empty:
                 print(f"✅ Found legacy live data for GW{target_gameweek}")
+                # Ensure event column exists
+                if 'event' not in current_live_data.columns:
+                    current_live_data['event'] = target_gameweek
     except Exception as e:
         print(f"⚠️  No current live data for GW{target_gameweek}: {str(e)[:50]}")
         current_live_data = pd.DataFrame()
+
+    # Combine historical and current live data
+    all_live_data = []
+    if not live_data_historical.empty:
+        all_live_data.append(live_data_historical)
+    if not current_live_data.empty:
+        all_live_data.append(current_live_data)
+
+    if all_live_data:
+        live_data_combined = pd.concat(all_live_data, ignore_index=True)
+        print(f"📊 Combined live data: {len(live_data_combined)} records across {len(live_data_combined['event'].unique()) if 'event' in live_data_combined.columns else 0} gameweeks")
+
+        # Convert string numeric columns to proper numeric types
+        numeric_columns = ['expected_goals', 'expected_assists', 'ict_index', 'influence', 'creativity', 'threat']
+        for col in numeric_columns:
+            if col in live_data_combined.columns:
+                live_data_combined[col] = pd.to_numeric(live_data_combined[col], errors='coerce')
+
+    else:
+        live_data_combined = live_data_historical  # Fallback to historical only
     
     # Merge players with current gameweek stats if available
     if not current_live_data.empty:
@@ -245,7 +273,7 @@ def fetch_fpl_data(target_gameweek: int, form_window: int = 5) -> Tuple[pd.DataF
     print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
     print(f"📅 Target GW: {target_gameweek}")
     
-    return players, teams, xg_rates, fixtures, target_gameweek, live_data_historical
+    return players, teams, xg_rates, fixtures, target_gameweek, live_data_combined
 
 
 def fetch_manager_team(previous_gameweek: int) -> Optional[Dict]:

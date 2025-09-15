@@ -16,6 +16,8 @@ dependencies = [
     "plotly>=6.3.0",
     "ruff>=0.12.10",
     "fpl-team-picker",
+    "xgboost>=3.0.5",
+    "scikit-learn>=1.7.2",
 ]
 
 [dependency-groups]
@@ -26,6 +28,7 @@ dev = [
 [project.scripts]
 fpl-season-planner = "fpl_team_picker.interfaces.season_planner:main"
 fpl-gameweek-manager = "fpl_team_picker.interfaces.gameweek_manager:main"
+fpl-ml-experiment = "fpl_team_picker.interfaces.ml_xp_experiment:main"
 
 [tool.uv]
 package = true
