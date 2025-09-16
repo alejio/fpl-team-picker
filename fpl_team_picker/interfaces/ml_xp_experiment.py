@@ -19,10 +19,10 @@ def _():
     import plotly.graph_objects as go
 
     # ML libraries
-    import xgboost as xgb
+    from sklearn.linear_model import RidgeCV
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import mean_absolute_error
-    from sklearn.preprocessing import LabelEncoder
+    from sklearn.preprocessing import LabelEncoder, StandardScaler
     # import shap  # Commented out due to Python 3.13 compatibility issues
 
     # FPL data pipeline
@@ -33,6 +33,8 @@ def _():
     return (
         FPLDataClient,
         LabelEncoder,
+        RidgeCV,
+        StandardScaler,
         XPModel,
         config,
         fetch_fpl_data,
@@ -43,7 +45,6 @@ def _():
         pd,
         px,
         train_test_split,
-        xgb,
     )
 
 
@@ -501,7 +502,9 @@ def _(
                 ])
 
         except Exception as e:
-            training_summary = mo.md(f"❌ **Training data preparation failed:** {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            training_summary = mo.md(f"❌ **Training data preparation failed:** {str(e)}\n\n```\n{error_details}\n```")
             training_data = pd.DataFrame()
             ml_features = []  # Also initialize ml_features on exception
     else:
@@ -516,6 +519,8 @@ def _(
         training_summary = mo.vstack([mo.md(line) for line in debug_info])
         training_data = pd.DataFrame()  # Initialize empty DataFrame when conditions not met
         ml_features = []  # Also initialize ml_features
+        target_variable = 'total_points'  # Initialize target_variable
+        le_position = LabelEncoder()  # Initialize le_position
 
     training_summary
     return le_position, ml_features, target_variable, training_data
@@ -550,16 +555,18 @@ def _(mo):
 
 @app.cell
 def _(
+    RidgeCV,
+    StandardScaler,
     mean_absolute_error,
     ml_features,
     mo,
     target_variable,
     train_test_split,
     training_data,
-    xgb,
 ):
     # Initialize variables
     ml_model = None
+    scaler = None
     X_train, X_test, y_train, y_test = None, None, None, None
 
     if not training_data.empty and ml_features and len(ml_features) > 0:
@@ -573,50 +580,47 @@ def _(
                 X, y, test_size=0.2, random_state=42, stratify=None
             )
 
-            # Train XGBoost with optimized hyperparameters
-            ml_model = xgb.XGBRegressor(
-                objective='reg:squarederror',
-                random_state=42,
-                n_jobs=-1,  # Use all cores
-                # Optimized hyperparameters for better performance
-                max_depth=6,           # Prevent overfitting
-                learning_rate=0.1,     # More conservative learning
-                n_estimators=200,      # More trees for better learning
-                subsample=0.8,         # Sample 80% of data per tree
-                colsample_bytree=0.8,  # Sample 80% of features per tree
-                reg_alpha=0.1,         # L1 regularization
-                reg_lambda=1.0,        # L2 regularization
-                min_child_weight=3,    # Minimum samples in leaf nodes
-                gamma=0.1              # Minimum loss reduction for splits
+            # Scale features for Ridge regression
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            # Train Ridge regression with cross-validation for optimal alpha
+            ml_model = RidgeCV(
+                alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
+                cv=5,
+                scoring='neg_mean_absolute_error'
             )
 
-            ml_model.fit(X_train, y_train)
+            ml_model.fit(X_train_scaled, y_train)
 
             # Quick training metrics
-            train_pred = ml_model.predict(X_train)
-            test_pred = ml_model.predict(X_test)
+            train_pred = ml_model.predict(X_train_scaled)
+            test_pred = ml_model.predict(X_test_scaled)
 
             train_mae = mean_absolute_error(y_train, train_pred)
             test_mae = mean_absolute_error(y_test, test_pred)
 
             model_summary = mo.vstack([
-                mo.md("### ✅ Enhanced XGBoost Model Trained with Rich Database Features"),
+                mo.md("### ✅ Enhanced Ridge Regression Model Trained with Rich Database Features"),
                 mo.md(f"**Training samples:** {len(X_train)} | **Test samples:** {len(X_test)}"),
                 mo.md(f"**Train MAE:** {train_mae:.2f} | **Test MAE:** {test_mae:.2f}"),
                 mo.md(f"**Total features:** {len(ml_features)} rich features from FPL database"),
                 mo.md(f"**Feature breakdown:** Base ({len([f for f in ml_features if f in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists']])}) + Enhanced ({len([f for f in ml_features if '_static' in f])}) + Contextual ({len([f for f in ml_features if f not in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists'] and '_static' not in f])})"),
-                mo.md("**Model type:** XGBRegressor with rich FPL database features and regularization"),
+                mo.md("**Model type:** Ridge Regression with feature scaling and cross-validated regularization"),
                 mo.md("---")
             ])
 
         except Exception as e:
             model_summary = mo.md(f"❌ **Model training failed:** {str(e)}")
             ml_model = None
+            scaler = None
     else:
         model_summary = mo.md("⚠️ **Prepare training data first to train model**")
+        scaler = None
 
     model_summary
-    return (ml_model,)
+    return (ml_model, scaler)
 
 
 @app.cell
@@ -639,13 +643,14 @@ def _(mo):
 
 @app.cell
 def _(
+    RidgeCV,
+    StandardScaler,
     mean_absolute_error,
     ml_features,
     mo,
     target_variable,
     train_test_split,
     training_data,
-    xgb,
 ):
     # Initialize position models dictionary
     position_models = {}
@@ -669,33 +674,29 @@ def _(
                         X_pos_train, y_pos_train, test_size=0.2, random_state=42
                     )
 
-                    # Train position-specific XGBoost model
-                    position_specific_model = xgb.XGBRegressor(
-                        objective='reg:squarederror',
-                        random_state=42,
-                        n_jobs=-1,
-                        # Slightly different params per position
-                        max_depth=5 if player_position in ['GKP', 'DEF'] else 6,  # Simpler for defensive positions
-                        learning_rate=0.1,
-                        n_estimators=150 if player_position == 'GKP' else 200,  # Fewer trees for GKP
-                        subsample=0.8,
-                        colsample_bytree=0.8,
-                        reg_alpha=0.1,
-                        reg_lambda=1.0,
-                        min_child_weight=2 if player_position in ['MID', 'FWD'] else 3,  # More flexible for attacking positions
-                        gamma=0.1
+                    # Scale features for position-specific Ridge regression
+                    position_scaler = StandardScaler()
+                    X_train_pos_scaled = position_scaler.fit_transform(X_train_pos_specific)
+                    X_test_pos_scaled = position_scaler.transform(X_test_pos_specific)
+                    
+                    # Train position-specific Ridge model with stronger regularization for small datasets
+                    alpha_range = [10.0, 100.0, 1000.0] if player_position in ['GKP', 'FWD'] else [0.1, 1.0, 10.0, 100.0]
+                    position_specific_model = RidgeCV(
+                        alphas=alpha_range,
+                        cv=min(5, len(X_train_pos_specific) // 10),  # Adjust CV folds for small datasets
+                        scoring='neg_mean_absolute_error'
                     )
 
-                    position_specific_model.fit(X_train_pos_specific, y_train_pos_specific)
+                    position_specific_model.fit(X_train_pos_scaled, y_train_pos_specific)
 
                     # Evaluate position-specific model
-                    train_pred_pos_specific = position_specific_model.predict(X_train_pos_specific)
-                    test_pred_pos_specific = position_specific_model.predict(X_test_pos_specific)
+                    train_pred_pos_specific = position_specific_model.predict(X_train_pos_scaled)
+                    test_pred_pos_specific = position_specific_model.predict(X_test_pos_scaled)
 
                     train_mae_pos_specific = mean_absolute_error(y_train_pos_specific, train_pred_pos_specific)
                     test_mae_pos_specific = mean_absolute_error(y_test_pos_specific, test_pred_pos_specific)
 
-                    position_models[player_position] = position_specific_model
+                    position_models[player_position] = (position_specific_model, position_scaler)
                     position_performance[player_position] = {
                         'samples': len(pos_training_data),
                         'train_samples': len(X_train_pos_specific),
@@ -761,6 +762,7 @@ def _(
     pd,
     position_models,
     rule_based_predictions,
+    scaler,
     target_gw_input,
 ):
     # Initialize variables
@@ -970,8 +972,11 @@ def _(
                 if X_current[feature_col].min() < 0:
                     X_current[feature_col] = X_current[feature_col].clip(lower=0)
 
+            # Scale features for prediction
+            X_current_scaled = scaler.transform(X_current)
+            
             # Generate General ML predictions
-            ml_xp_predictions = ml_model.predict(X_current)
+            ml_xp_predictions = ml_model.predict(X_current_scaled)
             ml_xp_predictions = pd.Series(ml_xp_predictions).clip(lower=0, upper=20).values
 
             # Generate Position-Specific ML predictions
@@ -991,7 +996,10 @@ def _(
                                 if X_pos[pos_feature_col].min() < 0:
                                     X_pos[pos_feature_col] = X_pos[pos_feature_col].clip(lower=0)
 
-                            pos_pred = position_models[position].predict(X_pos)
+                            # Unpack model and scaler
+                            pos_model, prediction_scaler = position_models[position]
+                            X_pos_scaled = prediction_scaler.transform(X_pos)
+                            pos_pred = pos_model.predict(X_pos_scaled)
                             pos_pred = np.clip(pos_pred, 0, 20)
                             position_specific_predictions[pos_mask] = pos_pred
                             position_prediction_counts[position] = len(pos_players)
@@ -1114,6 +1122,9 @@ def _(mo):
 
 @app.cell
 def _(comparison_data, go, mo, np, px):
+    # Initialize variables
+    rule_ensemble_corr = 0.0
+    
     if not comparison_data.empty:
         # Correlations between different prediction models
         rule_general_corr = np.corrcoef(comparison_data['rule_based_xP'], comparison_data['ml_general_xP'])[0, 1]
@@ -1217,6 +1228,7 @@ def _(comparison_data, go, mo, np, px):
             ])
     else:
         comparison_display = mo.md("⚠️ **Generate predictions first to see comparison**")
+        rule_ensemble_corr = 0.0  # Default value when no data
 
     comparison_display
     return (rule_ensemble_corr,)
@@ -1238,11 +1250,11 @@ def _(mo):
 def _(ml_features, ml_model, mo, pd, px):
     if ml_model is not None:
         try:
-            # Feature importance plot (XGBoost built-in)
-            feature_importance = ml_model.feature_importances_
+            # Feature importance plot (Ridge coefficients)
+            feature_coeffs = abs(ml_model.coef_)  # Absolute values of coefficients
             importance_df = pd.DataFrame({
                 'feature': ml_features,
-                'importance': feature_importance
+                'importance': feature_coeffs
             }).sort_values('importance', ascending=True)
 
             fig_importance = px.bar(
@@ -1250,8 +1262,8 @@ def _(ml_features, ml_model, mo, pd, px):
                 x='importance',
                 y='feature',
                 orientation='h',
-                title='XGBoost Feature Importance',
-                labels={'importance': 'Feature Importance', 'feature': 'Features'}
+                title='Ridge Regression Feature Importance (Absolute Coefficients)',
+                labels={'importance': 'Absolute Coefficient Value', 'feature': 'Features'}
             )
 
             # Top features analysis
