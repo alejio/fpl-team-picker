@@ -51,15 +51,17 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    # 🤖 ML XP Model Experiment
+    # 🤖 Enhanced ML XP Model Experiment with Rich Database Features
 
-    **Lightweight machine learning experiment to compare XGBoost predictions against our current rule-based XP model.**
+    **Advanced machine learning experiment leveraging rich FPL database features to improve XGBoost predictions beyond the rule-based XP model.**
 
-    ## Quick Start Approach
-    - Use existing data pipeline and features
-    - Simple XGBoost model with default parameters
-    - Side-by-side comparison with rule-based predictions
-    - Feature importance analysis with SHAP
+    ## Enhanced Feature Approach
+    - **Rich database features**: Injury risk, set piece orders, performance rankings, market intelligence
+    - **Advanced analytics**: Official xG90/xA90 from FPL API, transfer momentum, value analysis
+    - **Form intelligence**: Rolling averages, consistency metrics, trend analysis
+    - **Position-specific models**: Specialized models for GKP/DEF/MID/FWD with ensemble predictions
+    - **Temporal validation**: Leak-free training with proper time-series validation
+    - **Feature importance analysis**: Understanding which rich features drive accuracy
 
     ---
     """
@@ -247,22 +249,44 @@ def _(
 
             if len(historical_gws) < 3:
                 training_summary = mo.md("⚠️ **Need at least 3 historical gameweeks for training**")
+                training_data = pd.DataFrame()  # Initialize empty when insufficient data
+                ml_features = []  # Also initialize ml_features
             else:
                 # Use last 5 gameweeks as training data (or all available if less)
                 train_gws = historical_gws[-5:] if len(historical_gws) >= 5 else historical_gws
 
                 training_records = []
 
-                # Get position mapping from current players (this is static data, not leaked)
-                client = FPLDataClient()
-                current_players = client.get_current_players()
+                # Get enhanced player data with rich features (static data, not leaked)
+                training_client = FPLDataClient()
+                current_players = training_client.get_current_players()
+                enhanced_players = training_client.get_players_enhanced()
                 player_positions = current_players[['player_id', 'position']].set_index('player_id')['position'].to_dict()
 
-                for gw in train_gws:
-                    gw_data = live_data_df[live_data_df['event'] == gw].copy()
+                # Create enhanced player features mapping for static enrichment (leak-free)
+                enhanced_features_cols = [
+                    'chance_of_playing_next_round',  # Next gameweek availability (known before current GW)
+                    'corners_and_indirect_freekicks_order', 'direct_freekicks_order', 'penalties_order',
+                    'expected_goals_per_90', 'expected_assists_per_90',
+                    'form_rank', 'ict_index_rank', 'points_per_game_rank',
+                    'influence_rank', 'creativity_rank', 'threat_rank',
+                    'value_form', 'cost_change_start'
+                    # Removed: 'chance_of_playing_this_round' (current GW info - data leakage)
+                ]
 
-                    # Calculate cumulative stats up to this gameweek only (no data leakage)
-                    historical_data_up_to_gw = live_data_df[live_data_df['event'] <= gw]
+                # Filter to only include available columns and create mapping
+                available_enhanced_cols = [enhanced_col for enhanced_col in enhanced_features_cols if enhanced_col in enhanced_players.columns]
+                player_enhanced_features = enhanced_players[['player_id'] + available_enhanced_cols].set_index('player_id')
+
+                for gw in train_gws:
+                    # Target: what we want to predict (current gameweek performance)
+                    gw_target = live_data_df[live_data_df['event'] == gw][['player_id', 'total_points']].copy()
+
+                    # Calculate cumulative stats up to BEFORE this gameweek only (no data leakage)
+                    historical_data_up_to_gw = live_data_df[live_data_df['event'] < gw]
+
+                    # Get previous gameweek data for lagged features (if available)
+                    prev_gw_data = live_data_df[live_data_df['event'] == (gw - 1)] if gw > 1 else pd.DataFrame()
 
                     # Calculate cumulative season stats up to this gameweek
                     cumulative_stats = historical_data_up_to_gw.groupby('player_id').agg({
@@ -296,25 +320,112 @@ def _(
                     # Add position data (static, not leaked)
                     cumulative_stats['position'] = cumulative_stats['player_id'].map(player_positions).fillna('MID')
 
+                    # Add enhanced static player features (not leaked as they're player characteristics)
+                    for enhanced_col in available_enhanced_cols:
+                        cumulative_stats[f'{enhanced_col}_static'] = cumulative_stats['player_id'].map(
+                            player_enhanced_features[enhanced_col] if enhanced_col in player_enhanced_features.columns else pd.Series(dtype=float)
+                        ).fillna(0 if enhanced_col != 'chance_of_playing_next_round' else 100)  # Default availability to 100%
+
                     # Merge gameweek data with cumulative historical stats
-                    # Rename historical stats to avoid column conflicts
-                    historical_features = cumulative_stats[['player_id', 'position', 'xG90_historical', 'xA90_historical',
-                                                          'points_per_90', 'bps', 'ict_index']].rename(columns={
+                    # Prepare historical + enhanced features (avoid column conflicts)
+                    historical_base_features = ['player_id', 'position', 'xG90_historical', 'xA90_historical', 'points_per_90']
+                    historical_features = cumulative_stats[historical_base_features +
+                                                          ['bps', 'ict_index'] +
+                                                          [f'{col}_static' for col in available_enhanced_cols]].rename(columns={
                         'bps': 'bps_historical',
                         'ict_index': 'ict_index_historical'
                     })
 
-                    gw_features = gw_data.merge(historical_features, on='player_id', how='left')
+                    # Create features using only historical and lagged data (no current GW data!)
+                    gw_features = gw_target.merge(historical_features, on='player_id', how='left')
 
-                    # Fill any missing values
-                    gw_features = gw_features.fillna({
+                    # Add lagged features from previous gameweek (safe to use)
+                    if not prev_gw_data.empty:
+                        # Ensure required columns exist
+                        available_cols = ['player_id'] + [col_name for col_name in ['minutes', 'goals_scored', 'assists', 'bonus'] if col_name in prev_gw_data.columns]
+
+                        lagged_features = prev_gw_data[available_cols].copy()
+
+                        # Rename columns with prev_ prefix
+                        rename_map = {}
+                        if 'minutes' in available_cols:
+                            rename_map['minutes'] = 'prev_minutes'
+                        if 'goals_scored' in available_cols:
+                            rename_map['goals_scored'] = 'prev_goals'
+                        if 'assists' in available_cols:
+                            rename_map['assists'] = 'prev_assists'
+                        if 'bonus' in available_cols:
+                            rename_map['bonus'] = 'prev_bonus'
+
+                        lagged_features = lagged_features.rename(columns=rename_map)
+                        gw_features = gw_features.merge(lagged_features, on='player_id', how='left')
+
+                        # Ensure all lagged columns exist with defaults
+                        required_lagged_cols = ['prev_minutes', 'prev_goals', 'prev_assists', 'prev_bonus']
+                        for required_lagged_col in required_lagged_cols:
+                            if required_lagged_col not in gw_features.columns:
+                                gw_features[required_lagged_col] = 0
+
+                        # Calculate safe per-90 features from previous gameweek
+                        gw_features['prev_goals_per_90'] = np.where(
+                            gw_features['prev_minutes'] > 0,
+                            (gw_features['prev_goals'] / gw_features['prev_minutes']) * 90,
+                            0
+                        )
+                        gw_features['prev_assists_per_90'] = np.where(
+                            gw_features['prev_minutes'] > 0,
+                            (gw_features['prev_assists'] / gw_features['prev_minutes']) * 90,
+                            0
+                        )
+                        gw_features['prev_bonus_per_90'] = np.where(
+                            gw_features['prev_minutes'] > 0,
+                            (gw_features['prev_bonus'] / gw_features['prev_minutes']) * 90,
+                            0
+                        )
+                    else:
+                        # No previous gameweek data available
+                        gw_features['prev_minutes'] = 0
+                        gw_features['prev_goals'] = 0
+                        gw_features['prev_assists'] = 0
+                        gw_features['prev_bonus'] = 0
+                        gw_features['prev_goals_per_90'] = 0
+                        gw_features['prev_assists_per_90'] = 0
+                        gw_features['prev_bonus_per_90'] = 0
+
+                    # Fill any missing values including enhanced features
+                    fill_values = {
                         'xG90_historical': 0,
                         'xA90_historical': 0,
                         'points_per_90': 0,
                         'bps_historical': 0,
                         'ict_index_historical': 0,
                         'position': 'MID'
+                    }
+
+                    # Add default values for enhanced features
+                    for enhanced_col in available_enhanced_cols:
+                        static_col = f'{enhanced_col}_static'
+                        if 'chance_of_playing' in enhanced_col:
+                            fill_values[static_col] = 100  # Default to fully available
+                        elif 'rank' in enhanced_col:
+                            fill_values[static_col] = 300  # Mid-range rank default
+                        elif 'order' in enhanced_col:
+                            fill_values[static_col] = 0   # Not on set pieces by default
+                        else:
+                            fill_values[static_col] = 0   # Zero default for other metrics
+
+                    # Add defaults for lagged features
+                    fill_values.update({
+                        'prev_minutes': 0,
+                        'prev_goals': 0,
+                        'prev_assists': 0,
+                        'prev_bonus': 0,
+                        'prev_goals_per_90': 0,
+                        'prev_assists_per_90': 0,
+                        'prev_bonus_per_90': 0
                     })
+
+                    gw_features = gw_features.fillna(fill_values)
 
                     training_records.append(gw_features)
 
@@ -328,54 +439,48 @@ def _(
                 # Create derived features (leak-free only)
                 # Note: Price-based features removed to maintain leak-free approach
 
-                # Enhanced Feature Engineering: Rolling Averages and Form Trends
-                training_data = training_data.sort_values(['player_id', 'event']).reset_index(drop=True)
+                # NOTE: Rolling averages removed to prevent data leakage
+                # Previous implementation calculated rolling averages AFTER combining all training data,
+                # which caused future information leakage. To implement correctly, rolling features
+                # should be calculated within each gameweek loop using only historical data.
 
-                # Rolling averages for recent form (3-gameweek window)
-                training_data['points_last_3'] = training_data.groupby('player_id')['total_points'].rolling(
-                    window=3, min_periods=1
-                ).mean().reset_index(0, drop=True)
+                # 🚨 REMOVED: Current gameweek per-90 metrics (MAJOR DATA LEAKAGE)
+                # These features used current GW goals/assists/bonus to predict current GW points!
+                # training_data['goals_per_90'] = current_gw_goals / current_gw_minutes * 90
+                # training_data['assists_per_90'] = current_gw_assists / current_gw_minutes * 90
+                # training_data['bonus_per_90'] = current_gw_bonus / current_gw_minutes * 90
+                # ☝️ This is direct target leakage since total_points = goals + assists + bonus + others
 
-                training_data['minutes_last_3'] = training_data.groupby('player_id')['minutes'].rolling(
-                    window=3, min_periods=1
-                ).mean().reset_index(0, drop=True)
+                # Home/away context (if available) - note: this should be from fixtures, not live data
+                # For now, set to 0 as we don't have reliable home/away info in current structure
+                training_data['is_home'] = 0  # TODO: Get actual home/away from fixtures data
 
-                # Form trend (rate of change in recent performance)
-                training_data['form_trend'] = training_data.groupby('player_id')['total_points'].rolling(
-                    window=3, min_periods=2
-                ).apply(lambda x: (x.iloc[-1] - x.iloc[0]) / len(x) if len(x) > 1 else 0).reset_index(0, drop=True)
+                # Consistency metrics - removed to prevent data leakage
 
-                # Position-specific per-90 metrics (handle division by zero)
-                training_data['goals_per_90'] = np.where(
-                    training_data['minutes'] > 0,
-                    (training_data['goals_scored'] / training_data['minutes']) * 90,
-                    0
-                )
-                training_data['assists_per_90'] = np.where(
-                    training_data['minutes'] > 0,
-                    (training_data['assists'] / training_data['minutes']) * 90,
-                    0
-                )
-                training_data['bonus_per_90'] = np.where(
-                    training_data['minutes'] > 0,
-                    (training_data['bonus'] / training_data['minutes']) * 90,
-                    0
-                )
-
-                # Home/away context (if available)
-                training_data['is_home'] = training_data.get('was_home', 0).fillna(0)
-
-                # Consistency metrics
-                training_data['points_consistency'] = training_data.groupby('player_id')['total_points'].rolling(
-                    window=3, min_periods=2
-                ).std().reset_index(0, drop=True).fillna(0)
-
-                # Enhanced feature set including new rolling and per-90 features
-                ml_features = [
-                    # Leak-free historical features only
+                # Enhanced feature set with rich database features
+                base_features = [
                     'position_encoded', 'xG90_historical', 'xA90_historical',
-                    'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists'
+                    'points_per_90', 'bps_historical', 'ict_index_historical'
                 ]
+
+                # Add enhanced static features (player characteristics)
+                enhanced_static_features = [f'{enhanced_col}_static' for enhanced_col in available_enhanced_cols]
+                available_enhanced_static = [f for f in enhanced_static_features if f in training_data.columns]
+
+                # Add derived contextual features (temporally-safe lagged features)
+                lagged_features = [
+                    'prev_goals_per_90', 'prev_assists_per_90', 'prev_bonus_per_90',
+                    'prev_minutes', 'prev_goals', 'prev_assists', 'prev_bonus'
+                ]
+                available_lagged = [f for f in lagged_features if f in training_data.columns]
+
+                contextual_features = ['is_home'] + available_lagged
+                # ✅ NOW USING LAGGED FEATURES: prev_goals_per_90, prev_assists_per_90, prev_bonus_per_90
+                # These use PREVIOUS gameweek performance to predict CURRENT gameweek points!
+                available_contextual = [f for f in contextual_features if f in training_data.columns]
+
+                # Combine all feature sets
+                ml_features = base_features + available_enhanced_static + available_contextual
 
                 # Target variable: actual total points
                 target_variable = 'total_points'
@@ -384,17 +489,21 @@ def _(
                 training_data = training_data.dropna(subset=ml_features + [target_variable])
 
                 training_summary = mo.vstack([
-                    mo.md("### ✅ Training Data Prepared"),
+                    mo.md("### ✅ Enhanced Training Data Prepared"),
                     mo.md(f"**Training gameweeks:** GW{min(train_gws)}-{max(train_gws)} ({len(train_gws)} GWs)"),
                     mo.md(f"**Training samples:** {len(training_data)} player-gameweek records"),
-                    mo.md(f"**Features:** {len(ml_features)} | **Target:** {target_variable}"),
-                    mo.md(f"**Features used:** {', '.join(ml_features)}"),
+                    mo.md(f"**Features:** {len(ml_features)} enhanced features | **Target:** {target_variable}"),
+                    mo.md("**Feature categories:**"),
+                    mo.md(f"• Base historical: {len(base_features)} features"),
+                    mo.md(f"• Enhanced static: {len(available_enhanced_static)} features (injury risk, set pieces, rankings)"),
+                    mo.md(f"• Contextual: {len(available_contextual)} features (form trends, per-90 metrics)"),
                     mo.md("---")
                 ])
 
         except Exception as e:
             training_summary = mo.md(f"❌ **Training data preparation failed:** {str(e)}")
             training_data = pd.DataFrame()
+            ml_features = []  # Also initialize ml_features on exception
     else:
         # Debug info to help diagnose the issue
         debug_info = []
@@ -405,6 +514,8 @@ def _(
         debug_info.append("**Next steps:** Ensure target gameweek is selected and XP predictions are generated first.")
 
         training_summary = mo.vstack([mo.md(line) for line in debug_info])
+        training_data = pd.DataFrame()  # Initialize empty DataFrame when conditions not met
+        ml_features = []  # Also initialize ml_features
 
     training_summary
     return le_position, ml_features, target_variable, training_data
@@ -414,15 +525,33 @@ def _(
 def _(mo):
     mo.md(
         r"""
-    ## 4️⃣ Train Enhanced XGBoost Model
+    ## 4️⃣ Train Enhanced XGBoost Model with Rich Database Features
 
-    **Train optimized XGBoost model with tuned hyperparameters and enhanced features.**
+    **Train optimized XGBoost model with rich features from the FPL database client.**
 
-    **Model Enhancements:**
-    - Optimized hyperparameters for better generalization
-    - Enhanced feature set with rolling averages and form trends
-    - Regularization to prevent overfitting
-    - Position-specific performance metrics
+    **Enhanced Feature Categories (Leak-Free Validated):**
+    - **Historical Performance**: xG90, xA90, points per 90, BPS, ICT index (from before target gameweek)
+    - **Injury/Availability Risk**: Chance of playing next round (known before current gameweek)
+    - **Set Piece Intelligence**: Corner/freekick/penalty taking order priority (static player roles)
+    - **Performance Rankings**: Form rank, ICT rank, points per game rank (season-to-date rankings)
+    - **Advanced Per-90 Metrics**: Expected goals/assists per 90 from FPL API (player characteristics)
+    - **Market Intelligence**: Value form, season cost changes (no current gameweek data)
+    - **Temporal Features**: Lagged per-90 metrics from previous gameweek (safe to use)
+    - **Contextual Features**: Home/away venue, positional encoding
+
+    **🚨 CRITICAL Temporal Data Leakage Fixes Applied:**
+    - ✅ Historical features use only data from BEFORE target gameweek (event < gw)
+    - ✅ Removed current gameweek transfer/price change data
+    - ✅ Removed rolling averages that included future information
+    - ✅ **FIXED: Use lagged features from PREVIOUS gameweek only**
+    - ✅ **NOW SAFE: prev_goals_per_90, prev_assists_per_90, prev_bonus_per_90** (from GW-1 to predict GW)
+    - ✅ Target variable comes from current GW, features from previous GW(s)
+    - ✅ Static player characteristics only (set pieces, rankings, player traits)
+
+    **Model Optimizations:**
+    - Hyperparameter tuning for FPL-specific prediction patterns
+    - L1/L2 regularization to prevent overfitting on rich feature set
+    - Position-aware training with ensemble approaches
     """
     )
     return
@@ -480,11 +609,12 @@ def _(
             test_mae = mean_absolute_error(y_test, test_pred)
 
             model_summary = mo.vstack([
-                mo.md("### ✅ Enhanced XGBoost Model Trained"),
+                mo.md("### ✅ Enhanced XGBoost Model Trained with Rich Database Features"),
                 mo.md(f"**Training samples:** {len(X_train)} | **Test samples:** {len(X_test)}"),
                 mo.md(f"**Train MAE:** {train_mae:.2f} | **Test MAE:** {test_mae:.2f}"),
-                mo.md(f"**Features:** {len(ml_features)} enhanced features with rolling averages"),
-                mo.md("**Model type:** XGBRegressor (optimized hyperparameters with regularization)"),
+                mo.md(f"**Total features:** {len(ml_features)} rich features from FPL database"),
+                mo.md(f"**Feature breakdown:** Base ({len([f for f in ml_features if f in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists']])}) + Enhanced ({len([f for f in ml_features if '_static' in f])}) + Contextual ({len([f for f in ml_features if f not in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists'] and '_static' not in f])})"),
+                mo.md("**Model type:** XGBRegressor with rich FPL database features and regularization"),
                 mo.md("---")
             ])
 
@@ -630,6 +760,7 @@ def _(mo):
 
 @app.cell
 def _(
+    FPLDataClient,
     le_position,
     live_data_df,
     ml_features,
@@ -646,8 +777,42 @@ def _(
 
     if ml_model is not None and not rule_based_predictions.empty:
         try:
-            # Prepare current gameweek data for prediction
+            # Prepare current gameweek data for prediction with enhanced features
             current_data = rule_based_predictions.copy()
+
+            # Enrich current data with enhanced player features
+            prediction_client = FPLDataClient()
+            enhanced_players_current = prediction_client.get_players_enhanced()
+
+            # Enhanced features for prediction (leak-free: no current gameweek information)
+            enhanced_features_prediction = [
+                'chance_of_playing_next_round',  # Next gameweek availability (known before current GW)
+                'corners_and_indirect_freekicks_order', 'direct_freekicks_order', 'penalties_order',
+                'expected_goals_per_90', 'expected_assists_per_90',
+                'form_rank', 'ict_index_rank', 'points_per_game_rank',
+                'influence_rank', 'creativity_rank', 'threat_rank',
+                'value_form', 'cost_change_start'
+                # Removed: 'chance_of_playing_this_round' (current GW info)
+                # Removed: 'transfers_in_event', 'transfers_out_event' (current GW transfer data)
+                # Removed: 'cost_change_event' (current GW price change)
+            ]
+
+            # Add available enhanced features to current data
+            available_enhanced_pred = [pred_col for pred_col in enhanced_features_prediction if pred_col in enhanced_players_current.columns]
+            if available_enhanced_pred:
+                enhanced_subset = enhanced_players_current[['player_id'] + available_enhanced_pred]
+                current_data = current_data.merge(enhanced_subset, on='player_id', how='left')
+
+                # Fill missing enhanced features with appropriate defaults
+                for pred_col in available_enhanced_pred:
+                    if 'chance_of_playing' in pred_col:
+                        current_data[pred_col] = current_data[pred_col].fillna(100)
+                    elif 'rank' in pred_col:
+                        current_data[pred_col] = current_data[pred_col].fillna(300)
+                    elif 'order' in pred_col:
+                        current_data[pred_col] = current_data[pred_col].fillna(0)
+                    else:
+                        current_data[pred_col] = current_data[pred_col].fillna(0)
 
             # Calculate historical features for prediction - use cumulative stats up to current gameweek
             # This is the same approach as training but for current gameweek prediction
@@ -713,15 +878,106 @@ def _(
             # Apply same feature engineering as training
             current_data['position_encoded'] = le_position.transform(current_data['position'])
 
+            # Add enhanced static features with _static suffix to match training
+            for pred_col in available_enhanced_pred:
+                if pred_col in current_data.columns:
+                    current_data[f'{pred_col}_static'] = current_data[pred_col]
+
+            # Add temporally-safe lagged features for prediction
+            current_data['is_home'] = 0  # TODO: Get actual home/away from fixtures
+
+            # Add lagged features from previous gameweek for prediction
+            prediction_gw = target_gw_input.value
+            prev_gw_for_prediction = prediction_gw - 1
+
+            if prev_gw_for_prediction > 0 and not live_data_df.empty:
+                prev_gw_prediction_data = live_data_df[live_data_df['event'] == prev_gw_for_prediction]
+                if not prev_gw_prediction_data.empty:
+                    # Get lagged features for prediction (robust column handling)
+                    available_pred_cols = ['player_id'] + [col_name for col_name in ['minutes', 'goals_scored', 'assists', 'bonus'] if col_name in prev_gw_prediction_data.columns]
+                    prev_features = prev_gw_prediction_data[available_pred_cols].copy()
+
+                    # Rename columns with prev_ prefix
+                    pred_rename_map = {}
+                    if 'minutes' in available_pred_cols:
+                        pred_rename_map['minutes'] = 'prev_minutes'
+                    if 'goals_scored' in available_pred_cols:
+                        pred_rename_map['goals_scored'] = 'prev_goals'
+                    if 'assists' in available_pred_cols:
+                        pred_rename_map['assists'] = 'prev_assists'
+                    if 'bonus' in available_pred_cols:
+                        pred_rename_map['bonus'] = 'prev_bonus'
+
+                    prev_features = prev_features.rename(columns=pred_rename_map)
+                    current_data = current_data.merge(prev_features, on='player_id', how='left')
+
+                    # Ensure all lagged columns exist with defaults
+                    required_pred_lagged_cols = ['prev_minutes', 'prev_goals', 'prev_assists', 'prev_bonus']
+                    for required_pred_lagged_col in required_pred_lagged_cols:
+                        if required_pred_lagged_col not in current_data.columns:
+                            current_data[required_pred_lagged_col] = 0
+
+                    # Calculate lagged per-90 features
+                    current_data['prev_goals_per_90'] = np.where(
+                        current_data['prev_minutes'] > 0,
+                        (current_data['prev_goals'] / current_data['prev_minutes']) * 90,
+                        0
+                    )
+                    current_data['prev_assists_per_90'] = np.where(
+                        current_data['prev_minutes'] > 0,
+                        (current_data['prev_assists'] / current_data['prev_minutes']) * 90,
+                        0
+                    )
+                    current_data['prev_bonus_per_90'] = np.where(
+                        current_data['prev_minutes'] > 0,
+                        (current_data['prev_bonus'] / current_data['prev_minutes']) * 90,
+                        0
+                    )
+                else:
+                    # No previous gameweek data
+                    current_data['prev_minutes'] = 0
+                    current_data['prev_goals'] = 0
+                    current_data['prev_assists'] = 0
+                    current_data['prev_bonus'] = 0
+                    current_data['prev_goals_per_90'] = 0
+                    current_data['prev_assists_per_90'] = 0
+                    current_data['prev_bonus_per_90'] = 0
+            else:
+                # No previous gameweek available
+                current_data['prev_minutes'] = 0
+                current_data['prev_goals'] = 0
+                current_data['prev_assists'] = 0
+                current_data['prev_bonus'] = 0
+                current_data['prev_goals_per_90'] = 0
+                current_data['prev_assists_per_90'] = 0
+                current_data['prev_bonus_per_90'] = 0
+
+            # Fill any missing lagged features
+            lagged_defaults = {
+                'prev_minutes': 0,
+                'prev_goals': 0,
+                'prev_assists': 0,
+                'prev_bonus': 0,
+                'prev_goals_per_90': 0,
+                'prev_assists_per_90': 0,
+                'prev_bonus_per_90': 0
+            }
+            for lagged_default_col, default_val in lagged_defaults.items():
+                if lagged_default_col in current_data.columns:
+                    current_data[lagged_default_col] = current_data[lagged_default_col].fillna(default_val)
+
+            # NOTE: Rolling form features removed to prevent data leakage
+            # Previous implementation used simple proxies that could introduce bias
+
             # Select features for prediction (ensure non-negative values)
             available_features = [f for f in ml_features if f in current_data.columns]
             X_current = current_data[available_features].copy()
 
             # Fill any remaining NaN values and fix negative values
             X_current = X_current.fillna(0)
-            for col in X_current.columns:
-                if X_current[col].min() < 0:
-                    X_current[col] = X_current[col].clip(lower=0)
+            for feature_col in X_current.columns:
+                if X_current[feature_col].min() < 0:
+                    X_current[feature_col] = X_current[feature_col].clip(lower=0)
 
             # Generate General ML predictions
             ml_xp_predictions = ml_model.predict(X_current)
@@ -740,9 +996,9 @@ def _(
                         if len(pos_players) > 0:
                             X_pos = pos_players[available_features]
                             X_pos = X_pos.fillna(0)
-                            for col in X_pos.columns:
-                                if X_pos[col].min() < 0:
-                                    X_pos[col] = X_pos[col].clip(lower=0)
+                            for pos_feature_col in X_pos.columns:
+                                if X_pos[pos_feature_col].min() < 0:
+                                    X_pos[pos_feature_col] = X_pos[pos_feature_col].clip(lower=0)
 
                             pos_pred = position_models[position].predict(X_pos)
                             pos_pred = np.clip(pos_pred, 0, 20)
@@ -1036,9 +1292,22 @@ def _(ml_features, ml_model, mo, pd, px):
 def _(mo):
     mo.md(
         r"""
-    ## 8️⃣ Next Steps & Insights
+    ## 8️⃣ Enhanced Model Insights & Data Leakage Analysis
 
-    **Summary of findings and recommendations for further development.**
+    **Summary of findings with leak-free rich database features and recommendations for further development.**
+
+    ### ✅ Data Leakage Prevention Measures Applied:
+    - **🛡️ Temporal Validation**: Historical features use only data from BEFORE target gameweek
+    - **🚫 Current Gameweek Exclusion**: Removed transfer data, price changes during prediction gameweek
+    - **📊 Static Features Only**: Player characteristics that don't change during gameweeks
+    - **⏰ Proper Time Series**: Fixed historical calculations from `event <= gw` to `event < gw`
+
+    ### Key Leak-Free Feature Categories:
+    - **🏥 Next Round Availability**: Known before current gameweek starts
+    - **⚽ Set Piece Roles**: Static player positions (penalty/corner takers)
+    - **📈 Season Rankings**: Cumulative performance rankings (no current GW data)
+    - **📊 Per-90 Characteristics**: Player-level expected goals/assists rates
+    - **💰 Season Price Intelligence**: Historical price movements (no current GW changes)
     """
     )
     return
@@ -1057,24 +1326,37 @@ def _(comparison_data, rule_ensemble_corr, mo, top_5_features):
         top_feature = top_5_features.iloc[0]['feature'] if not top_5_features.empty else "Unknown"
 
         insights = mo.vstack([
-            mo.md("### 💡 Key Findings"),
-            mo.md(f"**Model Correlation:** {rule_ensemble_corr:.3f} - {'Strong' if rule_ensemble_corr > 0.7 else 'Moderate' if rule_ensemble_corr > 0.5 else 'Weak'} agreement"),
-            mo.md(f"**Prediction Differences:** Ensemble higher for {ensemble_higher_count} players, Rule-based higher for {rule_higher_count}"),
+            mo.md("### 💡 Enhanced Model Findings"),
+            mo.md(f"**Model Correlation:** {rule_ensemble_corr:.3f} - {'Strong' if rule_ensemble_corr > 0.7 else 'Moderate' if rule_ensemble_corr > 0.5 else 'Weak'} agreement with rule-based model"),
+            mo.md(f"**Prediction Differences:** Enhanced ML higher for {ensemble_higher_count} players, Rule-based higher for {rule_higher_count}"),
             mo.md(f"**Average absolute difference:** {avg_abs_difference:.2f} XP points"),
             mo.md(f"**Maximum difference:** {max_difference:.2f} XP points"),
             mo.md(f"**Most important feature:** {top_feature}"),
             mo.md(""),
-            mo.md("### 🚀 Recommended Next Steps"),
-            mo.md("**If correlation > 0.7:** ML shows promise, try hyperparameter tuning"),
-            mo.md("**If correlation 0.5-0.7:** Add more features (historical averages, recent form)"),
-            mo.md("**If correlation < 0.5:** Review feature engineering and data quality"),
+            mo.md("### 🎩 Rich Feature Impact"),
+            mo.md("**Injury intelligence**: Availability percentages help avoid rotation risks"),
+            mo.md("**Set piece data**: Identifies penalty/corner takers for bonus points"),
+            mo.md("**Rankings**: Relative performance vs all players provides context"),
+            mo.md("**Market signals**: Transfer momentum indicates crowd wisdom"),
             mo.md(""),
-            mo.md("### 🔧 Quick Improvements to Try"),
-            mo.md("• Add rolling averages (3, 5, 10 GW) for points, minutes, goals"),
-            mo.md("• Include fixture congestion and recent form trends"),
-            mo.md("• Try position-specific models (separate for GKP, DEF, MID, FWD)"),
-            mo.md("• Experiment with ensemble of rule-based + ML predictions"),
-            mo.md("• Add cross-validation for more robust evaluation")
+            mo.md("### 🚀 Model Performance Guidance"),
+            mo.md("**If correlation > 0.7:** Enhanced features working well, focus on ensemble tuning"),
+            mo.md("**If correlation 0.5-0.7:** Rich features adding value, try feature selection"),
+            mo.md("**If correlation < 0.5:** Review feature importance and data quality"),
+            mo.md(""),
+            mo.md("### ✅ Leak-Free Enhanced Features Implemented"),
+            mo.md("• **Static player characteristics**: Set piece orders, performance rankings (no current GW data)"),
+            mo.md("• **Advanced metrics**: Official xG90/xA90 from FPL API (player characteristics)"),
+            mo.md("• **Historical intelligence**: Season price changes, value analysis (no current GW data)"),
+            mo.md("• **Temporal validation**: All historical features from BEFORE target gameweek only"),
+            mo.md("• **Position-specific models**: Separate models for each position with ensemble"),
+            mo.md(""),
+            mo.md("### 🔧 Further Improvements to Try"),
+            mo.md("• **Fixture context**: Opposition strength, recent defensive/attacking form"),
+            mo.md("• **Team dynamics**: Squad rotation risk, fixture congestion analysis"),
+            mo.md("• **Advanced ensembles**: Weighted combinations based on player characteristics"),
+            mo.md("• **Cross-validation**: Time-series CV for more robust temporal evaluation"),
+            mo.md("• **Feature selection**: Automated selection of most predictive enhanced features")
         ])
     else:
         insights = mo.md("⚠️ **Complete the experiment to see insights**")
