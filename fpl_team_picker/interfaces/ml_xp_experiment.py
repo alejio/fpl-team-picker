@@ -539,15 +539,6 @@ def _(mo):
     - **Temporal Features**: Lagged per-90 metrics from previous gameweek (safe to use)
     - **Contextual Features**: Home/away venue, positional encoding
 
-    **🚨 CRITICAL Temporal Data Leakage Fixes Applied:**
-    - ✅ Historical features use only data from BEFORE target gameweek (event < gw)
-    - ✅ Removed current gameweek transfer/price change data
-    - ✅ Removed rolling averages that included future information
-    - ✅ **FIXED: Use lagged features from PREVIOUS gameweek only**
-    - ✅ **NOW SAFE: prev_goals_per_90, prev_assists_per_90, prev_bonus_per_90** (from GW-1 to predict GW)
-    - ✅ Target variable comes from current GW, features from previous GW(s)
-    - ✅ Static player characteristics only (set pieces, rankings, player traits)
-
     **Model Optimizations:**
     - Hyperparameter tuning for FPL-specific prediction patterns
     - L1/L2 regularization to prevent overfitting on rich feature set
@@ -743,7 +734,7 @@ def _(
         position_summary = mo.md("⚠️ **Prepare training data first to train position-specific models**")
 
     position_summary
-    return (position_models, position_performance)
+    return (position_models,)
 
 
 @app.cell
@@ -1228,7 +1219,7 @@ def _(comparison_data, go, mo, np, px):
         comparison_display = mo.md("⚠️ **Generate predictions first to see comparison**")
 
     comparison_display
-    return
+    return (rule_ensemble_corr,)
 
 
 @app.cell
@@ -1289,32 +1280,7 @@ def _(ml_features, ml_model, mo, pd, px):
 
 
 @app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 8️⃣ Enhanced Model Insights & Data Leakage Analysis
-
-    **Summary of findings with leak-free rich database features and recommendations for further development.**
-
-    ### ✅ Data Leakage Prevention Measures Applied:
-    - **🛡️ Temporal Validation**: Historical features use only data from BEFORE target gameweek
-    - **🚫 Current Gameweek Exclusion**: Removed transfer data, price changes during prediction gameweek
-    - **📊 Static Features Only**: Player characteristics that don't change during gameweeks
-    - **⏰ Proper Time Series**: Fixed historical calculations from `event <= gw` to `event < gw`
-
-    ### Key Leak-Free Feature Categories:
-    - **🏥 Next Round Availability**: Known before current gameweek starts
-    - **⚽ Set Piece Roles**: Static player positions (penalty/corner takers)
-    - **📈 Season Rankings**: Cumulative performance rankings (no current GW data)
-    - **📊 Per-90 Characteristics**: Player-level expected goals/assists rates
-    - **💰 Season Price Intelligence**: Historical price movements (no current GW changes)
-    """
-    )
-    return
-
-
-@app.cell
-def _(comparison_data, rule_ensemble_corr, mo, top_5_features):
+def _(comparison_data, mo, rule_ensemble_corr, top_5_features):
     if not comparison_data.empty:
         # Calculate some basic insights using ensemble predictions
         ensemble_higher_count = len(comparison_data[comparison_data['ensemble_vs_rule'] > 0])
