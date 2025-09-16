@@ -26,7 +26,8 @@ fpl-team-picker/
 │   │   └── charts.py         # Plotly-based interactive visualizations
 │   ├── interfaces/           # User interfaces (Marimo notebooks)
 │   │   ├── season_planner.py # Season-start team building interface
-│   │   └── gameweek_manager.py # Weekly gameweek management interface
+│   │   ├── gameweek_manager.py # Weekly gameweek management interface
+│   │   └── ml_xp_experiment.py # ML expected points model development and validation
 │   └── utils/                # Utility functions
 │       └── helpers.py        # Common helper functions
 ├── pyproject.toml            # Project configuration and dependencies
@@ -162,6 +163,14 @@ Key features:
 - Captain selection tools with risk assessment
 - Player performance trends and form analytics
 
+#### ML Expected Points Experiment (`ml_xp_experiment.py`)
+**Marimo notebook for ML model development and validation:**
+- XGBoost-based expected points prediction with leak-free temporal validation
+- Enhanced feature engineering with historical per-90 metrics
+- Position-specific models (GKP, DEF, MID, FWD) with ensemble predictions
+- Form-weighted training data using historical gameweek performance
+- Model comparison and performance validation against actual FPL results
+
 ## Command Line Interface
 
 The project provides CLI entry points for both interfaces:
@@ -170,12 +179,51 @@ The project provides CLI entry points for both interfaces:
 # Season-start team building
 fpl-season-planner
 
-# Weekly gameweek management  
+# Weekly gameweek management
 fpl-gameweek-manager
+
+# ML model development
+marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
 
 # Or run directly with Marimo
 marimo run fpl_team_picker/interfaces/season_planner.py
 marimo run fpl_team_picker/interfaces/gameweek_manager.py
+marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
+```
+
+## ML Model Development Data Sources
+
+### Historical Gameweek Performance Data
+The fpl-dataset-builder project provides comprehensive historical data for ML model development via the `FPLDataClient`:
+
+**Available Historical Data:**
+- `get_gameweek_performance(gw)` - All players' performance for specific gameweek
+- `get_player_gameweek_history(player_id, start_gw, end_gw)` - Historical performance for individual players
+- `get_my_picks_history(start_gw, end_gw)` - Historical team selections across gameweeks
+
+**Core Performance Fields (Leak-Free for ML Training):**
+- **Basic Stats**: `total_points`, `minutes`, `goals_scored`, `assists`, `clean_sheets`, `goals_conceded`
+- **Advanced Metrics**: `expected_goals`, `expected_assists`, `ict_index`, `bps`, `influence`, `creativity`, `threat`
+- **Context**: `team_id`, `opponent_team`, `was_home`, `value` (player price at time of gameweek)
+
+**ML Feature Engineering (Temporal Validation):**
+The ML experiment interface implements proper temporal validation to prevent data leakage:
+- Historical per-90 metrics calculated from cumulative data up to each training gameweek
+- Position-specific modeling with separate XGBoost models for GKP/DEF/MID/FWD
+- Ensemble predictions combining general + position-specific model outputs
+- Leak-free features: `xG90_historical`, `xA90_historical`, `points_per_90`, `bps_historical`, `ict_index_historical`
+
+**Usage Example:**
+```python
+from client import FPLDataClient
+
+client = FPLDataClient()
+
+# Get training data for multiple gameweeks with proper temporal validation
+for gw in range(2, 6):  # GW2-5 for training
+    gw_data = client.get_gameweek_performance(gw)
+    # Calculate cumulative historical stats up to previous gameweek only
+    # Use for training to predict current gameweek performance
 ```
 
 ## Expected Points Models
@@ -195,6 +243,21 @@ marimo run fpl_team_picker/interfaces/gameweek_manager.py
 2. **Form-Weighted Calculations** - 70% recent form + 30% season average
 3. **Dynamic Performance Adjustments** - Form multipliers and momentum tracking
 
+### ML-Based Expected Points Model (Experimental)
+**XGBoost machine learning approach with leak-free temporal validation:**
+
+1. **Enhanced Feature Engineering** - Historical per-90 metrics with cumulative calculations
+2. **Position-Specific Models** - Separate XGBoost models for GKP, DEF, MID, FWD positions
+3. **Ensemble Predictions** - Combines general + position-specific model outputs
+4. **Temporal Validation** - Proper train/test splits preventing data leakage
+5. **Hyperparameter Optimization** - Tuned XGBoost parameters for FPL prediction accuracy
+
+**Key Features:**
+- Uses only historical data available at prediction time (no future information)
+- Incorporates gameweek-by-gameweek performance history from fpl-dataset-builder
+- Validates against actual FPL results with performance metrics
+- Experimental interface for model development and accuracy testing
+
 ## Development Commands
 
 **Primary Interfaces:**
@@ -213,6 +276,7 @@ fpl-gameweek-manager
 # Development mode
 marimo edit fpl_team_picker/interfaces/season_planner.py
 marimo edit fpl_team_picker/interfaces/gameweek_manager.py
+marimo edit fpl_team_picker/interfaces/ml_xp_experiment.py
 ```
 
 **Code Quality:**
@@ -237,7 +301,9 @@ vulture fpl_team_picker/
 - plotly>=6.3.0 (interactive visualizations)
 - pydantic (configuration validation)
 - requests (HTTP client)
-- fpl-dataset-builder (local dependency)
+- xgboost (machine learning for expected points models)
+- scikit-learn (ML utilities and preprocessing)
+- fpl-dataset-builder (local dependency for historical data)
 
 **Key Features:**
 - **Modular architecture** - Separated concerns with clear interfaces
@@ -291,8 +357,13 @@ export FPL_TEAM_STRENGTH_HISTORICAL_TRANSITION_GW=10
 ## Development Workflow
 
 1. **Season Start**: Use season planner for initial 15-player squad building
-2. **Weekly Planning**: Use gameweek manager for lineup and transfer decisions  
+2. **Weekly Planning**: Use gameweek manager for lineup and transfer decisions
 3. **Post-Gameweek**: Analyze results and validate model predictions
-4. **Continuous Improvement**: Update configuration and model parameters
+4. **ML Model Development**: Use ML experiment interface for expected points model improvement
+   - Train models on historical gameweek performance data
+   - Validate with proper temporal splits to prevent data leakage
+   - Compare ML predictions against actual FPL results
+   - Iterate on feature engineering and hyperparameter optimization
+5. **Continuous Improvement**: Update configuration and model parameters
 
-The modular architecture supports rapid iteration and testing of different strategies while maintaining code quality and type safety.
+The modular architecture supports rapid iteration and testing of different strategies while maintaining code quality and type safety. The ML experiment interface provides a dedicated environment for developing and validating machine learning approaches to expected points prediction using comprehensive historical data from the fpl-dataset-builder.
