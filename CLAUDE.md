@@ -19,7 +19,8 @@ fpl-team-picker/
 │   ├── core/                 # Core business logic
 │   │   ├── data_loader.py    # Data loading and preprocessing
 │   │   ├── team_strength.py  # Dynamic team strength calculations
-│   │   └── xp_model.py       # Expected points calculation engine
+│   │   ├── xp_model.py       # Expected points calculation engine
+│   │   └── chip_assessment.py # Chip timing analysis and recommendations
 │   ├── optimization/         # Transfer and team optimization
 │   │   └── optimizer.py      # Smart transfer optimization logic
 │   ├── visualization/        # Charts and visual components
@@ -90,11 +91,12 @@ fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
 
 Key configuration sections:
 - `XPModelConfig` - Form weighting, thresholds, debug settings
-- `TeamStrengthConfig` - Dynamic strength calculation parameters  
+- `TeamStrengthConfig` - Dynamic strength calculation parameters
 - `MinutesModelConfig` - Enhanced minutes prediction parameters
 - `StatisticalEstimationConfig` - xG/xA estimation parameters
 - `OptimizationConfig` - Transfer optimization settings
 - `VisualizationConfig` - Chart and display settings
+- `ChipAssessmentConfig` - Chip recommendation thresholds and parameters
 
 ### 2. Core Business Logic (`fpl_team_picker/core/`)
 
@@ -126,6 +128,14 @@ Key features:
 - **GW8+ pure current season** - Responsive to current form once sufficient data
 - **Rolling window analysis** - 6-gameweek performance windows
 - **Venue-specific adjustments** - Home/away advantage incorporation
+
+#### Chip Assessment Engine (`chip_assessment.py`)
+**Heuristic-based analysis for optimal chip usage timing:**
+- **Wildcard Assessment** - Transfer opportunity analysis and fixture run quality evaluation
+- **Free Hit Analysis** - Double gameweek detection and temporary squad improvement potential
+- **Bench Boost Evaluation** - Bench strength calculation and rotation risk assessment
+- **Triple Captain Identification** - Premium captain candidate analysis and fixture quality review
+- **Traffic Light Recommendations** - 🟢 RECOMMENDED, 🟡 CONSIDER, 🔴 HOLD status system
 
 ### 3. Optimization Engine (`fpl_team_picker/optimization/`)
 
@@ -162,6 +172,7 @@ Key features:
 - Transfer optimization with 0-3 transfer scenarios
 - Captain selection tools with risk assessment
 - Player performance trends and form analytics
+- Chip assessment with smart timing recommendations for Wildcard, Free Hit, Bench Boost, and Triple Captain
 
 #### ML Expected Points Experiment (`ml_xp_experiment.py`)
 **Marimo notebook for ML model development and validation:**
@@ -357,7 +368,7 @@ export FPL_TEAM_STRENGTH_HISTORICAL_TRANSITION_GW=10
 ## Development Workflow
 
 1. **Season Start**: Use season planner for initial 15-player squad building
-2. **Weekly Planning**: Use gameweek manager for lineup and transfer decisions
+2. **Weekly Planning**: Use gameweek manager for lineup and transfer decisions, including chip assessment analysis
 3. **Post-Gameweek**: Analyze results and validate model predictions
 4. **ML Model Development**: Use ML experiment interface for expected points model improvement
    - Train models on historical gameweek performance data
