@@ -11,7 +11,7 @@ from .data_loader import (
     fetch_fpl_data,
     fetch_manager_team,
     process_current_squad,
-    load_gameweek_datasets
+    load_gameweek_datasets,
 )
 
 from .xp_model import XPModel
@@ -20,9 +20,9 @@ from .team_strength import DynamicTeamStrength
 
 __all__ = [
     "fetch_fpl_data",
-    "fetch_manager_team", 
+    "fetch_manager_team",
     "process_current_squad",
     "load_gameweek_datasets",
     "XPModel",
-    "DynamicTeamStrength"
+    "DynamicTeamStrength",
 ]
