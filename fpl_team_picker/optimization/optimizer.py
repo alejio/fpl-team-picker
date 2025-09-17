@@ -394,6 +394,10 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
             
             for _, rep1 in pos1_replacements.iterrows():
                 for _, rep2 in pos2_replacements.iterrows():
+                    # Ensure we don't buy the same player twice
+                    if rep1['player_id'] == rep2['player_id']:
+                        continue
+                        
                     total_cost = rep1['price'] + rep2['price']
                     total_funds = available_budget + out1['price'] + out2['price']
                     
@@ -435,6 +439,7 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
             
             # Find best replacement for each of the 3 positions
             replacements = []
+            replacement_ids = set()  # Track selected replacement IDs to avoid duplicates
             total_out_value = out1['price'] + out2['price'] + out3['price']
             remaining_budget = available_budget + total_out_value
             
@@ -442,12 +447,14 @@ def optimize_team_with_transfers(current_squad: pd.DataFrame,
                 best_rep = all_players[
                     (all_players['position'] == out_player['position']) &
                     (all_players['price'] <= remaining_budget / 3) &  # Rough budget allocation
-                    (~all_players['player_id'].isin(current_player_ids))
+                    (~all_players['player_id'].isin(current_player_ids)) &
+                    (~all_players['player_id'].isin(replacement_ids))  # Avoid duplicate replacements
                 ].nlargest(1, 'xP_5gw')
                 
                 if not best_rep.empty:
                     replacement = best_rep.iloc[0]
                     replacements.append(replacement)
+                    replacement_ids.add(replacement['player_id'])
                     remaining_budget -= replacement['price']
                 else:
                     # Can't find replacement, skip this scenario

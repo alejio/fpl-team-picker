@@ -303,45 +303,154 @@ def _(
 
     try:
         if not players.empty and gameweek_input.value:
-            from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
+            if config.xp_model.use_ml_model:
+                # Use ML XP Model as primary
+                from fpl_team_picker.core.ml_xp_model import MLXPModel, merge_1gw_5gw_results
+                from fpl_team_picker.core.xp_model import XPModel
 
-            xp_model = XPModel(
-                form_weight=config.xp_model.form_weight,
-                form_window=config.xp_model.form_window,
-                debug=config.xp_model.debug
-            )
+                ml_xp_model = MLXPModel(
+                    min_training_gameweeks=config.xp_model.ml_min_training_gameweeks,
+                    training_gameweeks=config.xp_model.ml_training_gameweeks,
+                    position_min_samples=config.xp_model.ml_position_min_samples,
+                    ensemble_rule_weight=config.xp_model.ml_ensemble_rule_weight,
+                    debug=config.xp_model.debug
+                )
+                
+                # Create rule-based model for ensemble
+                rule_xp_model = XPModel(
+                    form_weight=config.xp_model.form_weight,
+                    form_window=config.xp_model.form_window,
+                    debug=config.xp_model.debug
+                )
+                
+                model_type = "ML"
+                xp_model = ml_xp_model
+                rule_model_for_ensemble = rule_xp_model
+            else:
+                # Use traditional rule-based model
+                from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
+                
+                xp_model = XPModel(
+                    form_weight=config.xp_model.form_weight,
+                    form_window=config.xp_model.form_window,
+                    debug=config.xp_model.debug
+                )
+                
+                model_type = "Rule-Based"
+                rule_model_for_ensemble = None
 
             # Calculate 1GW and 5GW expected points
-            players_1gw = xp_model.calculate_expected_points(
-                players_data=players,
-                teams_data=teams,
-                xg_rates_data=xg_rates,
-                fixtures_data=fixtures,
-                target_gameweek=gameweek_input.value,
-                live_data=live_data_historical,
-                gameweeks_ahead=1
-            )
+            if config.xp_model.use_ml_model:
+                players_1gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=1,
+                    rule_based_model=rule_model_for_ensemble
+                )
 
-            players_5gw = xp_model.calculate_expected_points(
-                players_data=players,
-                teams_data=teams,
-                xg_rates_data=xg_rates,
-                fixtures_data=fixtures,
-                target_gameweek=gameweek_input.value,
-                live_data=live_data_historical,
-                gameweeks_ahead=5
-            )
+                players_5gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=5,
+                    rule_based_model=rule_model_for_ensemble
+                )
+            else:
+                players_1gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=1
+                )
+
+                players_5gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=5
+                )
 
             # Merge 1GW and 5GW results with derived metrics
             players_with_xp = merge_1gw_5gw_results(players_1gw, players_5gw)
 
-            xp_result = create_xp_results_display(players_with_xp, gameweek_input.value, mo)
+            # Create results display with model information
+            model_info = mo.md(f"**Model Type:** {model_type} {'(with rule-based ensemble)' if config.xp_model.use_ml_model and config.xp_model.ml_ensemble_rule_weight > 0 else ''}")
+            xp_results = create_xp_results_display(players_with_xp, gameweek_input.value, mo)
+            xp_result = mo.vstack([model_info, xp_results])
         else:
             xp_result = mo.md("Load gameweek data first")
-    except ImportError:
-        xp_result = mo.md("❌ Could not load XPModel - check xp_model.py")
+    except ImportError as ie:
+        xp_result = mo.md(f"❌ Could not load ML XP Model - {str(ie)}")
+    except ValueError as ve:
+        # Handle insufficient training data gracefully
+        if "Need at least" in str(ve):
+            xp_result = mo.vstack([
+                mo.md("⚠️ **Insufficient Training Data for ML Model**"),
+                mo.md(f"Error: {str(ve)}"),
+                mo.md("**Falling back to rule-based model...**")
+            ])
+            try:
+                # Fallback to rule-based model
+                from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
+                
+                xp_model = XPModel(
+                    form_weight=config.xp_model.form_weight,
+                    form_window=config.xp_model.form_window,
+                    debug=config.xp_model.debug
+                )
+                
+                players_1gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=1
+                )
+
+                players_5gw = xp_model.calculate_expected_points(
+                    players_data=players,
+                    teams_data=teams,
+                    xg_rates_data=xg_rates,
+                    fixtures_data=fixtures,
+                    target_gameweek=gameweek_input.value,
+                    live_data=live_data_historical,
+                    gameweeks_ahead=5
+                )
+                
+                players_with_xp = merge_1gw_5gw_results(players_1gw, players_5gw)
+                xp_result = mo.vstack([
+                    mo.md("✅ **Using Rule-Based Model (ML fallback)**"),
+                    create_xp_results_display(players_with_xp, gameweek_input.value, mo)
+                ])
+            except Exception as fallback_e:
+                xp_result = mo.md(f"❌ Both ML and rule-based models failed: {str(fallback_e)}")
+        else:
+            xp_result = mo.md(f"❌ ML XP Model error: {str(ve)}")
     except Exception as e:
-        xp_result = mo.md(f"❌ Critical error in XP calculation: {str(e)}")
+        xp_result = mo.md(f"❌ Critical error in ML XP calculation: {str(e)}")
+        # Add debug information
+        import traceback
+        error_details = traceback.format_exc()
+        xp_result = mo.vstack([
+            xp_result,
+            mo.md("**Debug Information:**"),
+            mo.md(f"```\n{error_details}\n```")
+        ])
 
     xp_result
     return (players_with_xp,)
@@ -589,7 +698,17 @@ def _(mo, players_with_xp):
 
             for _, player in players_with_xp.sort_values(['position', sort_column], ascending=[True, False]).iterrows():
                 xp_display = player.get('xP_5gw', player.get('xP', 0))
-                label = f"{player['web_name']} ({player['position']}, {player['name']}) - £{player['price']:.1f}m, {xp_display:.2f} 5GW-xP"
+                
+                # Handle different team name column possibilities
+                team_name = ""
+                if 'name' in player and pd.notna(player['name']):
+                    team_name = player['name']
+                elif 'team' in player and pd.notna(player['team']):
+                    team_name = player['team']
+                elif 'team_name' in player and pd.notna(player['team_name']):
+                    team_name = player['team_name']
+                
+                label = f"{player['web_name']} ({player['position']}, {team_name}) - £{player['price']:.1f}m, {xp_display:.2f} 5GW-xP"
                 player_options.append({"label": label, "value": player['player_id']})
 
             must_include_dropdown = mo.ui.multiselect(

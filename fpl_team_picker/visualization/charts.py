@@ -155,13 +155,32 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         # The performance data only has player_id, we need names from current players
         if not players_data.empty:
             print("🔗 Merging with provided players data to get names...")
+            print(f"📊 Available columns in players_data: {list(players_data.columns)}")
             
             # Include current price info too (handle missing columns gracefully)
-            base_cols = ['player_id', 'web_name', 'position', 'name']
-            optional_cols = ['team', 'now_cost', 'selected_by_percent']
+            essential_cols = ['player_id', 'web_name', 'position']
+            team_name_cols = ['name', 'team_name', 'team']  # Different possible team name columns
+            price_cols = ['price', 'now_cost', 'price_gbp']  # Different possible price columns
+            optional_cols = ['selected_by_percent']
             
-            # Only include columns that exist
-            available_cols = base_cols + [col for col in optional_cols if col in players_data.columns]
+            # Start with essential columns
+            available_cols = [col for col in essential_cols if col in players_data.columns]
+            
+            # Add team name column if available (try different names)
+            for team_col in team_name_cols:
+                if team_col in players_data.columns:
+                    available_cols.append(team_col)
+                    break
+            
+            # Add price column if available (try different names)
+            for price_col in price_cols:
+                if price_col in players_data.columns:
+                    available_cols.append(price_col)
+                    break
+            
+            # Add optional columns that exist
+            available_cols.extend([col for col in optional_cols if col in players_data.columns])
+            
             player_info = players_data[available_cols].drop_duplicates('player_id')
             
             print(f"📊 Using player info columns: {available_cols}")
@@ -267,19 +286,34 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
             print("❌ No players with valid names found!")
             return [], [], pd.DataFrame()
             
-        player_stats = valid_players.groupby('player_id').agg({
+        # Handle missing team name column gracefully
+        agg_dict = {
             'total_points': 'max',
             'web_name': 'first',
-            'position': 'first', 
-            'name': 'first',
+            'position': 'first',
             'gameweek': 'count'  # Number of gameweeks with data
-        }).reset_index()
+        }
+        
+        # Add team name column if it exists (try different possible names)
+        team_col_found = None
+        for team_col in ['name', 'team_name', 'team']:
+            if team_col in valid_players.columns:
+                agg_dict[team_col] = 'first'
+                team_col_found = team_col
+                break
+        
+        player_stats = valid_players.groupby('player_id').agg(agg_dict).reset_index()
         
         # Filter to players with at least some data and sort by points (all players)
         active_players = player_stats[player_stats['gameweek'] >= 1].sort_values('total_points', ascending=False)
         
         for _, player_row in active_players.iterrows():
-            label = f"{player_row['web_name']} ({player_row['position']}, {player_row['name']}) - {player_row['total_points']} pts"
+            # Build label with available team information
+            team_info = ""
+            if team_col_found and team_col_found in player_row and pd.notna(player_row[team_col_found]):
+                team_info = f", {player_row[team_col_found]}"
+            
+            label = f"{player_row['web_name']} ({player_row['position']}{team_info}) - {player_row['total_points']} pts"
             player_options.append({"label": label, "value": int(player_row['player_id'])})
         
         print(f"📊 Created {len(player_options)} player options for trends")
@@ -320,6 +354,8 @@ def create_player_trends_visualization(players_data: pd.DataFrame) -> Tuple[List
         
     except Exception as e:
         print(f"Error creating trends data: {e}")
+        import traceback
+        traceback.print_exc()
         return [], [], pd.DataFrame()
 
 

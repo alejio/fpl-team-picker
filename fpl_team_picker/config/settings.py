@@ -13,10 +13,19 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class XPModelConfig(BaseModel):
     """Expected Points Model Configuration"""
+    # Model selection
+    use_ml_model: bool = Field(default=True, description="Use ML model instead of rule-based model")
+    ml_ensemble_rule_weight: float = Field(default=0.2, description="Weight for rule-based in ML ensemble (0-1)", ge=0.0, le=1.0)
+    
     # Form weighting
     form_weight: float = Field(default=0.7, description="70% recent form, 30% season baseline", ge=0.0, le=1.0)
     form_window: int = Field(default=5, description="5 gameweek form window", ge=1, le=10)
     debug: bool = Field(default=True, description="Enable debug logging")
+    
+    # ML Model Configuration
+    ml_min_training_gameweeks: int = Field(default=3, description="Minimum gameweeks for ML training", ge=2, le=10)
+    ml_training_gameweeks: int = Field(default=5, description="Number of recent gameweeks for ML training", ge=3, le=15)
+    ml_position_min_samples: int = Field(default=30, description="Minimum samples for position-specific models", ge=10, le=100)
     
     # Form classification thresholds  
     hot_threshold: float = Field(default=6.0, description="Points per gameweek for 'hot' players", ge=0.0)

@@ -1,5 +1,10 @@
 {
   "xp_model": {
+    "use_ml_model": true,
+    "ml_ensemble_rule_weight": 0.2,
+    "ml_min_training_gameweeks": 3,
+    "ml_training_gameweeks": 5,
+    "ml_position_min_samples": 30,
     "form_weight": 0.7,
     "form_window": 5,
     "debug": true
