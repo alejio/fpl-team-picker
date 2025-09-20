@@ -7,6 +7,7 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
@@ -20,6 +21,7 @@ def _():
         create_trends_chart,
         create_fixture_difficulty_visualization,
     )
+
     return (
         create_fixture_difficulty_visualization,
         create_form_analytics_display,
@@ -27,6 +29,90 @@ def _():
         create_trends_chart,
         create_xp_results_display,
     )
+
+
+@app.cell
+def _(mo):
+    # Transfer Deadline Display
+    from client import get_raw_events_bootstrap
+    from datetime import datetime
+
+    try:
+        events = get_raw_events_bootstrap()
+        now = datetime.now()
+
+        # Find current/next deadline
+        upcoming_events = events[events["deadline_time"] > now].sort_values(
+            "deadline_time"
+        )
+
+        if not upcoming_events.empty:
+            next_event = upcoming_events.iloc[0]
+            deadline_time = next_event["deadline_time"]
+            gw_name = next_event["name"]
+
+            # Calculate time until deadline
+            time_diff = deadline_time - now
+            total_hours = time_diff.total_seconds() / 3600
+
+            # Format time remaining
+            if total_hours < 1:
+                minutes = int(time_diff.total_seconds() / 60)
+                time_remaining = f"{minutes} minutes"
+                urgency_color = "#ef4444"  # Red
+                urgency_emoji = "🚨"
+            elif total_hours < 6:
+                time_remaining = f"{total_hours:.1f} hours"
+                urgency_color = "#f59e0b"  # Yellow
+                urgency_emoji = "⚠️"
+            elif total_hours < 24:
+                time_remaining = f"{total_hours:.1f} hours"
+                urgency_color = "#3b82f6"  # Blue
+                urgency_emoji = "⏰"
+            else:
+                days = total_hours / 24
+                time_remaining = f"{days:.1f} days"
+                urgency_color = "#22c55e"  # Green
+                urgency_emoji = "📅"
+
+            # Format deadline display
+            deadline_formatted = deadline_time.strftime("%A, %B %d at %I:%M %p")
+
+            deadline_content = f"""
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div style="font-size: 1.1em; margin-bottom: 4px;">
+            <strong>{urgency_emoji} {gw_name} Transfer Deadline</strong>
+            </div>
+            <div style="font-size: 1.3em; color: {urgency_color}; font-weight: bold; margin-bottom: 4px;">
+            {time_remaining} remaining
+            </div>
+            <div style="font-size: 0.9em; color: #cbd5e1;">
+            {deadline_formatted}
+            </div>
+            </div>
+            """
+
+        else:
+            # No upcoming deadlines found
+            deadline_content = """
+            <div style="background: #374151; color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center;">
+            <strong>📋 No upcoming transfer deadlines found</strong>
+            </div>
+            """
+
+        deadline_display = mo.md(deadline_content)
+
+    except Exception as e:
+        # Fallback if deadline check fails
+        deadline_display = mo.md(f"""
+        <div style="background: #fee2e2; border: 1px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px; text-align: center;">
+        🔴 <strong>Unable to load transfer deadline</strong><br/>
+        <small>Error: {str(e)}</small>
+        </div>
+        """)
+
+    deadline_display
+    return (deadline_display,)
 
 
 @app.cell
@@ -46,8 +132,76 @@ def _(mo):
 
 
 @app.cell
+def _(mo):
+    # Data Freshness Indicators
+    from client import get_data_freshness
+
+    try:
+        freshness = get_data_freshness()
+
+        # Get status info
+        status = freshness["overall_freshness"]["status"]
+        age_desc = freshness["data_age_description"]
+        recommendations = freshness["recommendations"]
+
+        # Color coding based on status
+        if status == "very_fresh":
+            status_emoji = "🟢"
+            status_color = "#22c55e"
+        elif status == "fresh":
+            status_emoji = "🟢"
+            status_color = "#22c55e"
+        elif status == "stale":
+            status_emoji = "🟡"
+            status_color = "#f59e0b"
+        else:  # very_stale
+            status_emoji = "🔴"
+            status_color = "#ef4444"
+
+        # Create freshness display
+        freshness_content = f"""
+        ## 📊 Data Status
+
+        <div style="background: #f8fafc; border-left: 4px solid {status_color}; padding: 12px; margin: 8px 0; border-radius: 4px;">
+        <strong>{status_emoji} {age_desc}</strong><br/>
+        <small style="color: #64748b;">
+        Players: {freshness["raw_data_freshness"]["raw_players_bootstrap"]["age_description"]} |
+        Events: {freshness["raw_data_freshness"]["raw_events_bootstrap"]["age_description"]} |
+        Fixtures: {freshness["raw_data_freshness"]["raw_fixtures"]["age_description"]}
+        </small>
+        </div>
+        """
+
+        # Add recommendations if data is stale
+        if status in ["stale", "very_stale"]:
+            rec_text = "<br/>".join([f"• {rec}" for rec in recommendations])
+            freshness_content += f"""
+            <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 0.9em;">
+            <strong>💡 Recommendations:</strong><br/>
+            {rec_text}
+            </div>
+            """
+
+        data_freshness_display = mo.md(freshness_content)
+
+    except Exception as e:
+        # Fallback if freshness check fails
+        data_freshness_display = mo.md(f"""
+        ## 📊 Data Status
+        <div style="background: #fee2e2; border-left: 4px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px;">
+        🔴 <strong>Unable to check data freshness</strong><br/>
+        <small>Error: {str(e)}</small>
+        </div>
+        """)
+
+    data_freshness_display
+    return (data_freshness_display,)
+
+
+@app.cell
 def _():
     import pandas as pd
+
     return (pd,)
 
 
@@ -74,6 +228,7 @@ def _():
         fetch_manager_team,
         process_current_squad,
     )
+
     return fetch_fpl_data, fetch_manager_team, process_current_squad
 
 
@@ -530,7 +685,9 @@ def _(create_form_analytics_display, mo, players_with_xp):
         if not players_with_xp.empty:
             form_insights_display = create_form_analytics_display(players_with_xp, mo)
         else:
-            form_insights_display = mo.md("⚠️ Calculate expected points first to enable form analytics")
+            form_insights_display = mo.md(
+                "⚠️ Calculate expected points first to enable form analytics"
+            )
     except Exception as e:
         form_insights_display = mo.md(f"⚠️ Form analytics unavailable: {str(e)}")
 
@@ -544,9 +701,13 @@ def _(current_squad, mo, players_with_xp):
 
     try:
         if not current_squad.empty and not players_with_xp.empty:
-            squad_form_content = create_squad_form_analysis(current_squad, players_with_xp, mo)
+            squad_form_content = create_squad_form_analysis(
+                current_squad, players_with_xp, mo
+            )
         else:
-            squad_form_content = mo.md("⚠️ Load team data and calculate expected points first to enable squad form analysis")
+            squad_form_content = mo.md(
+                "⚠️ Load team data and calculate expected points first to enable squad form analysis"
+            )
     except Exception as e:
         squad_form_content = mo.md(f"⚠️ Squad form analysis unavailable: {str(e)}")
 
@@ -828,6 +989,7 @@ def _(
     pd,
     players_with_xp,
     team_data,
+    teams,
 ):
     from fpl_team_picker.optimization.optimizer import optimize_team_with_transfers
 
@@ -874,13 +1036,15 @@ def _(
                         starting_11_df = pd.DataFrame(optimal_starting_11)
 
                         # Fix team names by merging with teams data
-                        if 'team' in starting_11_df.columns and not teams.empty:
+                        if "team" in starting_11_df.columns and not teams.empty:
                             # Create team name mapping
-                            team_id_col = 'id' if 'id' in teams.columns else 'team_id'
-                            team_map = dict(zip(teams[team_id_col], teams['name']))
+                            team_id_col = "id" if "id" in teams.columns else "team_id"
+                            team_map = dict(zip(teams[team_id_col], teams["name"]))
 
                             # Update name column with actual team names
-                            starting_11_df['name'] = starting_11_df['team'].map(team_map)
+                            starting_11_df["name"] = starting_11_df["team"].map(
+                                team_map
+                            )
 
                         display_cols = []
                         for disp_col in [
@@ -906,13 +1070,15 @@ def _(
                             bench_xp_total = sum(p.get("xP", 0) for p in bench_players)
 
                             # Fix team names by merging with teams data
-                            if 'team' in bench_df.columns and not teams.empty:
+                            if "team" in bench_df.columns and not teams.empty:
                                 # Create team name mapping
-                                team_id_col = 'id' if 'id' in teams.columns else 'team_id'
-                                team_map = dict(zip(teams[team_id_col], teams['name']))
+                                team_id_col = (
+                                    "id" if "id" in teams.columns else "team_id"
+                                )
+                                team_map = dict(zip(teams[team_id_col], teams["name"]))
 
                                 # Update name column with actual team names
-                                bench_df['name'] = bench_df['team'].map(team_map)
+                                bench_df["name"] = bench_df["team"].map(team_map)
 
                             bench_display_cols = []
                             for disp_col in [
@@ -1022,7 +1188,7 @@ def _(mo, optimal_starting_11):
                 **Please run transfer optimization first to enable captain selection.**
 
                 Once you have an optimal starting 11, captain recommendations will appear here based on:
-                - Double points potential (XP × 2)  
+                - Double points potential (XP × 2)
                 - Fixture difficulty and opponent strength
                 - Recent form and momentum indicators
                 - Minutes certainty and injury risk
@@ -1107,9 +1273,9 @@ def _(
 
                 # Merge current squad with xP data for chip assessment
                 current_squad_with_xp = current_squad.merge(
-                    players_with_xp[['player_id', 'xP', 'xP_5gw']],
-                    on='player_id',
-                    how='left'
+                    players_with_xp[["player_id", "xP", "xP_5gw"]],
+                    on="player_id",
+                    how="left",
                 )
 
                 # Run chip assessments
