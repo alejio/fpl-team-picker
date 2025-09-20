@@ -873,6 +873,15 @@ def _(
                     if optimal_starting_11:
                         starting_11_df = pd.DataFrame(optimal_starting_11)
 
+                        # Fix team names by merging with teams data
+                        if 'team' in starting_11_df.columns and not teams.empty:
+                            # Create team name mapping
+                            team_id_col = 'id' if 'id' in teams.columns else 'team_id'
+                            team_map = dict(zip(teams[team_id_col], teams['name']))
+
+                            # Update name column with actual team names
+                            starting_11_df['name'] = starting_11_df['team'].map(team_map)
+
                         display_cols = []
                         for disp_col in [
                             "web_name",
@@ -895,6 +904,15 @@ def _(
                         if bench_players:
                             bench_df = pd.DataFrame(bench_players)
                             bench_xp_total = sum(p.get("xP", 0) for p in bench_players)
+
+                            # Fix team names by merging with teams data
+                            if 'team' in bench_df.columns and not teams.empty:
+                                # Create team name mapping
+                                team_id_col = 'id' if 'id' in teams.columns else 'team_id'
+                                team_map = dict(zip(teams[team_id_col], teams['name']))
+
+                                # Update name column with actual team names
+                                bench_df['name'] = bench_df['team'].map(team_map)
 
                             bench_display_cols = []
                             for disp_col in [
