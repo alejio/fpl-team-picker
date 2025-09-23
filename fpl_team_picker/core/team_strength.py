@@ -2,8 +2,8 @@
 Dynamic Team Strength Calculation Module
 
 Calculates team strength ratings that evolve throughout the season:
-- GW1-7: Weighted combination of 2024-25 historical data + current season
-- GW8+: Pure current season performance (ignoring historical data)
+- GW1-7: Weighted combination of previous season (2024-25) baseline + current season (2025-26)
+- GW8+: Pure current season (2025-26) performance (ignoring previous season baseline)
 
 This provides stable early season ratings while becoming fully responsive
 to current season performance once sufficient data is available.
@@ -21,16 +21,16 @@ warnings.filterwarnings("ignore")
 
 class DynamicTeamStrength:
     """
-    Dynamic team strength calculator with historical transition logic
+    Dynamic team strength calculator with previous season transition logic
 
     Key Features:
-    - Uses 2024-25 season data as historical baseline
-    - Transitions to current season focus at GW8
+    - Uses previous season (2024-25) final positions as baseline for current season (2025-26)
+    - Transitions to current season (2025-26) focus at GW8
     - Rolling 6-gameweek windows for current season metrics
     - Home/away venue-specific adjustments
     """
 
-    # 2024-25 Premier League final standings
+    # Previous season (2024-25) Premier League final standings - used as baseline for current season (2025-26)
     HISTORICAL_POSITIONS = {
         "Liverpool": 1,
         "Arsenal": 2,
@@ -457,7 +457,7 @@ class DynamicTeamStrength:
     def _calculate_reputation_strength(self, all_teams: List[str]) -> Dict[str, float]:
         """Factor 3: Reputation (20% weight) - Historical success over 3-5 seasons"""
         reputation_ratings = {
-            # Big 6 - traditional top teams (Liverpool updated for 2024-25 championship)
+            # Big 6 - traditional top teams (Liverpool won previous season 2024-25)
             "Liverpool": 1.3,
             "Manchester City": 1.25,
             "Arsenal": 1.25,
@@ -588,7 +588,7 @@ class DynamicTeamStrength:
 
     def _get_static_fallback_ratings(self) -> Dict[str, float]:
         """
-        Fallback to static 2024-25 final table ratings if dynamic calculation fails
+        Fallback to static previous season (2024-25) final table ratings if dynamic calculation fails
         """
         strength_ratings = {}
         for team, position in self.HISTORICAL_POSITIONS.items():

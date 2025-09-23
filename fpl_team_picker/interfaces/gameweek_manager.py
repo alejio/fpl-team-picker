@@ -430,7 +430,7 @@ def _(mo):
     **Dynamic team strength ratings with seasonal transitions and venue adjustments.**
 
     Our model evolves throughout the season:
-    - **Early Season**: Blend 2024-25 baseline with current performance
+    - **Early Season**: Blend previous season (2024-25) baseline with current season (2025-26) performance
     - **GW8+ Focus**: Pure current season form and results
     - **Home/Away**: Contextual difficulty scaling by venue
 

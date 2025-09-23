@@ -46,7 +46,7 @@ from client import FPLDataClient
 
 client = FPLDataClient()
 players = client.get_current_players()
-teams = client.get_current_teams() 
+teams = client.get_current_teams()
 fixtures = client.get_fixtures_normalized()
 xg_rates = client.get_player_xg_xa_rates()
 live_data = client.get_gameweek_live_data(gw)
@@ -124,7 +124,7 @@ Key features:
 
 #### Dynamic Team Strength (`team_strength.py`)
 **Evolving team strength ratings throughout the season:**
-- **Historical transition logic** - Weighted 2024-25 baseline → current season focus
+- **Previous season transition logic** - Weighted previous season (2024-25) baseline → current season (2025-26) focus
 - **GW8+ pure current season** - Responsive to current form once sufficient data
 - **Rolling window analysis** - 6-gameweek performance windows
 - **Venue-specific adjustments** - Home/away advantage incorporation
@@ -281,7 +281,7 @@ fpl-season-planner
 # or: marimo run fpl_team_picker/interfaces/season_planner.py
 
 # Run gameweek manager
-fpl-gameweek-manager  
+fpl-gameweek-manager
 # or: marimo run fpl_team_picker/interfaces/gameweek_manager.py
 
 # Development mode
@@ -330,7 +330,7 @@ vulture fpl_team_picker/
 All implementations must comply with official FPL rules documented in `fpl_rules.md`. Key constraints include:
 - Squad composition: 2 GKP, 5 DEF, 5 MID, 3 FWD
 - £100m budget limit
-- Max 3 players per real team  
+- Max 3 players per real team
 - Valid formations for starting 11
 
 ## Configuration

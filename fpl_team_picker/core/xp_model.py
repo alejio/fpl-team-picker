@@ -176,11 +176,11 @@ class XPModel:
         self, teams_df: pd.DataFrame, players_df: pd.DataFrame, target_gameweek: int
     ) -> Dict[str, float]:
         """
-        Calculate dynamic team strength ratings using 2024-25 data + current season
+        Calculate dynamic team strength ratings using previous season baseline + current season data
 
         Transition logic:
-        - GW1-7: Weighted combination of 2024-25 historical + current season
-        - GW8+: Pure current season performance (ignoring historical)
+        - GW1-7: Weighted combination of previous season (2024-25) baseline + current season (2025-26)
+        - GW8+: Pure current season (2025-26) performance (ignoring previous season baseline)
         """
         try:
             from .team_strength import (
