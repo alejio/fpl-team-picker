@@ -21,7 +21,7 @@ def _():
 
     # ML libraries
     from sklearn.linear_model import RidgeCV
-    from sklearn.model_selection import train_test_split
+    from sklearn.model_selection import train_test_split, TimeSeriesSplit
     from sklearn.metrics import mean_absolute_error
     from sklearn.preprocessing import LabelEncoder, StandardScaler
     # import shap  # Commented out due to Python 3.13 compatibility issues
@@ -40,6 +40,7 @@ def _():
         LabelEncoder,
         RidgeCV,
         StandardScaler,
+        TimeSeriesSplit,
         XPModel,
         config,
         fetch_fpl_data,
@@ -621,6 +622,9 @@ def _(
                         historical_features, on="player_id", how="left"
                     )
 
+                    # Add gameweek information for temporal validation
+                    gw_features["gameweek"] = gw
+
                     # Add lagged features from previous gameweek (safe to use)
                     if not prev_gw_data.empty:
                         # Ensure required columns exist
@@ -1010,6 +1014,7 @@ def _(mo):
 def _(
     RidgeCV,
     StandardScaler,
+    TimeSeriesSplit,
     mean_absolute_error,
     ml_features,
     mo,
@@ -1028,26 +1033,76 @@ def _(
             X = training_data[ml_features]
             y = training_data[target_variable]
 
-            # Train/test split (80/20)
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=None
+            # Add gameweek column for temporal validation
+            training_data_with_gw = training_data.copy()
+            training_data_with_gw["gameweek"] = training_data_with_gw.index.map(
+                lambda idx: training_data_with_gw.loc[idx, "gameweek"]
+                if "gameweek" in training_data_with_gw.columns
+                else 1  # Fallback if gameweek column missing
             )
+
+            # Get unique gameweeks and sort them
+            available_gameweeks = sorted(
+                training_data["gameweek"].unique()
+                if "gameweek" in training_data.columns
+                else range(1, len(training_data) // 100 + 2)
+            )  # Estimate based on data size
+
+            # TEMPORAL TRAIN/TEST SPLIT - Last gameweek(s) for testing
+            if len(available_gameweeks) >= 3:
+                # Use last gameweek for testing, rest for training
+                test_gameweeks = [available_gameweeks[-1]]
+                train_gameweeks = available_gameweeks[:-1]
+
+                # Create temporal split
+                if "gameweek" in training_data.columns:
+                    train_mask = training_data["gameweek"].isin(train_gameweeks)
+                    test_mask = training_data["gameweek"].isin(test_gameweeks)
+                else:
+                    # Fallback: use last 20% as test (temporal order)
+                    split_idx = int(len(training_data) * 0.8)
+                    train_mask = training_data.index < split_idx
+                    test_mask = training_data.index >= split_idx
+
+                X_train = X[train_mask]
+                X_test = X[test_mask]
+                y_train = y[train_mask]
+                y_test = y[test_mask]
+
+                split_info = f"Temporal split: Train GWs {train_gameweeks}, Test GWs {test_gameweeks}"
+            else:
+                # Fallback to temporal ordering if insufficient gameweeks
+                general_split_idx = int(len(training_data) * 0.8)
+                X_train = X.iloc[:general_split_idx]
+                X_test = X.iloc[general_split_idx:]
+                y_train = y.iloc[:general_split_idx]
+                y_test = y.iloc[general_split_idx:]
+
+                split_info = "Temporal ordering split (80/20) - insufficient gameweeks for full temporal validation"
 
             # Scale features for Ridge regression
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
 
-            # Train Ridge regression with cross-validation for optimal alpha
+            # Train Ridge regression with TIME SERIES cross-validation for optimal alpha
+            # Use TimeSeriesSplit instead of random CV
+            n_cv_splits = (
+                min(5, len(available_gameweeks) - 1)
+                if len(available_gameweeks) > 2
+                else 3
+            )
+            tscv = TimeSeriesSplit(n_splits=n_cv_splits)
+
             ml_model = RidgeCV(
                 alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
-                cv=5,
+                cv=tscv,  # Temporal cross-validation
                 scoring="neg_mean_absolute_error",
             )
 
             ml_model.fit(X_train_scaled, y_train)
 
-            # Quick training metrics
+            # Validation metrics
             train_pred = ml_model.predict(X_train_scaled)
             test_pred = ml_model.predict(X_test_scaled)
 
@@ -1057,22 +1112,26 @@ def _(
             model_summary = mo.vstack(
                 [
                     mo.md(
-                        "### ✅ Enhanced Ridge Regression Model Trained with Rich Database Features"
+                        "### ✅ Enhanced Ridge Regression Model with Temporal Validation"
                     ),
+                    mo.md(f"**🕐 Validation Strategy:** {split_info}"),
                     mo.md(
                         f"**Training samples:** {len(X_train)} | **Test samples:** {len(X_test)}"
                     ),
                     mo.md(
-                        f"**Train MAE:** {train_mae:.2f} | **Test MAE:** {test_mae:.2f}"
+                        f"**🎯 Temporal Train MAE:** {train_mae:.2f} | **🧪 Temporal Test MAE:** {test_mae:.2f}"
                     ),
                     mo.md(
                         f"**Total features:** {len(ml_features)} rich features from FPL database"
                     ),
                     mo.md(
-                        f"**Feature breakdown:** Base ({len([f for f in ml_features if f in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists']])}) + Enhanced ({len([f for f in ml_features if '_static' in f])}) + Contextual ({len([f for f in ml_features if f not in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical', 'minutes', 'goals_scored', 'assists'] and '_static' not in f])})"
+                        f"**Cross-validation:** TimeSeriesSplit with {n_cv_splits} splits (temporal-aware)"
                     ),
                     mo.md(
-                        "**Model type:** Ridge Regression with feature scaling and cross-validated regularization"
+                        f"**Selected alpha:** {ml_model.alpha_:.4f} (optimal regularization)"
+                    ),
+                    mo.md(
+                        "**✅ NO TIME LEAKAGE:** Model never trains on future to predict past"
                     ),
                     mo.md("---"),
                 ]
@@ -1084,6 +1143,7 @@ def _(
             scaler = None
     else:
         model_summary = mo.md("⚠️ **Prepare training data first to train model**")
+        ml_model = None
         scaler = None
 
     model_summary
@@ -1112,6 +1172,7 @@ def _(mo):
 def _(
     RidgeCV,
     StandardScaler,
+    TimeSeriesSplit,
     mean_absolute_error,
     ml_features,
     mo,
@@ -1138,15 +1199,39 @@ def _(
                     X_pos_train = pos_training_data[ml_features]
                     y_pos_train = pos_training_data[target_variable]
 
-                    # Train/test split for this position
-                    (
-                        X_train_pos_specific,
-                        X_test_pos_specific,
-                        y_train_pos_specific,
-                        y_test_pos_specific,
-                    ) = train_test_split(
-                        X_pos_train, y_pos_train, test_size=0.2, random_state=42
-                    )
+                    # TEMPORAL split for position-specific models
+                    if "gameweek" in pos_training_data.columns:
+                        pos_gameweeks = sorted(pos_training_data["gameweek"].unique())
+                        if len(pos_gameweeks) >= 2:
+                            # Use temporal split
+                            pos_test_gws = [pos_gameweeks[-1]]
+                            pos_train_gws = pos_gameweeks[:-1]
+
+                            pos_train_mask = pos_training_data["gameweek"].isin(
+                                pos_train_gws
+                            )
+                            pos_test_mask = pos_training_data["gameweek"].isin(
+                                pos_test_gws
+                            )
+
+                            X_train_pos_specific = X_pos_train[pos_train_mask]
+                            X_test_pos_specific = X_pos_train[pos_test_mask]
+                            y_train_pos_specific = y_pos_train[pos_train_mask]
+                            y_test_pos_specific = y_pos_train[pos_test_mask]
+                        else:
+                            # Fallback to temporal ordering
+                            pos_split_idx = int(len(pos_training_data) * 0.8)
+                            X_train_pos_specific = X_pos_train.iloc[:pos_split_idx]
+                            X_test_pos_specific = X_pos_train.iloc[pos_split_idx:]
+                            y_train_pos_specific = y_pos_train.iloc[:pos_split_idx]
+                            y_test_pos_specific = y_pos_train.iloc[pos_split_idx:]
+                    else:
+                        # Fallback to temporal ordering if no gameweek column
+                        pos_split_idx_fallback = int(len(pos_training_data) * 0.8)
+                        X_train_pos_specific = X_pos_train.iloc[:pos_split_idx_fallback]
+                        X_test_pos_specific = X_pos_train.iloc[pos_split_idx_fallback:]
+                        y_train_pos_specific = y_pos_train.iloc[:pos_split_idx_fallback]
+                        y_test_pos_specific = y_pos_train.iloc[pos_split_idx_fallback:]
 
                     # Scale features for position-specific Ridge regression
                     position_scaler = StandardScaler()
@@ -1155,17 +1240,22 @@ def _(
                     )
                     X_test_pos_scaled = position_scaler.transform(X_test_pos_specific)
 
-                    # Train position-specific Ridge model with stronger regularization for small datasets
+                    # Train position-specific Ridge model with temporal CV
                     alpha_range = (
                         [10.0, 100.0, 1000.0]
                         if player_position in ["GKP", "FWD"]
                         else [0.1, 1.0, 10.0, 100.0]
                     )
+
+                    # Use TimeSeriesSplit for position-specific models too
+                    pos_cv_splits = min(
+                        3, len(X_train_pos_specific) // 20
+                    )  # Conservative for smaller datasets
+                    pos_tscv = TimeSeriesSplit(n_splits=max(2, pos_cv_splits))
+
                     position_specific_model = RidgeCV(
                         alphas=alpha_range,
-                        cv=min(
-                            5, len(X_train_pos_specific) // 10
-                        ),  # Adjust CV folds for small datasets
+                        cv=pos_tscv,  # Temporal CV for position models
                         scoring="neg_mean_absolute_error",
                     )
 
@@ -1241,6 +1331,154 @@ def _(
 
     position_summary
     return (position_models,)
+
+
+@app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ## 4️⃣c Walk-Forward Validation
+
+    **Comprehensive temporal validation simulating real-world deployment scenario.**
+
+    Tests the model's ability to learn progressively by training on historical data
+    and testing on each subsequent gameweek.
+    """
+    )
+    return
+
+
+@app.cell
+def _(
+    RidgeCV,
+    StandardScaler,
+    TimeSeriesSplit,
+    mean_absolute_error,
+    ml_features,
+    mo,
+    np,
+    pd,
+    target_variable,
+    training_data,
+):
+    # Walk-forward validation results
+    walk_forward_results = []
+    walk_forward_summary = mo.md(
+        "⚠️ **Train model first to run walk-forward validation**"
+    )
+
+    if not training_data.empty and ml_features and len(ml_features) > 0:
+        try:
+            if "gameweek" in training_data.columns:
+                available_gws = sorted(training_data["gameweek"].unique())
+                min_train_gws = 2  # Minimum gameweeks needed for training
+
+                if len(available_gws) >= min_train_gws + 1:
+                    walk_forward_results = []
+
+                    # Walk-forward validation: train on GW 1-N, test on GW N+1
+                    for test_gw in available_gws[min_train_gws:]:
+                        wf_train_gws = [gw for gw in available_gws if gw < test_gw]
+
+                        if len(wf_train_gws) >= min_train_gws:
+                            # Prepare data for this fold
+                            train_data = training_data[
+                                training_data["gameweek"].isin(wf_train_gws)
+                            ]
+                            test_data = training_data[
+                                training_data["gameweek"] == test_gw
+                            ]
+
+                            if len(train_data) > 0 and len(test_data) > 0:
+                                # Features and targets
+                                X_train_wf = train_data[ml_features]
+                                y_train_wf = train_data[target_variable]
+                                X_test_wf = test_data[ml_features]
+                                y_test_wf = test_data[target_variable]
+
+                                # Scale features
+                                scaler_wf = StandardScaler()
+                                X_train_wf_scaled = scaler_wf.fit_transform(X_train_wf)
+                                X_test_wf_scaled = scaler_wf.transform(X_test_wf)
+
+                                # Train model with temporal CV
+                                tscv_wf = TimeSeriesSplit(
+                                    n_splits=min(3, len(wf_train_gws) - 1)
+                                )
+                                model_wf = RidgeCV(
+                                    alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
+                                    cv=tscv_wf,
+                                    scoring="neg_mean_absolute_error",
+                                )
+
+                                model_wf.fit(X_train_wf_scaled, y_train_wf)
+
+                                # Predict and evaluate
+                                pred_wf = model_wf.predict(X_test_wf_scaled)
+                                mae_wf = mean_absolute_error(y_test_wf, pred_wf)
+
+                                walk_forward_results.append(
+                                    {
+                                        "test_gw": test_gw,
+                                        "train_gws": f"GW{min(wf_train_gws)}-{max(wf_train_gws)}",
+                                        "train_samples": len(train_data),
+                                        "test_samples": len(test_data),
+                                        "mae": mae_wf,
+                                        "selected_alpha": model_wf.alpha_,
+                                    }
+                                )
+
+                    if walk_forward_results:
+                        # Create results DataFrame
+                        wf_df = pd.DataFrame(walk_forward_results)
+                        avg_mae = wf_df["mae"].mean()
+                        std_mae = wf_df["mae"].std()
+                        best_gw = wf_df.loc[wf_df["mae"].idxmin()]
+                        worst_gw = wf_df.loc[wf_df["mae"].idxmax()]
+
+                        walk_forward_summary = mo.vstack(
+                            [
+                                mo.md("### ✅ Walk-Forward Validation Results"),
+                                mo.md(
+                                    f"**🚶 Validation gameweeks:** {len(walk_forward_results)} progressive tests"
+                                ),
+                                mo.md(
+                                    f"**📊 Average MAE:** {avg_mae:.3f} ± {std_mae:.3f}"
+                                ),
+                                mo.md(
+                                    f"**🏆 Best performance:** GW{best_gw['test_gw']} (MAE: {best_gw['mae']:.3f})"
+                                ),
+                                mo.md(
+                                    f"**📉 Worst performance:** GW{worst_gw['test_gw']} (MAE: {worst_gw['mae']:.3f})"
+                                ),
+                                mo.md("**📈 Progressive Learning Table:**"),
+                                mo.ui.table(wf_df.round(3), page_size=10),
+                                mo.md(
+                                    "**🎯 This simulates real deployment** - training only on past data to predict future gameweeks"
+                                ),
+                                mo.md("---"),
+                            ]
+                        )
+                    else:
+                        walk_forward_summary = mo.md(
+                            "⚠️ **Insufficient data for walk-forward validation**"
+                        )
+                else:
+                    walk_forward_summary = mo.md(
+                        "⚠️ **Need at least 3 gameweeks for walk-forward validation**"
+                    )
+            else:
+                walk_forward_summary = mo.md(
+                    "⚠️ **No gameweek information available for walk-forward validation**"
+                )
+
+        except Exception as e:
+            walk_forward_summary = mo.md(
+                f"❌ **Walk-forward validation failed:** {str(e)}"
+            )
+
+    walk_forward_summary
+    return (walk_forward_results,)
 
 
 @app.cell
