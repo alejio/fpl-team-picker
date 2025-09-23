@@ -68,7 +68,11 @@ def get_current_gameweek_info() -> Dict:
             1, min(target_gameweek + 2, 39)
         ):  # Check up to 2 gameweeks ahead
             try:
+                # Try both live data and performance data methods
                 gw_data = client.get_gameweek_live_data(gw)
+                if gw_data.empty:
+                    gw_data = client.get_gameweek_performance(gw)
+
                 if not gw_data.empty:
                     available_gws.append(gw)
             except Exception:

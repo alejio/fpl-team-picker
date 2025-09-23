@@ -392,19 +392,34 @@ def _(
         else:
             team_display = mo.vstack(
                 [
-                    mo.md(f"### ⚠️ GW{target_gw} - Previous Team Data Missing"),
+                    mo.md(f"### ⏳ GW{target_gw} - Previous Team Data Pending"),
                     mo.md(
                         f"**Available data:** GW{', GW'.join(map(str, available_data)) if available_data else 'None'}"
                     ),
                     mo.md(""),
                     mo.md(
-                        f"Cannot load team data from GW{previous_gw}. This may be because:"
+                        f"Cannot load team data from GW{previous_gw}. This usually happens when:"
                     ),
-                    mo.md(f"• GW{previous_gw} data isn't available yet, or"),
-                    mo.md("• Database hasn't been updated with your team information"),
-                    mo.md(""),
                     mo.md(
-                        "**Suggestion:** Try selecting a gameweek where your previous team data is available."
+                        f"• GW{previous_gw} just finished and data is being processed"
+                    ),
+                    mo.md("• Database needs to be refreshed with latest results"),
+                    mo.md(
+                        "• Your team picks haven't been saved from the previous gameweek"
+                    ),
+                    mo.md(""),
+                    mo.md("**📊 What you can do:**"),
+                    mo.md(
+                        "• **Refresh data**: Run the data update commands to sync latest results"
+                    ),
+                    mo.md(
+                        f"• **Wait**: Check back in 1-2 hours after GW{previous_gw} finishes"
+                    ),
+                    mo.md(
+                        f"• **Use available data**: Analyze GW{', GW'.join(map(str, available_data[-3:]) if available_data else [])} for insights"
+                    ),
+                    mo.md(
+                        "• **Manual planning**: Use the player analysis tools below for transfer planning"
                     ),
                 ]
             )
