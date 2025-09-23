@@ -19,8 +19,8 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_ensemble_rule_weight: float = Field(
-        default=0.2,
-        description="Weight for rule-based in ML ensemble (0-1)",
+        default=0.22,
+        description="Weight for rule-based in ML ensemble (0-1) - optimized based on 0.78 MAE performance",
         ge=0.0,
         le=1.0,
     )

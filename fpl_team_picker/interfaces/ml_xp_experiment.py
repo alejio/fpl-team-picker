@@ -20,7 +20,7 @@ def _():
     import plotly.graph_objects as go
 
     # ML libraries
-    from sklearn.linear_model import RidgeCV
+    from sklearn.linear_model import RidgeCV, Ridge
     from sklearn.model_selection import train_test_split, TimeSeriesSplit
     from sklearn.metrics import mean_absolute_error
     from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -38,6 +38,7 @@ def _():
     return (
         FPLDataClient,
         LabelEncoder,
+        Ridge,
         RidgeCV,
         StandardScaler,
         TimeSeriesSplit,
@@ -371,9 +372,60 @@ def _(
 
                 for gw in train_gws:
                     # Target: what we want to predict (current gameweek performance)
+                    # Include minutes and price for physics feature calculations
+                    target_columns = [
+                        "player_id",
+                        "total_points",
+                        "minutes",
+                        "value",
+                        "now_cost",
+                    ]
+                    available_target_cols = [
+                        col for col in target_columns if col in live_data_df.columns
+                    ]
+
+                    # DEBUG: Check what price columns are available
+                    price_cols = [
+                        col
+                        for col in live_data_df.columns
+                        if any(
+                            price_term in col.lower()
+                            for price_term in ["price", "cost", "value"]
+                        )
+                    ]
+                    print(f"    💰 Available price columns: {price_cols}")
+
                     gw_target = live_data_df[live_data_df["event"] == gw][
-                        ["player_id", "total_points"]
+                        available_target_cols
                     ].copy()
+
+                    # Convert price column with proper handling
+                    if "value" in gw_target.columns:
+                        gw_target = gw_target.rename(columns={"value": "price"})
+                        gw_target["price"] = pd.to_numeric(
+                            gw_target["price"], errors="coerce"
+                        )
+                        # Quick validation
+                        non_null_count = gw_target["price"].notna().sum()
+                        if non_null_count > 0:
+                            sample_prices = gw_target["price"].dropna().head(3).values
+                            print(
+                                f"    ✅ Price data fixed: {sample_prices} ({non_null_count}/{len(gw_target)} valid)"
+                            )
+                        else:
+                            print("    ❌ Price data still missing!")
+
+                    elif "now_cost" in gw_target.columns:
+                        gw_target = gw_target.rename(columns={"now_cost": "price"})
+                        gw_target["price"] = (
+                            pd.to_numeric(gw_target["price"], errors="coerce") / 10.0
+                        )
+                        sample_prices = gw_target["price"].dropna().head(3).values
+                        print(f"    ✅ Using now_cost: {sample_prices}")
+                    else:
+                        print(
+                            f"    ❌ No price column found in: {gw_target.columns.tolist()}"
+                        )
 
                     # Calculate cumulative stats up to BEFORE this gameweek only (no data leakage)
                     historical_data_up_to_gw = live_data_df[
@@ -413,6 +465,13 @@ def _(
 
                     # Build dynamic aggregation dict - only use fields that actually exist
                     available_columns = historical_data_up_to_gw.columns.tolist()
+                    print(
+                        f"    📋 Available columns for GW{gw}: {len(available_columns)} columns"
+                    )
+                    xg_cols = [
+                        col for col in available_columns if "expected" in col.lower()
+                    ]
+                    print(f"    🎯 Expected goals columns: {xg_cols}")
 
                     # Core fields that should always exist
                     agg_dict = {
@@ -457,6 +516,35 @@ def _(
                         .reset_index()
                     )
 
+                    # DEBUG: Check aggregation results
+                    if len(cumulative_stats) > 0:
+                        # Find a player with non-zero xG for better debugging
+                        non_zero_xg = cumulative_stats[
+                            cumulative_stats["expected_goals"] > 0.001
+                        ]
+                        if len(non_zero_xg) > 0:
+                            sample_idx = non_zero_xg.index[0]
+                            sample_player_id = cumulative_stats.loc[
+                                sample_idx, "player_id"
+                            ]
+                            xg_val = cumulative_stats.loc[sample_idx, "expected_goals"]
+                            minutes_val = cumulative_stats.loc[sample_idx, "minutes"]
+                            print(
+                                f"    🔬 Sample aggregation - Player {sample_player_id}: xG={xg_val:.3f}, minutes={minutes_val}"
+                            )
+                        else:
+                            # Fallback to first player if no one has xG
+                            sample_player_id = cumulative_stats.iloc[0]["player_id"]
+                            xg_val = cumulative_stats.iloc[0].get(
+                                "expected_goals", "N/A"
+                            )
+                            minutes_val = cumulative_stats.iloc[0].get("minutes", "N/A")
+                            print(
+                                f"    🔬 Sample aggregation - Player {sample_player_id}: xG={xg_val}, minutes={minutes_val} (all zero)"
+                            )
+                    else:
+                        print(f"    ⚠️ No cumulative stats generated for GW{gw}")
+
                     # Calculate per-90 stats - only for fields that exist
 
                     # Core per-90 metrics (always available)
@@ -478,6 +566,49 @@ def _(
                         * 90,
                         0,
                     )
+
+                    # DEBUG: Check per-90 calculation results
+                    if len(cumulative_stats) > 0:
+                        # Find a player with non-zero xG90 for better debugging
+                        non_zero_xg90 = cumulative_stats[
+                            cumulative_stats["xG90_historical"] > 0.001
+                        ]
+                        if len(non_zero_xg90) > 0:
+                            sample_idx = non_zero_xg90.index[0]
+                            sample_xg90 = cumulative_stats.loc[
+                                sample_idx, "xG90_historical"
+                            ]
+                            sample_xa90 = cumulative_stats.loc[
+                                sample_idx, "xA90_historical"
+                            ]
+                            sample_player_id = cumulative_stats.loc[
+                                sample_idx, "player_id"
+                            ]
+                            print(
+                                f"    ⚽ Sample per-90 stats (Player {sample_player_id}): xG90={sample_xg90:.3f}, xA90={sample_xa90:.3f}"
+                            )
+                        else:
+                            sample_xg90 = cumulative_stats.iloc[0].get(
+                                "xG90_historical", "N/A"
+                            )
+                            sample_xa90 = cumulative_stats.iloc[0].get(
+                                "xA90_historical", "N/A"
+                            )
+                            print(
+                                f"    ⚽ Sample per-90 stats: xG90={sample_xg90:.3f}, xA90={sample_xa90:.3f} (all zero)"
+                            )
+
+                        # Check if most values are zero
+                        xg90_nonzero = (
+                            cumulative_stats["xG90_historical"] > 0.001
+                        ).sum()
+                        xa90_nonzero = (
+                            cumulative_stats["xA90_historical"] > 0.001
+                        ).sum()
+                        total_players = len(cumulative_stats)
+                        print(
+                            f"    📊 Non-zero stats: {xg90_nonzero}/{total_players} have xG90>0, {xa90_nonzero}/{total_players} have xA90>0"
+                        )
                     cumulative_stats["points_per_90"] = np.where(
                         cumulative_stats["minutes"] > 0,
                         (cumulative_stats["total_points"] / cumulative_stats["minutes"])
@@ -762,10 +893,170 @@ def _(
 
                     gw_features = gw_features.fillna(fill_values)
 
+                    # ===== PHYSICS-INFORMED FEATURE ENGINEERING =====
+                    # Add FPL-aware features that understand scoring rules and context
+
+                    # 1. Position-based scoring multipliers (NO LEAKAGE - static FPL rules)
+                    training_goal_multipliers = {"GKP": 6, "DEF": 6, "MID": 5, "FWD": 4}
+                    training_cs_multipliers = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
+
+                    # Map positions to multipliers
+                    gw_features["goal_multiplier"] = gw_features["position"].map(
+                        training_goal_multipliers
+                    )
+                    gw_features["cs_multiplier"] = gw_features["position"].map(
+                        training_cs_multipliers
+                    )
+
+                    # 2. Physics-based expected points (NO LEAKAGE - uses historical data only)
+                    # These use the same logic as rule-based but learn optimal weightings
+                    gw_features["physics_goal_points"] = (
+                        gw_features.get("xG90_historical", 0)
+                        * gw_features.get("minutes", 90)
+                        / 90
+                        * gw_features["goal_multiplier"]
+                    )
+
+                    gw_features["physics_assist_points"] = (
+                        gw_features.get("xA90_historical", 0)
+                        * gw_features.get("minutes", 90)
+                        / 90
+                        * 3  # Always 3 points
+                    )
+
+                    # 3. Opponent strength features (NO LEAKAGE - uses team strength from before target GW)
+                    # Get opponent team strength for the target gameweek
+                    if (
+                        hasattr(gw_features, "opponent_team")
+                        and "opponent_team" in gw_features.columns
+                    ):
+                        # This would use team strength calculated up to the previous gameweek
+                        pass  # Placeholder for now - would need team strength data
+
+                    # 4. Form-weighted features (NO LEAKAGE - uses only historical performance)
+                    form_window = 3  # Last 3 gameweeks
+                    if gw > form_window:
+                        # Form-weighted points (if we had individual GW data)
+                        # This would calculate weighted average of last 3 gameweeks
+                        gw_features["form_weighted_points"] = gw_features.get(
+                            "points_per_90", 0
+                        )
+
+                    else:
+                        gw_features["form_weighted_points"] = gw_features.get(
+                            "points_per_90", 0
+                        )
+
+                    # 5. Price-efficiency features (NO LEAKAGE - current price available before GW)
+                    # Use a safe division with proper fallback for missing prices
+                    if "price" in gw_features.columns:
+                        training_price_values = (
+                            gw_features["price"].fillna(5.0).replace(0, 5.0)
+                        )
+                    else:
+                        training_price_values = 5.0  # Default price for all players
+
+                    gw_features["points_per_price"] = (
+                        gw_features.get("points_per_90", 0) / training_price_values
+                    )
+
+                    gw_features["xg_per_price"] = (
+                        gw_features.get("xG90_historical", 0) / training_price_values
+                    )
+
+                    # 6. Position-specific features (NO LEAKAGE - uses historical averages)
+                    if gw_features.get("position", "").iloc[0] in ["GKP", "DEF"]:
+                        # Defensive focus
+                        gw_features["defensive_potential"] = gw_features.get(
+                            "cs_multiplier", 0
+                        ) * gw_features.get("clean_sheets_per_90", 0)
+                        gw_features["saves_importance"] = gw_features.get(
+                            "saves_per_90", 0
+                        )
+                    else:
+                        gw_features["defensive_potential"] = 0
+                        gw_features["saves_importance"] = 0
+
+                    if gw_features.get("position", "").iloc[0] in ["MID", "FWD"]:
+                        # Attacking focus
+                        gw_features["attacking_threat"] = gw_features.get(
+                            "xG90_historical", 0
+                        ) + gw_features.get("xA90_historical", 0)
+                        gw_features["penalty_potential"] = gw_features.get(
+                            "penalties_order", 0
+                        )
+                    else:
+                        gw_features["attacking_threat"] = 0
+                        gw_features["penalty_potential"] = 0
+
+                    # 7. Minutes prediction features (NO LEAKAGE - based on historical rotation)
+                    gw_features["minutes_consistency"] = (
+                        90 - abs(gw_features.get("minutes", 90) - 90)
+                    ) / 90  # How consistent are their minutes
+
+                    gw_features["expected_minutes_factor"] = (
+                        gw_features.get("minutes", 90) / 90
+                    )
+
+                    # 8. Interaction features (combine multiple signals)
+                    gw_features["xgi_per_90"] = gw_features.get(
+                        "xG90_historical", 0
+                    ) + gw_features.get("xA90_historical", 0)
+
+                    gw_features["total_threat"] = gw_features.get(
+                        "xgi_per_90", 0
+                    ) * gw_features.get("expected_minutes_factor", 1.0)
+
+                    # 9. Ensure no infinite or NaN values after feature engineering
+                    training_physics_features = [
+                        "goal_multiplier",
+                        "cs_multiplier",
+                        "physics_goal_points",
+                        "physics_assist_points",
+                        "form_weighted_points",
+                        "points_per_price",
+                        "xg_per_price",
+                        "defensive_potential",
+                        "saves_importance",
+                        "attacking_threat",
+                        "penalty_potential",
+                        "minutes_consistency",
+                        "expected_minutes_factor",
+                        "xgi_per_90",
+                        "total_threat",
+                    ]
+
+                    for training_feature in training_physics_features:
+                        if training_feature in gw_features.columns:
+                            gw_features[training_feature] = gw_features[
+                                training_feature
+                            ].fillna(0)
+                            gw_features[training_feature] = gw_features[
+                                training_feature
+                            ].replace([np.inf, -np.inf], 0)
+
                     training_records.append(gw_features)
 
                 # Combine all training data
                 training_data = pd.concat(training_records, ignore_index=True)
+
+                # DEBUG: Check if physics features survived concatenation
+                physics_check = [
+                    f
+                    for f in [
+                        "goal_multiplier",
+                        "physics_goal_points",
+                        "attacking_threat",
+                    ]
+                    if f in training_data.columns
+                ]
+                print(
+                    f"🔍 PHYSICS FEATURES CHECK: {physics_check} (found {len(physics_check)}/3 key physics features)"
+                )
+                if physics_check:
+                    print("✅ Physics features present in training_data!")
+                else:
+                    print("❌ Physics features MISSING from training_data!")
 
                 # Feature engineering
                 le_position = LabelEncoder()
@@ -872,10 +1163,112 @@ def _(
                     f for f in contextual_features if f in training_data.columns
                 ]
 
+                # Physics-informed features (FPL-aware)
+                physics_features = [
+                    "goal_multiplier",
+                    "cs_multiplier",
+                    "physics_goal_points",
+                    "physics_assist_points",
+                    "form_weighted_points",
+                    "points_per_price",
+                    "xg_per_price",
+                    "defensive_potential",
+                    "saves_importance",
+                    "attacking_threat",
+                    "penalty_potential",
+                    "minutes_consistency",
+                    "expected_minutes_factor",
+                    "xgi_per_90",
+                    "total_threat",
+                ]
+
+                # Only include physics features that exist in training data
+                available_physics_features = [
+                    f for f in physics_features if f in training_data.columns
+                ]
+
                 # Combine all feature sets
                 ml_features = (
-                    base_features + available_static_features + available_contextual
+                    base_features
+                    + available_static_features
+                    + available_contextual
+                    + available_physics_features
                 )
+
+                # DEBUG: Print feature breakdown for analysis
+                print("🔍 FEATURE DEBUG:")
+                print(f"  📊 Base features ({len(base_features)}): {base_features}")
+                print(
+                    f"  🔄 Contextual features ({len(available_contextual)}): {available_contextual}"
+                )
+                print(
+                    f"  🧬 Physics features ({len(available_physics_features)}): {available_physics_features}"
+                )
+                print(f"  📈 Total features: {len(ml_features)}")
+                print("  📝 Sample physics feature values:")
+                if available_physics_features and not training_data.empty:
+                    for pf in available_physics_features[
+                        :3
+                    ]:  # Show first 3 physics features
+                        if pf in training_data.columns:
+                            # Find non-zero examples for better debugging
+                            non_zero_mask = training_data[pf] > 0.001
+                            if non_zero_mask.any():
+                                sample_vals = (
+                                    training_data[non_zero_mask][pf].head(3).values
+                                )
+                                print(f"    {pf}: {sample_vals} (non-zero examples)")
+                            else:
+                                sample_vals = training_data[pf].head(3).values
+                                print(f"    {pf}: {sample_vals} (all zero!)")
+
+                # DEBUG: Check base data that physics features depend on
+                print("  🔍 Base data check:")
+                base_data_cols = [
+                    "xG90_historical",
+                    "xA90_historical",
+                    "points_per_90",
+                    "minutes",
+                    "price",
+                ]
+                for col in base_data_cols:
+                    if col in training_data.columns:
+                        # Find players with non-zero values for better debugging
+                        non_zero_mask = training_data[col] > 0.001
+                        if non_zero_mask.any():
+                            sample_vals = (
+                                training_data[non_zero_mask][col].head(3).values
+                            )
+                            mean_val = training_data[col].mean()
+                            non_zero_count = non_zero_mask.sum()
+                            total_count = len(training_data)
+                            print(
+                                f"    {col}: {sample_vals} (mean: {mean_val:.3f}, {non_zero_count}/{total_count} non-zero)"
+                            )
+                        else:
+                            sample_vals = training_data[col].head(3).values
+                            mean_val = training_data[col].mean()
+                            print(
+                                f"    {col}: {sample_vals} (mean: {mean_val:.3f}, ALL ZERO)"
+                            )
+                    else:
+                        print(f"    {col}: MISSING!")
+
+                # Check if all physics features are zero
+                physics_means = {}
+                for pf in available_physics_features:
+                    if pf in training_data.columns:
+                        physics_means[pf] = training_data[pf].mean()
+
+                zero_physics = [
+                    pf
+                    for pf, mean_val in physics_means.items()
+                    if abs(mean_val) < 0.001
+                ]
+                if zero_physics:
+                    print(f"  ⚠️ Physics features with near-zero means: {zero_physics}")
+                else:
+                    print("  ✅ Physics features have non-zero values")
 
                 # Target variable: actual total points
                 target_variable = "total_points"
@@ -907,6 +1300,9 @@ def _(
                         ),
                         mo.md(
                             f"• **Rich contextual features**: {len(available_contextual)} features (expanded lagged + home/away)"
+                        ),
+                        mo.md(
+                            f"• **🧬 Physics features**: {len(available_physics_features)} FPL-aware features{' - ⚠️ MISSING!' if len(available_physics_features) == 0 else ''}"
                         ),
                         mo.md("---"),
                         mo.md(
@@ -1133,6 +1529,15 @@ def _(
                     mo.md(
                         "**✅ NO TIME LEAKAGE:** Model never trains on future to predict past"
                     ),
+                    mo.md(
+                        f"**🧬 Physics Features:** {len([f for f in ml_features if any(phys in f for phys in ['goal_multiplier', 'physics_', 'threat', 'potential', 'efficiency'])])} FPL-aware features"
+                    ),
+                    mo.md(
+                        f"**📊 Base Features:** {len([f for f in ml_features if f in ['position_encoded', 'xG90_historical', 'xA90_historical', 'points_per_90', 'bps_historical', 'ict_index_historical']])} statistical features"
+                    ),
+                    mo.md(
+                        f"**🔄 Contextual Features:** {len([f for f in ml_features if 'prev_' in f or '_static' in f])} lagged features"
+                    ),
                     mo.md("---"),
                 ]
             )
@@ -1350,6 +1755,7 @@ def _(mo):
 
 @app.cell
 def _(
+    Ridge,
     RidgeCV,
     StandardScaler,
     TimeSeriesSplit,
@@ -1380,7 +1786,10 @@ def _(
                     for test_gw in available_gws[min_train_gws:]:
                         wf_train_gws = [gw for gw in available_gws if gw < test_gw]
 
-                        if len(wf_train_gws) >= min_train_gws:
+                        # Need minimum gameweeks for both training and CV splits
+                        if len(wf_train_gws) >= max(
+                            min_train_gws, 3
+                        ):  # At least 3 GWs for meaningful CV
                             # Prepare data for this fold
                             train_data = training_data[
                                 training_data["gameweek"].isin(wf_train_gws)
@@ -1389,7 +1798,9 @@ def _(
                                 training_data["gameweek"] == test_gw
                             ]
 
-                            if len(train_data) > 0 and len(test_data) > 0:
+                            if (
+                                len(train_data) > 30 and len(test_data) > 0
+                            ):  # Minimum samples for reliable training
                                 # Features and targets
                                 X_train_wf = train_data[ml_features]
                                 y_train_wf = train_data[target_variable]
@@ -1402,14 +1813,30 @@ def _(
                                 X_test_wf_scaled = scaler_wf.transform(X_test_wf)
 
                                 # Train model with temporal CV
-                                tscv_wf = TimeSeriesSplit(
-                                    n_splits=min(3, len(wf_train_gws) - 1)
-                                )
-                                model_wf = RidgeCV(
-                                    alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
-                                    cv=tscv_wf,
-                                    scoring="neg_mean_absolute_error",
-                                )
+                                # Ensure minimum of 2 splits for TimeSeriesSplit
+                                wf_cv_splits = max(2, min(3, len(wf_train_gws) - 1))
+
+                                if wf_cv_splits >= 2:
+                                    # Use TimeSeriesSplit CV
+                                    tscv_wf = TimeSeriesSplit(n_splits=wf_cv_splits)
+                                    model_wf = RidgeCV(
+                                        alphas=[
+                                            0.001,
+                                            0.01,
+                                            0.1,
+                                            1.0,
+                                            10.0,
+                                            100.0,
+                                            1000.0,
+                                        ],
+                                        cv=tscv_wf,
+                                        scoring="neg_mean_absolute_error",
+                                    )
+                                else:
+                                    # Fallback to simple Ridge without CV if insufficient data
+                                    model_wf = Ridge(
+                                        alpha=1.0
+                                    )  # Use default regularization
 
                                 model_wf.fit(X_train_wf_scaled, y_train_wf)
 
@@ -1424,7 +1851,12 @@ def _(
                                         "train_samples": len(train_data),
                                         "test_samples": len(test_data),
                                         "mae": mae_wf,
-                                        "selected_alpha": model_wf.alpha_,
+                                        "selected_alpha": getattr(
+                                            model_wf, "alpha_", 1.0
+                                        ),  # Handle both RidgeCV and Ridge
+                                        "cv_splits": wf_cv_splits
+                                        if wf_cv_splits >= 2
+                                        else "No CV",
                                     }
                                 )
 
@@ -1667,6 +2099,128 @@ def _(
             current_data["position_encoded"] = le_position.transform(
                 current_data["position"]
             )
+
+            # ===== APPLY PHYSICS-INFORMED FEATURES FOR PREDICTION =====
+            # Same physics features as training (NO LEAKAGE - uses only historical data)
+
+            # 1. Position-based scoring multipliers
+            prediction_goal_multipliers = {"GKP": 6, "DEF": 6, "MID": 5, "FWD": 4}
+            prediction_cs_multipliers = {"GKP": 4, "DEF": 4, "MID": 1, "FWD": 0}
+
+            current_data["goal_multiplier"] = current_data["position"].map(
+                prediction_goal_multipliers
+            )
+            current_data["cs_multiplier"] = current_data["position"].map(
+                prediction_cs_multipliers
+            )
+
+            # 2. Physics-based expected points
+            current_data["physics_goal_points"] = (
+                current_data.get("xG90_historical", 0)
+                * current_data.get("minutes", 90)
+                / 90
+                * current_data["goal_multiplier"]
+            )
+
+            current_data["physics_assist_points"] = (
+                current_data.get("xA90_historical", 0)
+                * current_data.get("minutes", 90)
+                / 90
+                * 3
+            )
+
+            # 3. Form-weighted features
+            current_data["form_weighted_points"] = current_data.get("points_per_90", 0)
+
+            # 4. Price-efficiency features
+            # Use safe division with proper fallback for missing prices
+            if "price" in current_data.columns:
+                prediction_price_values = (
+                    current_data["price"].fillna(5.0).replace(0, 5.0)
+                )
+            else:
+                prediction_price_values = 5.0  # Default price for all players
+
+            current_data["points_per_price"] = (
+                current_data.get("points_per_90", 0) / prediction_price_values
+            )
+
+            current_data["xg_per_price"] = (
+                current_data.get("xG90_historical", 0) / prediction_price_values
+            )
+
+            # 5. Position-specific features
+            current_data["defensive_potential"] = np.where(
+                current_data["position"].isin(["GKP", "DEF"]),
+                current_data.get("cs_multiplier", 0)
+                * current_data.get("clean_sheets_per_90", 0),
+                0,
+            )
+
+            current_data["saves_importance"] = np.where(
+                current_data["position"].isin(["GKP", "DEF"]),
+                current_data.get("saves_per_90", 0),
+                0,
+            )
+
+            current_data["attacking_threat"] = np.where(
+                current_data["position"].isin(["MID", "FWD"]),
+                current_data.get("xG90_historical", 0)
+                + current_data.get("xA90_historical", 0),
+                0,
+            )
+
+            current_data["penalty_potential"] = np.where(
+                current_data["position"].isin(["MID", "FWD"]),
+                current_data.get("penalties_order", 0),
+                0,
+            )
+
+            # 6. Minutes and consistency features
+            current_data["minutes_consistency"] = (
+                90 - abs(current_data.get("minutes", 90) - 90)
+            ) / 90
+
+            current_data["expected_minutes_factor"] = (
+                current_data.get("minutes", 90) / 90
+            )
+
+            # 7. Interaction features
+            current_data["xgi_per_90"] = current_data.get(
+                "xG90_historical", 0
+            ) + current_data.get("xA90_historical", 0)
+
+            current_data["total_threat"] = current_data.get(
+                "xgi_per_90", 0
+            ) * current_data.get("expected_minutes_factor", 1.0)
+
+            # 8. Clean up physics features
+            prediction_physics_features = [
+                "goal_multiplier",
+                "cs_multiplier",
+                "physics_goal_points",
+                "physics_assist_points",
+                "form_weighted_points",
+                "points_per_price",
+                "xg_per_price",
+                "defensive_potential",
+                "saves_importance",
+                "attacking_threat",
+                "penalty_potential",
+                "minutes_consistency",
+                "expected_minutes_factor",
+                "xgi_per_90",
+                "total_threat",
+            ]
+
+            for prediction_feature in prediction_physics_features:
+                if prediction_feature in current_data.columns:
+                    current_data[prediction_feature] = current_data[
+                        prediction_feature
+                    ].fillna(0)
+                    current_data[prediction_feature] = current_data[
+                        prediction_feature
+                    ].replace([np.inf, -np.inf], 0)
 
             # Add enhanced static features with _static suffix to match training
             for pred_col in available_enhanced_pred:
