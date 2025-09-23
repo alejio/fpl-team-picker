@@ -311,20 +311,20 @@ class FixtureDifficultyConfig(BaseModel):
 
     # Difficulty multiplier calculation
     base_difficulty_multiplier: float = Field(
-        default=2.0,
-        description="Base calculation: 2.0 - opponent_strength",
+        default=2.2,
+        description="Base calculation: 2.2 - opponent_strength (increased from 2.0 for better differentiation)",
         ge=1.0,
         le=5.0,
     )
 
-    # Difficulty classification thresholds
+    # Difficulty classification thresholds (adjusted for better elite team recognition)
     easy_fixture_threshold: float = Field(
-        default=1.15, description="> 1.15 = Easy (🟢)", ge=1.0, le=2.0
+        default=1.20, description="> 1.20 = Easy (🟢)", ge=1.0, le=2.0
     )
     average_fixture_min: float = Field(
-        default=0.85, description="0.85-1.15 = Average (🟡)", ge=0.5, le=1.0
+        default=0.90, description="0.90-1.20 = Average (🟡)", ge=0.5, le=1.0
     )
-    # < 0.85 = Hard (🔴)
+    # < 0.90 = Hard (🔴) - now properly captures elite teams like Liverpool
 
     # Temporal weighting for multi-gameweek
     temporal_weights: List[float] = Field(

@@ -913,8 +913,14 @@ def merge_1gw_5gw_results(
 
         # Add fixture outlook based on 5GW difficulty
         if "fixture_difficulty_5gw" in merged.columns:
+            from fpl_team_picker.config import config
+
             merged["fixture_outlook"] = merged["fixture_difficulty_5gw"].apply(
-                lambda x: "Easy" if x > 1.15 else "Hard" if x < 0.85 else "Average"
+                lambda x: "Easy"
+                if x >= config.fixture_difficulty.easy_fixture_threshold
+                else "Hard"
+                if x < config.fixture_difficulty.average_fixture_min
+                else "Average"
             )
         else:
             merged["fixture_outlook"] = "Average"

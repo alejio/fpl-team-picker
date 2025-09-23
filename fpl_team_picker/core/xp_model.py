@@ -1047,16 +1047,18 @@ class XPModel:
                 # Home team difficulty = inverse of away team strength (with home advantage)
                 away_strength = team_strength.get(away_team, 1.0)
                 home_difficulty = (
-                    2.0 - away_strength
+                    config.fixture_difficulty.base_difficulty_multiplier - away_strength
                 )  # Easier opponent = higher difficulty multiplier
 
                 # Away team difficulty = inverse of home team strength (without home advantage)
                 home_strength = team_strength.get(home_team, 1.0)
-                away_difficulty = 2.0 - home_strength
+                away_difficulty = (
+                    config.fixture_difficulty.base_difficulty_multiplier - home_strength
+                )
 
-                # Clip to valid range [0.7, 1.3]
-                home_difficulty = np.clip(home_difficulty, 0.7, 1.3)
-                away_difficulty = np.clip(away_difficulty, 0.7, 1.3)
+                # Clip to valid range [0.6, 1.4] to accommodate wider differentiation
+                home_difficulty = np.clip(home_difficulty, 0.6, 1.4)
+                away_difficulty = np.clip(away_difficulty, 0.6, 1.4)
 
                 gw_team_difficulties[home_team] = home_difficulty
                 gw_team_difficulties[away_team] = away_difficulty
@@ -1265,9 +1267,9 @@ def merge_1gw_5gw_results(
             "fixture_difficulty_5gw"
         ].apply(
             lambda x: "🟢 Easy"
-            if x >= 1.15
+            if x >= config.fixture_difficulty.easy_fixture_threshold
             else "🟡 Average"
-            if x >= 0.85
+            if x >= config.fixture_difficulty.average_fixture_min
             else "🔴 Hard"
         )
     else:
