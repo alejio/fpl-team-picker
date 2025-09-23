@@ -114,6 +114,55 @@ def _(get_current_gameweek_info, mo):
 
 
 @app.cell
+def _(mo):
+    mo.md(
+        r"""
+    ## 1️⃣b Training Configuration
+
+    **Configure how many previous gameweeks to use for training.**
+    """
+    )
+    return
+
+
+@app.cell
+def _(mo):
+    # Training window configuration
+    training_window_input = mo.ui.number(
+        value=5,  # Default to 5 gameweeks
+        start=2,  # Minimum 2 gameweeks for training
+        stop=20,  # Maximum 20 gameweeks
+        step=1,
+        label="Number of previous gameweeks to train on",
+    )
+
+    use_all_available = mo.ui.checkbox(
+        label="Use all available gameweeks (ignore window size)", value=False
+    )
+
+    train_button = mo.ui.button(
+        label="🚀 Train Model",
+        value=0,
+        on_click=lambda value: value + 1,
+        kind="success",
+    )
+
+    mo.vstack(
+        [
+            mo.md("### 🧠 ML Training Configuration"),
+            training_window_input,
+            use_all_available,
+            mo.md(
+                "*This controls how much historical data the model uses for training*"
+            ),
+            train_button,
+            mo.md("---"),
+        ]
+    )
+    return (training_window_input, use_all_available, train_button)
+
+
+@app.cell
 def _(fetch_fpl_data, mo, pd, target_gw_input):
     # Initialize variables
     ml_data_loaded = False
@@ -252,6 +301,9 @@ def _(
     pd,
     rule_based_predictions,
     target_gw_input,
+    train_button,
+    training_window_input,
+    use_all_available,
 ):
     # Initialize variables with defaults
     training_data = pd.DataFrame()
@@ -259,7 +311,12 @@ def _(
     target_variable = "total_points"
     le_position = LabelEncoder()
 
-    if not rule_based_predictions.empty and not live_data_df.empty:
+    # Only run training if button has been clicked
+    if (
+        train_button.value > 0
+        and not rule_based_predictions.empty
+        and not live_data_df.empty
+    ):
         try:
             # Get training data from historical gameweeks (before target gameweek)
             historical_gws = sorted(
@@ -270,19 +327,31 @@ def _(
                 ]
             )
 
-            if len(historical_gws) < 3:
+            if len(historical_gws) < 2:
                 training_summary = mo.md(
-                    "⚠️ **Need at least 3 historical gameweeks for training**"
+                    "⚠️ **Need at least 2 historical gameweeks for training**"
                 )
                 training_data = (
                     pd.DataFrame()
                 )  # Initialize empty when insufficient data
                 ml_features = []  # Also initialize ml_features
             else:
-                # Use last 5 gameweeks as training data (or all available if less)
-                train_gws = (
-                    historical_gws[-5:] if len(historical_gws) >= 5 else historical_gws
-                )
+                # Configurable training window logic
+                if use_all_available.value:
+                    # Use all available historical gameweeks
+                    train_gws = historical_gws
+                    training_strategy = f"All available ({len(historical_gws)} GWs)"
+                else:
+                    # Use specified training window
+                    window_size = training_window_input.value
+                    train_gws = (
+                        historical_gws[-window_size:]
+                        if len(historical_gws) >= window_size
+                        else historical_gws
+                    )
+                    training_strategy = (
+                        f"Last {len(train_gws)} GWs (window: {window_size})"
+                    )
 
                 training_records = []
 
@@ -633,6 +702,7 @@ def _(
                 training_summary = mo.vstack(
                     [
                         mo.md("### ✅ Enhanced Training Data Prepared"),
+                        mo.md(f"**Training strategy:** {training_strategy}"),
                         mo.md(
                             f"**Training gameweeks:** GW{min(train_gws)}-{max(train_gws)} ({len(train_gws)} GWs)"
                         ),
@@ -664,23 +734,32 @@ def _(
             training_data = pd.DataFrame()
             ml_features = []  # Also initialize ml_features on exception
     else:
-        # Debug info to help diagnose the issue
+        # Check what's blocking training - show detailed debug info
         debug_info = []
-        debug_info.append("⚠️ **Training data preparation blocked. Debug info:**")
+        debug_info.append("🔍 **Training Status Debug:**")
         debug_info.append(
-            f"• rule_based_predictions empty: {rule_based_predictions.empty if hasattr(rule_based_predictions, 'empty') else 'Not a DataFrame'}"
+            f"• Button clicked: {train_button.value > 0} (clicks: {train_button.value})"
         )
         debug_info.append(
-            f"• live_data_df empty: {live_data_df.empty if hasattr(live_data_df, 'empty') else 'Not a DataFrame'}"
+            f"• XP predictions loaded: {not rule_based_predictions.empty}"
         )
-        debug_info.append(
-            f"• target_gw_input value: {target_gw_input.value if hasattr(target_gw_input, 'value') else 'No value'}"
-        )
-        debug_info.append(
-            "**Next steps:** Ensure target gameweek is selected and XP predictions are generated first."
-        )
+        debug_info.append(f"• Live data loaded: {not live_data_df.empty}")
+
+        if train_button.value == 0:
+            debug_info.append("")
+            debug_info.append("⏯️ **Click the 'Train Model' button to start training**")
+        elif rule_based_predictions.empty:
+            debug_info.append("")
+            debug_info.append("⚠️ **Load data and generate XP predictions first**")
+        elif live_data_df.empty:
+            debug_info.append("")
+            debug_info.append("⚠️ **Load live data first**")
+        else:
+            debug_info.append("")
+            debug_info.append("⚠️ **Unknown issue blocking training**")
 
         training_summary = mo.vstack([mo.md(line) for line in debug_info])
+
         training_data = (
             pd.DataFrame()
         )  # Initialize empty DataFrame when conditions not met
