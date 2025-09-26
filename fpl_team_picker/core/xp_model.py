@@ -923,9 +923,20 @@ class XPModel:
             sbp = row.get(sbp_col, 5.0)
             availability = row.get("status", "a")
 
+            # Debug logging for specific player
+            player_name = row.get("web_name", "Unknown")
+            if "Ekitik" in player_name or "ekitik" in player_name:
+                print(
+                    f"🐛 DEBUG: {player_name} status = '{availability}' (should be 's' if suspended)"
+                )
+
             p_start = get_start_probability(sbp, availability)
 
             if availability in ["i", "s", "u"]:
+                if self.debug and availability == "s":
+                    print(
+                        f"🚫 {player_name} is suspended (status='s') - setting 0 minutes"
+                    )
                 return 0  # No minutes if unavailable
 
             # Position and price-based durability

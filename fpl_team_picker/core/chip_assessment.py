@@ -475,7 +475,7 @@ class ChipAssessmentEngine:
         unavailable_count = 0
 
         for _, player in current_squad.iterrows():
-            availability = player.get("availability_status", "a")
+            availability = player.get("status", "a")
             if availability in [
                 "i",
                 "s",

@@ -198,16 +198,39 @@ def get_best_starting_11(
     if len(squad_df) < 11:
         return [], "", 0
 
+    # Filter out suspended, injured, or unavailable players from starting 11 selection
+    available_squad = squad_df.copy()
+    if "status" in available_squad.columns:
+        unavailable_mask = available_squad["status"].isin(["i", "s", "u"])
+        if unavailable_mask.any():
+            unavailable_players = available_squad[unavailable_mask]
+            print(
+                f"🚫 Excluding {len(unavailable_players)} unavailable players from starting 11:"
+            )
+            for _, player in unavailable_players.iterrows():
+                status_desc = {"i": "injured", "s": "suspended", "u": "unavailable"}[
+                    player["status"]
+                ]
+                print(f"   - {player.get('web_name', 'Unknown')} ({status_desc})")
+
+            available_squad = available_squad[~unavailable_mask]
+
+    if len(available_squad) < 11:
+        print(
+            f"⚠️ Warning: Only {len(available_squad)} available players in squad (need 11)"
+        )
+        return [], "", 0
+
     # Default to current gameweek XP, fallback to 5GW if current not available
     sort_col = (
         xp_column
-        if xp_column in squad_df.columns
-        else ("xP_5gw" if "xP_5gw" in squad_df.columns else "xP")
+        if xp_column in available_squad.columns
+        else ("xP_5gw" if "xP_5gw" in available_squad.columns else "xP")
     )
 
     # Group by position and sort by XP
     by_position = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
-    for _, player in squad_df.iterrows():
+    for _, player in available_squad.iterrows():
         player_dict = player.to_dict()
         by_position[player["position"]].append(player_dict)
 
@@ -355,6 +378,28 @@ def optimize_team_with_transfers(
 
     # Get all players with XP data and apply exclusion constraints
     all_players = players_with_xp[players_with_xp["xP"].notna()].copy()
+
+    # Filter out suspended, injured, or unavailable players
+    if "status" in all_players.columns:
+        available_players_mask = ~all_players["status"].isin(["i", "s", "u"])
+        all_players = all_players[available_players_mask]
+
+        # Log any filtered players for debugging
+        excluded_players = players_with_xp[
+            players_with_xp["status"].isin(["i", "s", "u"])
+            & players_with_xp["xP"].notna()
+        ]
+        if not excluded_players.empty:
+            print(f"🚫 Filtered {len(excluded_players)} unavailable players:")
+            for _, player in excluded_players.iterrows():
+                status_desc = {"i": "injured", "s": "suspended", "u": "unavailable"}[
+                    player["status"]
+                ]
+                print(f"   - {player.get('web_name', 'Unknown')} ({status_desc})")
+
+    else:
+        print("⚠️ No 'status' column found in players data")
+
     if must_exclude_ids:
         all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
 
@@ -386,8 +431,43 @@ def optimize_team_with_transfers(
     # 1-Transfer scenarios
     print("🔍 Analyzing 1-transfer scenarios...")
 
-    # Get worst performers in current squad for potential replacement
-    squad_sorted = current_squad_with_xp.sort_values("xP_5gw", ascending=True)
+    # Prioritize suspended/injured players for transfer out, then worst performers
+    squad_for_transfer = current_squad_with_xp.copy()
+
+    # Check for unavailable players in current squad that should be prioritized for transfer
+    if "status" in squad_for_transfer.columns:
+        unavailable_in_squad = squad_for_transfer[
+            squad_for_transfer["status"].isin(["i", "s", "u"])
+        ]
+        available_in_squad = squad_for_transfer[
+            ~squad_for_transfer["status"].isin(["i", "s", "u"])
+        ]
+
+        if not unavailable_in_squad.empty:
+            print(
+                f"🚨 PRIORITY: {len(unavailable_in_squad)} unavailable players in current squad:"
+            )
+            for _, player in unavailable_in_squad.iterrows():
+                status_desc = {"i": "injured", "s": "suspended", "u": "unavailable"}[
+                    player["status"]
+                ]
+                print(
+                    f"   - {player.get('web_name', 'Unknown')} ({status_desc}) - MUST TRANSFER OUT"
+                )
+
+        # Sort: unavailable players first (by status priority), then available players by worst XP
+        unavailable_sorted = unavailable_in_squad.sort_values(
+            ["status", "xP_5gw"], ascending=[True, True]
+        )  # 's' comes before 'i' and 'u' alphabetically
+        available_sorted = available_in_squad.sort_values("xP_5gw", ascending=True)
+
+        # Combine: unavailable first, then worst performers
+        squad_sorted = pd.concat(
+            [unavailable_sorted, available_sorted], ignore_index=True
+        )
+    else:
+        # Fallback to original logic if no status column
+        squad_sorted = squad_for_transfer.sort_values("xP_5gw", ascending=True)
 
     for idx, out_player in squad_sorted.iterrows():
         if out_player["player_id"] in must_include_ids:
@@ -677,7 +757,7 @@ def optimize_team_with_transfers(
 *Decisions based on 5-gameweek horizon with temporal weighting and fixture analysis*
 
 ### 💰 Budget Pool Analysis:
-- **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info["sellable_value"]:.1f}m | **Total Pool:** £{budget_pool_info["total_budget"]:.1f}m 
+- **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info["sellable_value"]:.1f}m | **Total Pool:** £{budget_pool_info["total_budget"]:.1f}m
 - **Max Single Acquisition:** £{max_single_acquisition:.1f}m | **Budget Utilization:** {((budget_pool_info["total_budget"] - available_budget) / budget_pool_info["total_budget"] * 100) if budget_pool_info["total_budget"] > 0 else 0:.0f}% - {sellable_count} sellable players | **Min squad cost:** £{46.0:.1f}m
 
 ### 🔄 Enhanced Transfer Analysis:
@@ -737,6 +817,9 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
         # Injury/availability risk
         if player.get("status") in ["i", "d"]:
             risk_factors.append("injury risk")
+            risk_level = "🔴 High"
+        elif player.get("status") == "s":  # Suspended
+            risk_factors.append("suspended")
             risk_level = "🔴 High"
 
         # Fixture difficulty risk
