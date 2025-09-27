@@ -14,9 +14,9 @@ class DataOrchestrationService:
 
     def __init__(
         self,
-        player_repository: PlayerRepository,
-        team_repository: TeamRepository,
-        fixture_repository: FixtureRepository,
+        player_repository: PlayerRepository = None,
+        team_repository: TeamRepository = None,
+        fixture_repository: FixtureRepository = None,
     ):
         self.player_repository = player_repository
         self.team_repository = team_repository
@@ -104,6 +104,34 @@ class DataOrchestrationService:
                 error=DomainError(
                     error_type=ErrorType.DATA_ACCESS_ERROR,
                     message=f"Failed to load gameweek data: {str(e)}",
+                )
+            )
+
+    def get_current_gameweek_info(self) -> Result[Dict[str, Any]]:
+        """Get current gameweek information.
+
+        Returns:
+            Result containing current gameweek info or error
+        """
+        try:
+            from fpl_team_picker.core.data_loader import get_current_gameweek_info
+
+            gw_info = get_current_gameweek_info()
+            if not gw_info:
+                return Result(
+                    error=DomainError(
+                        error_type=ErrorType.DATA_ACCESS_ERROR,
+                        message="Could not determine current gameweek",
+                    )
+                )
+
+            return Result(value=gw_info)
+
+        except Exception as e:
+            return Result(
+                error=DomainError(
+                    error_type=ErrorType.DATA_ACCESS_ERROR,
+                    message=f"Failed to get current gameweek info: {str(e)}",
                 )
             )
 

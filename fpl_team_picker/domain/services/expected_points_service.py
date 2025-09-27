@@ -112,8 +112,10 @@ class ExpectedPointsService:
             if xp_5gw_result.is_failure:
                 return xp_5gw_result
 
-            # Merge results
-            return self._merge_1gw_5gw_results(xp_1gw_result.value, xp_5gw_result.value)
+            # Merge results with correct model type
+            return self._merge_1gw_5gw_results(
+                xp_1gw_result.value, xp_5gw_result.value, use_ml_model
+            )
 
         except Exception as e:
             return Result(
@@ -239,12 +241,19 @@ class ExpectedPointsService:
             )
 
     def _merge_1gw_5gw_results(
-        self, players_1gw: pd.DataFrame, players_5gw: pd.DataFrame
+        self,
+        players_1gw: pd.DataFrame,
+        players_5gw: pd.DataFrame,
+        use_ml_model: bool = False,
     ) -> Result[pd.DataFrame]:
         """Merge 1GW and 5GW results with derived metrics."""
         try:
-            # Import the merge function from the existing core module
-            from fpl_team_picker.core.xp_model import merge_1gw_5gw_results
+            if use_ml_model:
+                # Use ML model merge function which includes form columns
+                from fpl_team_picker.core.ml_xp_model import merge_1gw_5gw_results
+            else:
+                # Use rule-based merge function
+                from fpl_team_picker.core.xp_model import merge_1gw_5gw_results
 
             merged_result = merge_1gw_5gw_results(players_1gw, players_5gw)
             return Result(value=merged_result)

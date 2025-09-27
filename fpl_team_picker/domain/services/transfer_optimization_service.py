@@ -127,17 +127,13 @@ class TransferOptimizationService:
                 optimize_team_with_transfers,
             )
 
-            # Perform optimization WITHOUT modifying global config
-            # Instead, we'll pass the horizon as a parameter or handle it differently
+            # Perform optimization with correct parameter names
             optimization_result = optimize_team_with_transfers(
-                expected_points_df=players_with_xp,
-                current_squad_df=current_squad,
-                teams_df=teams,
+                current_squad=current_squad,
                 team_data=team_data,
-                must_include_player_ids=must_include_ids,
-                must_exclude_player_ids=must_exclude_ids,
-                # Note: If the function requires horizon, it should be a parameter
-                # not a global config mutation
+                players_with_xp=players_with_xp,
+                must_include_ids=must_include_ids,
+                must_exclude_ids=must_exclude_ids,
             )
 
             # Validate optimization result
@@ -149,16 +145,30 @@ class TransferOptimizationService:
                     )
                 )
 
-            return Result(
-                value={
-                    "optimization_result": optimization_result,
-                    "horizon": optimization_horizon,
-                    "constraints": {
-                        "must_include": list(must_include_ids),
-                        "must_exclude": list(must_exclude_ids),
-                    },
-                }
-            )
+            # Unpack the tuple returned by optimize_team_with_transfers
+            # Returns: (marimo_component, optimal_squad_df, optimization_results)
+            if isinstance(optimization_result, tuple) and len(optimization_result) == 3:
+                display_component, optimal_squad, best_scenario = optimization_result
+
+                return Result(
+                    value={
+                        "display_component": display_component,
+                        "optimal_squad": optimal_squad,
+                        "best_scenario": best_scenario,
+                        "horizon": optimization_horizon,
+                        "constraints": {
+                            "must_include": list(must_include_ids),
+                            "must_exclude": list(must_exclude_ids),
+                        },
+                    }
+                )
+            else:
+                return Result(
+                    error=DomainError(
+                        error_type=ErrorType.CALCULATION_ERROR,
+                        message=f"Optimization returned unexpected result format: {type(optimization_result)}",
+                    )
+                )
 
         except Exception as e:
             return Result(
@@ -724,3 +734,81 @@ class TransferOptimizationService:
             )
 
         return starting_11
+
+    def optimize_transfers_simple(
+        self,
+        gameweek_data: Dict[str, Any],
+        current_squad: pd.DataFrame,
+        use_5gw_horizon: bool = True,
+    ) -> Result[Dict[str, Any]]:
+        """Simplified transfer optimization method for clean notebook interface.
+
+        Args:
+            gameweek_data: Complete gameweek data from DataOrchestrationService
+            current_squad: Current squad DataFrame (15 players)
+            use_5gw_horizon: Whether to use 5GW horizon (True) or 1GW (False)
+
+        Returns:
+            Result containing simplified transfer recommendations
+        """
+        try:
+            # Extract required data from gameweek_data
+            players_with_xp = gameweek_data.get("players", pd.DataFrame())
+            teams = gameweek_data.get("teams", pd.DataFrame())
+            team_data = gameweek_data.get("manager_team", {})
+
+            # Set default team data if not available
+            if not team_data:
+                team_data = {
+                    "bank_balance": 0.0,
+                    "transfers_made": 0,
+                }
+
+            # Determine optimization horizon
+            horizon = "5gw" if use_5gw_horizon else "1gw"
+
+            # Call the main optimization method
+            optimization_result = self.optimize_transfers(
+                players_with_xp=players_with_xp,
+                current_squad=current_squad,
+                team_data=team_data,
+                teams=teams,
+                optimization_horizon=horizon,
+            )
+
+            if optimization_result.is_failure:
+                return optimization_result
+
+            # Transform result to expected format for clean notebook
+            opt_data = optimization_result.value
+
+            # Create simplified transfer recommendations
+            transfer_recommendations = []
+            if opt_data.get("best_scenario"):
+                best_scenario = opt_data["best_scenario"]
+                transfer_recommendations.append(
+                    {
+                        "transfer_count": best_scenario.get("transfers", 0),
+                        "net_xp_gain": best_scenario.get("xp_gain", 0.0),
+                        "total_cost": best_scenario.get("cost", 0.0),
+                        "summary": best_scenario.get(
+                            "description", "Transfer scenario"
+                        ),
+                    }
+                )
+
+            return Result(
+                value={
+                    "transfer_recommendations": transfer_recommendations,
+                    "optimization_horizon": horizon,
+                    "analysis_complete": True,
+                }
+            )
+
+        except Exception as e:
+            return Result(
+                error=DomainError(
+                    error_type=ErrorType.CALCULATION_ERROR,
+                    message=f"Simple transfer optimization failed: {str(e)}",
+                )
+            )
