@@ -494,7 +494,7 @@ def _(
     xg_rates,
 ):
     # Import global configuration
-    from fpl_team_picker.config import config
+    from fpl_team_picker.config import config as xp_config
 
     # Initialize variables
     players_with_xp = pd.DataFrame(
@@ -512,7 +512,7 @@ def _(
 
     try:
         if not players.empty and gameweek_input.value:
-            if config.xp_model.use_ml_model:
+            if xp_config.xp_model.use_ml_model:
                 # Use ML XP Model as primary
                 from fpl_team_picker.core.ml_xp_model import (
                     MLXPModel,
@@ -521,18 +521,18 @@ def _(
                 from fpl_team_picker.core.xp_model import XPModel
 
                 ml_xp_model = MLXPModel(
-                    min_training_gameweeks=config.xp_model.ml_min_training_gameweeks,
-                    training_gameweeks=config.xp_model.ml_training_gameweeks,
-                    position_min_samples=config.xp_model.ml_position_min_samples,
-                    ensemble_rule_weight=config.xp_model.ml_ensemble_rule_weight,
-                    debug=config.xp_model.debug,
+                    min_training_gameweeks=xp_config.xp_model.ml_min_training_gameweeks,
+                    training_gameweeks=xp_config.xp_model.ml_training_gameweeks,
+                    position_min_samples=xp_config.xp_model.ml_position_min_samples,
+                    ensemble_rule_weight=xp_config.xp_model.ml_ensemble_rule_weight,
+                    debug=xp_config.xp_model.debug,
                 )
 
                 # Create rule-based model for ensemble
                 rule_xp_model = XPModel(
-                    form_weight=config.xp_model.form_weight,
-                    form_window=config.xp_model.form_window,
-                    debug=config.xp_model.debug,
+                    form_weight=xp_config.xp_model.form_weight,
+                    form_window=xp_config.xp_model.form_window,
+                    debug=xp_config.xp_model.debug,
                 )
 
                 model_type = "ML"
@@ -543,16 +543,16 @@ def _(
                 from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
 
                 xp_model = XPModel(
-                    form_weight=config.xp_model.form_weight,
-                    form_window=config.xp_model.form_window,
-                    debug=config.xp_model.debug,
+                    form_weight=xp_config.xp_model.form_weight,
+                    form_window=xp_config.xp_model.form_window,
+                    debug=xp_config.xp_model.debug,
                 )
 
                 model_type = "Rule-Based"
                 rule_model_for_ensemble = None
 
             # Calculate 1GW and 5GW expected points
-            if config.xp_model.use_ml_model:
+            if xp_config.xp_model.use_ml_model:
                 players_1gw = xp_model.calculate_expected_points(
                     players_data=players,
                     teams_data=teams,
@@ -600,7 +600,7 @@ def _(
 
             # Create results display with model information
             model_info = mo.md(
-                f"**Model Type:** {model_type} {'(with rule-based ensemble)' if config.xp_model.use_ml_model and config.xp_model.ml_ensemble_rule_weight > 0 else ''}"
+                f"**Model Type:** {model_type} {'(with rule-based ensemble)' if xp_config.xp_model.use_ml_model and xp_config.xp_model.ml_ensemble_rule_weight > 0 else ''}"
             )
             xp_results = create_xp_results_display(
                 players_with_xp, gameweek_input.value, mo
@@ -625,9 +625,9 @@ def _(
                 from fpl_team_picker.core.xp_model import XPModel, merge_1gw_5gw_results
 
                 xp_model = XPModel(
-                    form_weight=config.xp_model.form_weight,
-                    form_window=config.xp_model.form_window,
-                    debug=config.xp_model.debug,
+                    form_weight=xp_config.xp_model.form_weight,
+                    form_window=xp_config.xp_model.form_window,
+                    debug=xp_config.xp_model.debug,
                 )
 
                 players_1gw = xp_model.calculate_expected_points(
@@ -680,7 +680,7 @@ def _(
         )
 
     xp_result
-    return config, players_with_xp
+    return players_with_xp
 
 
 @app.cell
@@ -881,11 +881,11 @@ def _(mo):
     - **Premium Acquisition Planning**: Multi-transfer scenarios for expensive targets
     - **Budget Pool Analysis**: Total available funds including sellable squad value
     - **Constraint Support**: Force include/exclude specific players
-    - **5-GW Strategic Focus**: Decisions based on fixture outlook and form trends
+    - **Configurable Horizon**: Choose between 1-GW immediate focus or 5-GW strategic planning
 
     ### Transfer Scenarios Analyzed:
     1. **No Transfers**: Keep current squad (baseline)
-    2. **1 Transfer**: Replace worst 5-GW performer
+    2. **1 Transfer**: Replace worst performer
     3. **2 Transfers**: Target two weakest links
     4. **3 Transfers**: Major squad overhaul
     5. **Premium Scenarios**: Direct upgrades and funded acquisitions
@@ -897,7 +897,33 @@ def _(mo):
 
 
 @app.cell
-def _(mo, pd, players_with_xp):
+def _(mo):
+    # Optimization horizon toggle
+    optimization_horizon_toggle = mo.ui.radio(
+        options=["5gw", "1gw"], value="5gw", label="Optimization Horizon:"
+    )
+
+    horizon_info = mo.md("""
+    **5GW (Strategic)**: Optimizes for 5-gameweek fixture outlook and form trends
+
+    **1GW (Immediate)**: Focuses only on current gameweek performance
+    """)
+
+    horizon_selection = mo.vstack(
+        [
+            mo.md("### ⚖️ Choose Optimization Strategy"),
+            optimization_horizon_toggle,
+            horizon_info,
+            mo.md("---"),
+        ]
+    )
+
+    horizon_selection
+    return (optimization_horizon_toggle,)
+
+
+@app.cell
+def _(mo, optimization_horizon_toggle, pd, players_with_xp):
     # Initialize variables with safe defaults to avoid marimo dependency issues
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
@@ -906,12 +932,23 @@ def _(mo, pd, players_with_xp):
     try:
         if not players_with_xp.empty:
             player_options = []
-            sort_column = "xP_5gw" if "xP_5gw" in players_with_xp.columns else "xP"
+            # Use the selected horizon to determine sort column and display
+            horizon = (
+                optimization_horizon_toggle.value
+                if optimization_horizon_toggle.value
+                else "5gw"
+            )
+            sort_column = (
+                "xP_5gw"
+                if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
+                else "xP"
+            )
+            horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
 
             for _, player in players_with_xp.sort_values(
                 ["position", sort_column], ascending=[True, False]
             ).iterrows():
-                xp_display = player.get("xP_5gw", player.get("xP", 0))
+                xp_display = player.get(sort_column, 0)
 
                 # Handle different team name column possibilities
                 team_name = ""
@@ -922,7 +959,7 @@ def _(mo, pd, players_with_xp):
                 elif "team_name" in player and pd.notna(player["team_name"]):
                     team_name = player["team_name"]
 
-                label = f"{player['web_name']} ({player['position']}, {team_name}) - £{player['price']:.1f}m, {xp_display:.2f} 5GW-xP"
+                label = f"{player['web_name']} ({player['position']}, {team_name}) - £{player['price']:.1f}m, {xp_display:.2f} {horizon_label}"
                 player_options.append({"label": label, "value": player["player_id"]})
 
             must_include_dropdown = mo.ui.multiselect(
@@ -937,8 +974,12 @@ def _(mo, pd, players_with_xp):
                 value=[],
             )
 
+            # Dynamic button label based on horizon
+            button_label = (
+                f"🚀 Run {horizon.upper()} Optimization (Auto-selects 0-3 transfers)"
+            )
             optimize_button = mo.ui.run_button(
-                label="🚀 Run Strategic 5-GW Optimization (Auto-selects 0-3 transfers)",
+                label=button_label,
                 kind="success",
             )
 
@@ -956,7 +997,7 @@ def _(mo, pd, players_with_xp):
                     mo.md("---"),
                     mo.md("### 🚀 Run Optimization"),
                     mo.md(
-                        "*The optimizer analyzes all transfer scenarios (0-3 transfers) and recommends the strategy with highest net expected points after penalties.*"
+                        f"*The optimizer analyzes all transfer scenarios (0-3 transfers) using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties.*"
                     ),
                     mo.md(""),
                     optimize_button,
@@ -1001,6 +1042,7 @@ def _(
     must_exclude_dropdown,
     must_include_dropdown,
     optimize_button,
+    optimization_horizon_toggle,
     pd,
     players_with_xp,
     team_data,
@@ -1008,8 +1050,9 @@ def _(
 ):
     from fpl_team_picker.optimization.optimizer import optimize_team_with_transfers
 
+    # Initialize variables to ensure they're always defined
     optimal_starting_11 = []
-    optimization_display = None  # Initialize once
+    optimization_display = None
 
     if optimize_button is not None and optimize_button.value:
         must_include_ids = (
@@ -1024,13 +1067,36 @@ def _(
         )
 
         try:
-            result = optimize_team_with_transfers(
-                current_squad=current_squad,
-                team_data=team_data,
-                players_with_xp=players_with_xp,
-                must_include_ids=must_include_ids,
-                must_exclude_ids=must_exclude_ids,
+            # Temporarily override the optimization horizon based on user selection
+            from fpl_team_picker.config import config as opt_config
+            import fpl_team_picker.optimization.optimizer as opt
+
+            # Get the selected horizon, defaulting to 5gw
+            selected_horizon = (
+                optimization_horizon_toggle.value
+                if optimization_horizon_toggle.value
+                else "5gw"
             )
+
+            # Create a temporary config with the selected horizon
+            original_horizon = opt_config.optimization.optimization_horizon
+            opt_config.optimization.optimization_horizon = selected_horizon
+
+            # Also update the module's config reference
+            opt.config.optimization.optimization_horizon = selected_horizon
+
+            try:
+                result = optimize_team_with_transfers(
+                    current_squad=current_squad,
+                    team_data=team_data,
+                    players_with_xp=players_with_xp,
+                    must_include_ids=must_include_ids,
+                    must_exclude_ids=must_exclude_ids,
+                )
+            finally:
+                # Restore original config
+                opt_config.optimization.optimization_horizon = original_horizon
+                opt.config.optimization.optimization_horizon = original_horizon
 
             if isinstance(result, tuple) and len(result) == 3:
                 optimization_display, optimal_squad_df, best_scenario = result
@@ -1232,7 +1298,6 @@ def _(mo):
 
 @app.cell
 def _(
-    config,
     current_squad,
     fixtures,
     gameweek_input,
@@ -1268,6 +1333,7 @@ def _(
 
     try:
         from fpl_team_picker.core.chip_assessment import ChipAssessmentEngine
+        from fpl_team_picker.config import config as chip_config
 
         if (
             gameweek_input.value
@@ -1284,7 +1350,9 @@ def _(
 
             if available_chips:
                 # Initialize chip assessment engine
-                chip_engine = ChipAssessmentEngine(config.chip_assessment.model_dump())
+                chip_engine = ChipAssessmentEngine(
+                    chip_config.chip_assessment.model_dump()
+                )
 
                 # Merge current squad with xP data for chip assessment
                 current_squad_with_xp = current_squad.merge(

@@ -353,6 +353,19 @@ class OptimizationConfig(BaseModel):
         le=10.0,
     )
 
+    # Optimization horizon
+    optimization_horizon: str = Field(
+        default="5gw",
+        description="Optimization horizon: '1gw' for current gameweek only, '5gw' for 5-gameweek strategic planning",
+    )
+
+    @field_validator("optimization_horizon")
+    @classmethod
+    def validate_optimization_horizon(cls, v):
+        if v not in ["1gw", "5gw"]:
+            raise ValueError("optimization_horizon must be either '1gw' or '5gw'")
+        return v
+
     # Scenario analysis
     max_transfers: int = Field(
         default=3, description="Maximum transfers to analyze (0-3)", ge=0, le=5

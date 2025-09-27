@@ -14,6 +14,19 @@ from typing import Dict, List, Tuple, Optional, Set
 from fpl_team_picker.config import config
 
 
+def get_optimization_xp_column() -> str:
+    """
+    Get the XP column to use for optimization based on configuration
+
+    Returns:
+        'xP' for 1-gameweek optimization, 'xP_5gw' for 5-gameweek optimization
+    """
+    if config.optimization.optimization_horizon == "1gw":
+        return "xP"
+    else:  # "5gw"
+        return "xP_5gw"
+
+
 def calculate_total_budget_pool(
     current_squad: pd.DataFrame,
     bank_balance: float,
@@ -102,7 +115,8 @@ def premium_acquisition_planner(
 
         # Try different selling strategies
         # Strategy 1: Sell lowest XP players first (avoid selling good players)
-        sort_column = "xP_5gw" if "xP_5gw" in sellable_players.columns else "xP"
+        xp_column = get_optimization_xp_column()
+        sort_column = xp_column if xp_column in sellable_players.columns else "xP"
         potential_sells = sellable_players.sort_values(sort_column, ascending=True)
 
         # Find minimum number of players to sell to cover gap
@@ -350,6 +364,10 @@ def optimize_team_with_transfers(
     if must_exclude_ids:
         print(f"🚫 Must exclude {len(must_exclude_ids)} players")
 
+    # Get optimization column based on configuration
+    xp_column = get_optimization_xp_column()
+    horizon_label = "1-GW" if xp_column == "xP" else "5-GW"
+
     # Update current squad with both 1-GW and 5-GW XP data for strategic decisions
     current_squad_with_xp = current_squad.merge(
         players_with_xp[["player_id", "xP", "xP_5gw", "fixture_outlook"]],
@@ -403,12 +421,14 @@ def optimize_team_with_transfers(
     if must_exclude_ids:
         all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
 
-    # Get best starting 11 from current squad (use 5GW for strategic transfer planning)
+    # Get best starting 11 from current squad using configured optimization horizon
     current_best_11, current_formation, current_xp = get_best_starting_11(
-        current_squad_with_xp, "xP_5gw"
+        current_squad_with_xp, xp_column
     )
 
-    print(f"📊 Current squad: {current_xp:.2f} 5GW-xP | Formation: {current_formation}")
+    print(
+        f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
+    )
 
     # Comprehensive scenario analysis
     scenarios = []
@@ -457,9 +477,9 @@ def optimize_team_with_transfers(
 
         # Sort: unavailable players first (by status priority), then available players by worst XP
         unavailable_sorted = unavailable_in_squad.sort_values(
-            ["status", "xP_5gw"], ascending=[True, True]
+            ["status", xp_column], ascending=[True, True]
         )  # 's' comes before 'i' and 'u' alphabetically
-        available_sorted = available_in_squad.sort_values("xP_5gw", ascending=True)
+        available_sorted = available_in_squad.sort_values(xp_column, ascending=True)
 
         # Combine: unavailable first, then worst performers
         squad_sorted = pd.concat(
@@ -467,7 +487,7 @@ def optimize_team_with_transfers(
         )
     else:
         # Fallback to original logic if no status column
-        squad_sorted = squad_for_transfer.sort_values("xP_5gw", ascending=True)
+        squad_sorted = squad_for_transfer.sort_values(xp_column, ascending=True)
 
     for idx, out_player in squad_sorted.iterrows():
         if out_player["player_id"] in must_include_ids:
@@ -482,10 +502,10 @@ def optimize_team_with_transfers(
 
         if not position_replacements.empty:
             # Get top 3 replacements
-            top_replacements = position_replacements.nlargest(3, "xP_5gw")
+            top_replacements = position_replacements.nlargest(3, xp_column)
 
             for _, replacement in top_replacements.iterrows():
-                if replacement["xP_5gw"] > out_player.get("xP_5gw", 0):
+                if replacement[xp_column] > out_player.get(xp_column, 0):
                     # Calculate transfer cost
                     penalty = (
                         config.optimization.transfer_cost if free_transfers < 1 else 0
@@ -502,7 +522,7 @@ def optimize_team_with_transfers(
 
                     # Get best starting 11 from new squad
                     new_best_11, new_formation, new_xp = get_best_starting_11(
-                        new_squad, "xP_5gw"
+                        new_squad, xp_column
                     )
                     net_xp = new_xp - penalty
                     xp_gain = net_xp - current_xp
@@ -538,12 +558,12 @@ def optimize_team_with_transfers(
             pos1_replacements = all_players[
                 (all_players["position"] == out1["position"])
                 & (~all_players["player_id"].isin(current_player_ids))
-            ].nlargest(2, "xP_5gw")
+            ].nlargest(2, xp_column)
 
             pos2_replacements = all_players[
                 (all_players["position"] == out2["position"])
                 & (~all_players["player_id"].isin(current_player_ids))
-            ].nlargest(2, "xP_5gw")
+            ].nlargest(2, xp_column)
 
             for _, rep1 in pos1_replacements.iterrows():
                 for _, rep2 in pos2_replacements.iterrows():
@@ -576,7 +596,7 @@ def optimize_team_with_transfers(
                         )
 
                         new_best_11, new_formation, new_xp = get_best_starting_11(
-                            new_squad, "xP_5gw"
+                            new_squad, xp_column
                         )
                         net_xp = new_xp - penalty
                         xp_gain = net_xp - current_xp
@@ -629,7 +649,7 @@ def optimize_team_with_transfers(
                     & (
                         ~all_players["player_id"].isin(replacement_ids)
                     )  # Avoid duplicate replacements
-                ].nlargest(1, "xP_5gw")
+                ].nlargest(1, xp_column)
 
                 if not best_rep.empty:
                     replacement = best_rep.iloc[0]
@@ -656,11 +676,11 @@ def optimize_team_with_transfers(
 
                     # Calculate XP gain
                     out_xp = (
-                        out1.get("xP_5gw", 0)
-                        + out2.get("xP_5gw", 0)
-                        + out3.get("xP_5gw", 0)
+                        out1.get(xp_column, 0)
+                        + out2.get(xp_column, 0)
+                        + out3.get(xp_column, 0)
                     )
-                    in_xp = rep1["xP_5gw"] + rep2["xP_5gw"] + rep3["xP_5gw"]
+                    in_xp = rep1[xp_column] + rep2[xp_column] + rep3[xp_column]
                     estimated_gain = in_xp - out_xp
                     net_xp = current_xp + estimated_gain - penalty
                     xp_gain = net_xp - current_xp
@@ -748,13 +768,13 @@ def optimize_team_with_transfers(
     )
 
     strategic_summary = f"""
-## 🏆 Strategic 5-GW Decision: {best_scenario["transfers"]} Transfer(s) Optimal
+## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal
 
 **Recommended Strategy:** {best_scenario["description"]}
 
-**Expected Net 5-GW XP:** {best_scenario["net_xp"]:.2f} | **Formation:** {best_scenario["formation"]}
+**Expected Net {horizon_label} XP:** {best_scenario["net_xp"]:.2f} | **Formation:** {best_scenario["formation"]}
 
-*Decisions based on 5-gameweek horizon with temporal weighting and fixture analysis*
+*Decisions based on {horizon_label.lower()} horizon {("with temporal weighting and fixture analysis" if xp_column == "xP_5gw" else "for immediate gameweek focus")}*
 
 ### 💰 Budget Pool Analysis:
 - **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info["sellable_value"]:.1f}m | **Total Pool:** £{budget_pool_info["total_budget"]:.1f}m
@@ -763,7 +783,7 @@ def optimize_team_with_transfers(
 ### 🔄 Enhanced Transfer Analysis:
 - **{len(scenarios)} total scenarios analyzed** ({len([s for s in scenarios if s["type"] == "premium_acquisition"])} premium acquisition scenarios) - Premium acquisition planner targets high-value players with smart funding strategies - Enhanced budget pool calculation enables complex multi-player funding scenarios
 
-**All Scenarios (sorted by 5-GW Net XP):**
+**All Scenarios (sorted by {horizon_label} Net XP):**
 """
 
     display_component = mo.vstack(
