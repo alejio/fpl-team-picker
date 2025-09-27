@@ -710,6 +710,12 @@ class MLXPModel:
             current_data = players_data.copy()
             predictions_df = self.predict(current_data)
 
+            # Calculate expected_minutes using rule-based logic
+            from fpl_team_picker.core.xp_model import XPModel
+
+            temp_xp_model = XPModel()
+            predictions_df = temp_xp_model._calculate_expected_minutes(predictions_df)
+
             # Use ensemble prediction as main xP
             predictions_df["xP"] = predictions_df["ml_ensemble_xP"]
 
@@ -825,6 +831,10 @@ def merge_1gw_5gw_results(
         # Get columns to merge from 5GW data
         merge_columns = ["player_id", "xP"]
 
+        # Add expected_minutes if it exists
+        if "expected_minutes" in players_5gw.columns:
+            merge_columns.append("expected_minutes")
+
         # Add fixture difficulty columns if they exist
         if "fixture_difficulty" in players_5gw.columns:
             merge_columns.append("fixture_difficulty")
@@ -898,9 +908,7 @@ def merge_1gw_5gw_results(
                 merged["recent_points_per_game"] - 4.0
             )  # 4.0 as baseline
 
-        # Add expected_minutes if not present (default estimation)
-        if "expected_minutes" not in merged.columns:
-            merged["expected_minutes"] = 70  # Default assumption
+        # expected_minutes should now be calculated by ML model, no fallback needed
 
         # Add fixture difficulty columns if missing
         if "fixture_difficulty" not in merged.columns:

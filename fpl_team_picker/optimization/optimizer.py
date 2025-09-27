@@ -369,8 +369,12 @@ def optimize_team_with_transfers(
     horizon_label = "1-GW" if xp_column == "xP" else "5-GW"
 
     # Update current squad with both 1-GW and 5-GW XP data for strategic decisions
+    merge_columns = ["player_id", "xP", "xP_5gw", "fixture_outlook"]
+    if "expected_minutes" in players_with_xp.columns:
+        merge_columns.append("expected_minutes")
+
     current_squad_with_xp = current_squad.merge(
-        players_with_xp[["player_id", "xP", "xP_5gw", "fixture_outlook"]],
+        players_with_xp[merge_columns],
         on="player_id",
         how="left",
     )
@@ -814,6 +818,8 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
     Returns:
         Marimo UI component with captain recommendations
     """
+    import pandas as pd
+
     if not starting_11:
         return (
             mo_ref.md("⚠️ **No starting 11 available for captain selection**")
@@ -849,7 +855,7 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
                 risk_level = "🟡 Medium"
 
         # Minutes certainty
-        expected_mins = player.get("expected_minutes", 90)
+        expected_mins = player.get("expected_minutes", 0)
         if expected_mins < 60:
             risk_factors.append("rotation risk")
             risk_level = "🟡 Medium" if risk_level == "🟢 Low" else risk_level
@@ -897,7 +903,7 @@ def select_captain(starting_11: List[Dict], mo_ref=None) -> object:
 
 **Recommended Captain:** {captain_pick["web_name"]} ({captain_pick["position"]})
 - **Expected Points:** {captain_pick.get("xP", 0):.2f} → **{captain_upside:.1f} as captain**
-- **Minutes:** {captain_pick.get("expected_minutes", 90):.0f}' expected
+- **Minutes:** {captain_pick.get("expected_minutes", 0):.0f}' expected
 - **Fixture:** {captain_pick.get("fixture_outlook", "Unknown")}
 
 **Vice Captain:** {vice_pick["web_name"]} ({vice_pick["position"]})

@@ -925,10 +925,10 @@ class XPModel:
 
             # Debug logging for specific player
             player_name = row.get("web_name", "Unknown")
-            if "Ekitik" in player_name or "ekitik" in player_name:
-                print(
-                    f"🐛 DEBUG: {player_name} status = '{availability}' (should be 's' if suspended)"
-                )
+
+            # Handle NaN SBP values
+            if pd.isna(sbp):
+                sbp = 5.0
 
             p_start = get_start_probability(sbp, availability)
 
@@ -975,6 +975,10 @@ class XPModel:
                 + p_partial_start * 45
                 + p_sub_appearance * 20
             )
+
+            # Handle NaN result
+            if pd.isna(expected_minutes):
+                expected_minutes = 70.0  # Safe fallback
 
             return expected_minutes
 
@@ -1244,7 +1248,7 @@ def merge_1gw_5gw_results(
     if "player_id" in players_1gw.columns and "player_id" in players_5gw.columns:
         merge_cols = ["player_id"] + [
             col
-            for col in ["xP", "xP_per_price", "fixture_difficulty"]
+            for col in ["xP", "xP_per_price", "fixture_difficulty", "expected_minutes"]
             if col in players_5gw.columns
         ]
 
