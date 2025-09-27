@@ -58,6 +58,16 @@ class DataOrchestrationService:
                 target_gameweek=target_gameweek, form_window=form_window
             )
 
+            # Unpack the tuple returned by fetch_fpl_data
+            (
+                players,
+                teams,
+                xg_rates,
+                fixtures,
+                actual_target_gameweek,
+                live_data_historical,
+            ) = fpl_data
+
             # Get manager team data if available
             manager_team = None
             current_squad = None
@@ -68,7 +78,7 @@ class DataOrchestrationService:
                     )
                     if manager_team is not None:
                         current_squad = process_current_squad(
-                            manager_team, fpl_data["players"], fpl_data["teams"]
+                            manager_team, players, teams
                         )
             except Exception:
                 # Manager team data is optional - don't fail if unavailable
@@ -76,11 +86,11 @@ class DataOrchestrationService:
 
             return Result(
                 value={
-                    "players": fpl_data["players"],
-                    "teams": fpl_data["teams"],
-                    "fixtures": fpl_data["fixtures"],
-                    "xg_rates": fpl_data["xg_rates"],
-                    "live_data_historical": fpl_data.get("live_data_historical"),
+                    "players": players,
+                    "teams": teams,
+                    "fixtures": fixtures,
+                    "xg_rates": xg_rates,
+                    "live_data_historical": live_data_historical,
                     "gameweek_info": gw_info,
                     "manager_team": manager_team,
                     "current_squad": current_squad,

@@ -110,15 +110,15 @@ class TestDomainServicesIntegration:
 
         players_with_xp = xp_result.value
 
-        # Test starting eleven selection (doesn't require current squad)
-        starting_11_result = transfer_service.get_starting_eleven(players_with_xp)
+        # Test optimal team selection from full database (for testing/analysis)
+        starting_11_result = transfer_service.get_optimal_team_from_database(players_with_xp)
         assert starting_11_result.is_success
 
         starting_11 = starting_11_result.value
         assert len(starting_11) == 11
 
-        # Test captain recommendation
-        captain_result = transfer_service.get_captain_recommendation(players_with_xp)
+        # Test captain recommendation from full database (for testing/analysis)
+        captain_result = transfer_service.get_captain_recommendation_from_database(players_with_xp)
         assert captain_result.is_success
 
         captain_recommendation = captain_result.value
