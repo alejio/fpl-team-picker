@@ -281,6 +281,8 @@ def _(
 ):
     # Initialize all variables with defaults first to avoid marimo dependency issues
     target_gw = gameweek_input.value if gameweek_input.value else None
+    previous_gw = target_gw - 1 if target_gw and target_gw > 1 else None
+    gameweek_data = {}
     team_data = None
     current_squad = pd.DataFrame()
     players = pd.DataFrame()
@@ -290,19 +292,51 @@ def _(
     live_data_historical = pd.DataFrame()
 
     if target_gw:
-        # Load core FPL data first
-        players, teams, xg_rates, fixtures, _, live_data_historical = fetch_fpl_data(
-            target_gw
+        # Use domain service for data orchestration
+        from fpl_team_picker.domain.services import DataOrchestrationService
+        from fpl_team_picker.adapters.database_repositories import (
+            DatabasePlayerRepository,
+            DatabaseTeamRepository,
+            DatabaseFixtureRepository,
         )
 
-        # Handle team data based on gameweek
-        if target_gw == 1:
-            previous_gw = None
-            # team_data remains None from initialization
-            # current_squad remains empty from initialization
+        # Initialize repositories
+        player_repo = DatabasePlayerRepository()
+        team_repo = DatabaseTeamRepository()
+        fixture_repo = DatabaseFixtureRepository()
+
+        # Create data orchestration service
+        data_service = DataOrchestrationService(player_repo, team_repo, fixture_repo)
+
+        # Load gameweek data
+        data_result = data_service.load_gameweek_data(target_gw, form_window=5)
+
+        if data_result.is_success:
+            gameweek_data = data_result.value
+            # Extract individual components for compatibility
+            players = gameweek_data["players"]
+            teams = gameweek_data["teams"]
+            xg_rates = gameweek_data["xg_rates"]
+            fixtures = gameweek_data["fixtures"]
+            live_data_historical = gameweek_data.get(
+                "live_data_historical", pd.DataFrame()
+            )
+            team_data = gameweek_data.get("manager_team")
+            current_squad = gameweek_data.get("current_squad", pd.DataFrame())
         else:
-            previous_gw = target_gw - 1
-            team_data = fetch_manager_team(previous_gw)
+            # Fallback to original data loading for error handling
+            try:
+                players, teams, xg_rates, fixtures, _, live_data_historical = (
+                    fetch_fpl_data(target_gw)
+                )
+
+                if target_gw > 1:
+                    team_data = fetch_manager_team(target_gw - 1)
+                    if team_data and not players.empty:
+                        current_squad = process_current_squad(team_data, players, teams)
+            except Exception:
+                # Keep defaults if fallback also fails
+                pass
 
     # Create team display based on gameweek and data availability
     team_display = mo.md("Configure target gameweek above to load team data")

@@ -1,6 +1,5 @@
 """Tests for database repository implementations."""
 
-import pytest
 
 from fpl_team_picker.adapters.database_repositories import (
     DatabaseFixtureRepository,

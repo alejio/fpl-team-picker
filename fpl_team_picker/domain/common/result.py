@@ -13,10 +13,12 @@ class ErrorType(str, Enum):
 
     VALIDATION_ERROR = "validation_error"
     DATA_NOT_FOUND = "data_not_found"
+    DATA_ACCESS_ERROR = "data_access_error"
     EXTERNAL_API_ERROR = "external_api_error"
     BUSINESS_RULE_VIOLATION = "business_rule_violation"
     CONFIGURATION_ERROR = "configuration_error"
     CALCULATION_ERROR = "calculation_error"
+    SYSTEM_ERROR = "system_error"
 
 
 class DomainError(BaseModel):
