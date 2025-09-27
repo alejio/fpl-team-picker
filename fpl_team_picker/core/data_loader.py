@@ -236,7 +236,7 @@ def fetch_fpl_data(
             f"📊 Combined live data: {len(live_data_combined)} records across {len(live_data_combined['event'].unique()) if 'event' in live_data_combined.columns else 0} gameweeks"
         )
 
-        # Convert string numeric columns to proper numeric types
+        # Convert string numeric columns to proper numeric types with validation
         numeric_columns = [
             "expected_goals",
             "expected_assists",
@@ -247,9 +247,22 @@ def fetch_fpl_data(
         ]
         for col in numeric_columns:
             if col in live_data_combined.columns:
-                live_data_combined[col] = pd.to_numeric(
-                    live_data_combined[col], errors="coerce"
+                # Check for invalid values before conversion
+                invalid_mask = (
+                    pd.to_numeric(live_data_combined[col], errors="coerce").isna()
+                    & live_data_combined[col].notna()
                 )
+                if invalid_mask.any():
+                    invalid_values = live_data_combined.loc[invalid_mask, col].unique()
+                    print(
+                        f"⚠️  Warning: Invalid numeric values in {col}: {invalid_values}"
+                    )
+                    # Fill invalid values with 0.0 instead of NaN for better data quality
+                    live_data_combined[col] = pd.to_numeric(
+                        live_data_combined[col], errors="coerce"
+                    ).fillna(0.0)
+                else:
+                    live_data_combined[col] = pd.to_numeric(live_data_combined[col])
 
     else:
         live_data_combined = live_data_historical  # Fallback to historical only
@@ -459,23 +472,38 @@ def process_current_squad(
     player_ids = [pick["element"] for pick in team_data["picks"]]
     current_squad = players[players["player_id"].isin(player_ids)].copy()
 
-    # Handle flexible team column naming
-    team_col = None
-    for col in ["team", "team_id", "team_id_x", "team_id_y"]:
-        if col in current_squad.columns:
-            team_col = col
-            break
+    # Ensure standardized team column naming
+    if "team_id" not in current_squad.columns:
+        # Look for alternative team column names and standardize
+        team_col_mapping = {
+            "team": "team_id",
+            "team_id_x": "team_id",
+            "team_id_y": "team_id",
+        }
 
-    if team_col:
+        found_team_col = None
+        for alt_col, standard_col in team_col_mapping.items():
+            if alt_col in current_squad.columns:
+                current_squad = current_squad.rename(columns={alt_col: standard_col})
+                found_team_col = alt_col
+                print(f"📋 Standardized team column: {alt_col} -> {standard_col}")
+                break
+
+        if not found_team_col:
+            raise ValueError(
+                f"No valid team column found in current squad data. "
+                f"Available columns: {list(current_squad.columns)}. "
+                f"Expected one of: {list(team_col_mapping.keys())}"
+            )
+
+    # Merge with team data using standardized column name
+    if "team_id" in current_squad.columns:
         current_squad = current_squad.merge(
-            teams[["id", "name"]], left_on=team_col, right_on="id", how="left"
+            teams[["id", "name"]], left_on="team_id", right_on="id", how="left"
         )
-    else:
-        print(
-            f"⚠️ No team column found in squad data. Available columns: {list(current_squad.columns)}"
-        )
-        # Add placeholder team name
-        current_squad["name"] = "Unknown Team"
+        # Fill any missing team names (defensive programming)
+        if "name" in current_squad.columns:
+            current_squad["name"] = current_squad["name"].fillna("Unknown Team")
 
     # Add captain info
     captain_id = next(
