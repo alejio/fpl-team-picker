@@ -2,7 +2,6 @@
 
 import pytest
 import subprocess
-import tempfile
 from pathlib import Path
 
 
@@ -12,10 +11,6 @@ class TestMarimoCompatibility:
     def test_core_imports_work(self):
         """Test that all core imports still work."""
         # Test data loading functionality (core dependency)
-        from fpl_team_picker.core.data_loader import (
-            fetch_fpl_data,
-            get_current_gameweek_info,
-        )
         from fpl_team_picker.config.settings import FPLConfig
 
         # Test configuration loading
@@ -23,7 +18,6 @@ class TestMarimoCompatibility:
         assert config is not None
 
         # Test that our new domain models don't interfere
-        from fpl_team_picker.domain.models import PlayerDomain, TeamDomain
         from fpl_team_picker.adapters.database_repositories import (
             DatabasePlayerRepository,
         )
