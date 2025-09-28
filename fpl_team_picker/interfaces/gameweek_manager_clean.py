@@ -343,85 +343,42 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, pd, players_with_xp):
-    # Form Analytics using PerformanceAnalyticsService
-    form_analytics_display = None
+def _(mo, players_with_xp):
+    # Form Analytics Dashboard using visualization function
+    if not players_with_xp.empty:
+        from fpl_team_picker.visualization.charts import create_form_analytics_display
 
-    if not players_with_xp.empty and gameweek_data:
-        try:
-            from fpl_team_picker.domain.services import PerformanceAnalyticsService
-
-            _analytics_service_form = PerformanceAnalyticsService()
-
-            # Get form analytics
-            form_data = _analytics_service_form.analyze_player_form(
-                players_with_xp, gameweek_data.get("live_data_historical")
-            )
-            form_analysis = form_data.get("form_analysis", {})
-            hot_players = form_analysis.get("hot_players", [])
-            cold_players = form_analysis.get("cold_players", [])
-
-            form_analytics_display = mo.vstack(
-                [
-                    mo.md("### 📈 Form Analytics Dashboard"),
-                    mo.md(
-                        f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
-                    ),
-                    mo.md("**🔥 Hot Players (Excellent Recent Form):**"),
-                    (
-                        mo.ui.table(
-                            pd.DataFrame(hot_players)[
-                                ["web_name", "position", "xP"]
-                            ].round(2)
-                            if hot_players
-                            and isinstance(hot_players, list)
-                            and len(hot_players) > 0
-                            else pd.DataFrame(
-                                {
-                                    "Player": ["No hot players found"],
-                                    "Position": [""],
-                                    "xP": [0],
-                                }
-                            ),
-                            page_size=8,
-                        )
-                        if hot_players
-                        else mo.md("No hot players identified")
-                    ),
-                    mo.md("**🧊 Cold Players (Poor Recent Form):**"),
-                    (
-                        mo.ui.table(
-                            pd.DataFrame(cold_players)[
-                                ["web_name", "position", "xP"]
-                            ].round(2)
-                            if cold_players
-                            and isinstance(cold_players, list)
-                            and len(cold_players) > 0
-                            else pd.DataFrame(
-                                {
-                                    "Player": ["No cold players found"],
-                                    "Position": [""],
-                                    "xP": [0],
-                                }
-                            ),
-                            page_size=8,
-                        )
-                        if cold_players
-                        else mo.md("No cold players identified")
-                    ),
-                    mo.md(
-                        f"**📊 Form Summary:** Analysis complete - {len(hot_players)} hot players, {len(cold_players)} cold players identified"
-                    ),
-                ]
-            )
-        except Exception as e:
-            form_analytics_display = mo.md(f"❌ **Form analytics error:** {str(e)}")
+        form_analytics_display = create_form_analytics_display(players_with_xp, mo)
     else:
         form_analytics_display = mo.md(
             "⚠️ **Calculate expected points first to enable form analytics**"
         )
 
     form_analytics_display
+    return
+
+
+@app.cell
+def _(gameweek_data, mo, players_with_xp):
+    # Squad Form Analysis using visualization function
+    if gameweek_data and not players_with_xp.empty:
+        _current_squad = gameweek_data.get("current_squad")
+        if _current_squad is not None and not _current_squad.empty:
+            from fpl_team_picker.visualization.charts import create_squad_form_analysis
+
+            squad_form_content = create_squad_form_analysis(
+                _current_squad, players_with_xp, mo
+            )
+        else:
+            squad_form_content = mo.md(
+                "⚠️ Load team data first to enable squad form analysis"
+            )
+    else:
+        squad_form_content = mo.md(
+            "⚠️ Calculate expected points and load team data first to enable squad form analysis"
+        )
+
+    squad_form_content
     return
 
 
