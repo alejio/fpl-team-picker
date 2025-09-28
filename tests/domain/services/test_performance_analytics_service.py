@@ -49,10 +49,8 @@ class TestPerformanceAnalyticsServiceIntegration:
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Test statistical insights (should work even without form data)
-        insights_result = analytics_service.get_statistical_insights(players_with_xp)
-        assert insights_result.is_success, f"Statistical insights failed: {insights_result.error.message if insights_result.error else 'Unknown'}"
-
-        insights = insights_result.value
+        insights = analytics_service.get_statistical_insights(players_with_xp)
+        assert isinstance(insights, dict)
         assert "xp_distribution" in insights
         assert insights["xp_distribution"]["mean"] > 0
         assert insights["xp_distribution"]["max"] > insights["xp_distribution"]["min"]
@@ -63,10 +61,8 @@ class TestPerformanceAnalyticsServiceIntegration:
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Test position trends for all positions
-        position_result = analytics_service.analyze_position_trends(players_with_xp)
-        assert position_result.is_success, f"Position trends failed: {position_result.error.message if position_result.error else 'Unknown'}"
-
-        position_data = position_result.value
+        position_data = analytics_service.analyze_position_trends(players_with_xp)
+        assert isinstance(position_data, dict)
         assert "position_analysis" in position_data
         assert len(position_data["position_analysis"]) > 0
 
@@ -80,10 +76,8 @@ class TestPerformanceAnalyticsServiceIntegration:
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Test specific position analysis
-        mid_result = analytics_service.analyze_position_trends(players_with_xp, position="MID")
-        assert mid_result.is_success, f"MID position analysis failed: {mid_result.error.message if mid_result.error else 'Unknown'}"
-
-        mid_data = mid_result.value
+        mid_data = analytics_service.analyze_position_trends(players_with_xp, position="MID")
+        assert isinstance(mid_data, dict)
         assert "position_analysis" in mid_data
         assert "MID" in mid_data["position_analysis"]
 
@@ -98,12 +92,9 @@ class TestPerformanceAnalyticsServiceIntegration:
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Test breakout player detection
-        breakout_result = analytics_service.detect_breakout_players(
+        breakout_players = analytics_service.detect_breakout_players(
             players_with_xp, price_threshold=7.0, xp_threshold=5.0
         )
-        assert breakout_result.is_success, f"Breakout detection failed: {breakout_result.error.message if breakout_result.error else 'Unknown'}"
-
-        breakout_players = breakout_result.value
         assert isinstance(breakout_players, list)
 
         # Check that all breakout players meet criteria
@@ -118,10 +109,9 @@ class TestPerformanceAnalyticsServiceIntegration:
         # Remove form columns if they exist to test fallback behavior
         players_no_form = players_with_xp.drop(columns=["momentum", "form_multiplier"], errors="ignore")
 
-        # This should fail gracefully when no form data is available
+        # This should work or return empty results when no form data is available
         form_result = analytics_service.analyze_player_form(players_no_form)
-        assert form_result.is_failure
-        assert "no form data available" in form_result.error.message.lower()
+        assert isinstance(form_result, dict)
 
     def test_error_handling(self, analytics_service):
         """Test error handling in analytics service."""
@@ -143,10 +133,9 @@ class TestPerformanceAnalyticsServiceIntegration:
         result = analytics_service.analyze_position_trends(df_with_columns, position="INVALID")
         assert isinstance(result, dict)  # Should return something, even if empty
 
-        # Test breakout detection with empty data
-        result = analytics_service.detect_breakout_players(empty_df)
-        assert result.is_failure
-        assert "no player data" in result.error.message.lower()
+        # Test breakout detection with empty data - should raise exception
+        with pytest.raises((KeyError, ValueError)):
+            analytics_service.detect_breakout_players(empty_df)
 
     def test_price_performance_correlation(self, analytics_service, sample_gameweek_data):
         """Test price-performance correlation analysis."""
@@ -156,10 +145,7 @@ class TestPerformanceAnalyticsServiceIntegration:
         if "price" not in players_with_xp.columns:
             pytest.skip("No price data available for correlation test")
 
-        insights_result = analytics_service.get_statistical_insights(players_with_xp)
-        assert insights_result.is_success
-
-        insights = insights_result.value
+        insights = analytics_service.get_statistical_insights(players_with_xp)
         if "price_performance_correlation" in insights:
             correlation = insights["price_performance_correlation"]
             # Correlation should be a valid number between -1 and 1
