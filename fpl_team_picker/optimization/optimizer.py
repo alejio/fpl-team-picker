@@ -373,10 +373,17 @@ def optimize_team_with_transfers(
     if "expected_minutes" in players_with_xp.columns:
         merge_columns.append("expected_minutes")
 
+    # Include team information in merge to maintain data contract
+    if "team" in players_with_xp.columns:
+        merge_columns.append("team")
+    elif "team_id" in players_with_xp.columns:
+        merge_columns.append("team_id")
+
     current_squad_with_xp = current_squad.merge(
         players_with_xp[merge_columns],
         on="player_id",
         how="left",
+        suffixes=("", "_from_xp"),  # Avoid column conflicts
     )
     # Fill any missing XP with 0
     current_squad_with_xp["xP"] = current_squad_with_xp["xP"].fillna(0)
@@ -384,6 +391,15 @@ def optimize_team_with_transfers(
     current_squad_with_xp["fixture_outlook"] = current_squad_with_xp[
         "fixture_outlook"
     ].fillna("🟡 Average")
+
+    # Validate team data contract - no NaN team values allowed
+    team_col = "team" if "team" in current_squad_with_xp.columns else "team_id"
+    if team_col in current_squad_with_xp.columns:
+        nan_teams = current_squad_with_xp[team_col].isna().sum()
+        if nan_teams > 0:
+            raise ValueError(
+                f"Data contract violation: {nan_teams} players have NaN team values after merge. This indicates missing players in XP calculation."
+            )
 
     # Current squad and available budget
     current_player_ids = set(current_squad_with_xp["player_id"].tolist())

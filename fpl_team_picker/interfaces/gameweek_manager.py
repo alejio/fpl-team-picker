@@ -661,18 +661,32 @@ def _(
                             if optimal_starting_11:
                                 _starting_11_df = _pd.DataFrame(optimal_starting_11)
 
-                                # Fix team names
+                                # Fix team names - enforce data contract
                                 if (
                                     "team" in _starting_11_df.columns
                                     and teams is not None
                                     and not teams.empty
                                 ):
+                                    # Ensure consistent column naming in data contract
                                     team_id_col = (
                                         "id" if "id" in teams.columns else "team_id"
                                     )
                                     team_map = dict(
                                         zip(teams[team_id_col], teams["name"])
                                     )
+
+                                    # Check if mapping will work - fail fast if data contract violated
+                                    team_values = _starting_11_df["team"].unique()
+                                    available_teams = set(teams[team_id_col])
+
+                                    if not set(team_values).issubset(available_teams):
+                                        missing_teams = (
+                                            set(team_values) - available_teams
+                                        )
+                                        raise ValueError(
+                                            f"Data contract violation: team IDs {missing_teams} not found in teams data. Expected teams: {available_teams}"
+                                        )
+
                                     _starting_11_df["name"] = _starting_11_df[
                                         "team"
                                     ].map(team_map)
@@ -703,7 +717,7 @@ def _(
                                         p.get("xP", 0) for p in bench_players
                                     )
 
-                                    # Fix team names for bench
+                                    # Fix team names for bench - enforce data contract
                                     if (
                                         "team" in bench_df.columns
                                         and teams is not None
@@ -715,6 +729,21 @@ def _(
                                         team_map = dict(
                                             zip(teams[team_id_col], teams["name"])
                                         )
+
+                                        # Check if mapping will work - fail fast if data contract violated
+                                        team_values = bench_df["team"].unique()
+                                        available_teams = set(teams[team_id_col])
+
+                                        if not set(team_values).issubset(
+                                            available_teams
+                                        ):
+                                            missing_teams = (
+                                                set(team_values) - available_teams
+                                            )
+                                            raise ValueError(
+                                                f"Data contract violation: bench team IDs {missing_teams} not found in teams data. Expected teams: {available_teams}"
+                                            )
+
                                         bench_df["name"] = bench_df["team"].map(
                                             team_map
                                         )
