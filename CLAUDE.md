@@ -182,16 +182,15 @@ form_analysis = analytics_service.analyze_player_form(
 # Returns: Form trends, momentum indicators, hot/cold classifications
 ```
 
-**Fixture Analysis Service** (`fixture_analysis_service.py`)
+**Fixture Analysis** - *Handled by visualization layer*
 ```python
-from fpl_team_picker.domain.services import FixtureAnalysisService
+# Fixture difficulty analysis is now handled directly in charts.py
+from fpl_team_picker.visualization.charts import create_fixture_difficulty_visualization
 
-# Fixture difficulty and scheduling analysis
-fixture_service = FixtureAnalysisService()
-fixture_analysis = fixture_service.analyze_fixtures(
-    target_gameweek=10, gameweeks_ahead=5
+fixture_analysis = create_fixture_difficulty_visualization(
+    target_gameweek=10, gameweeks_ahead=5, mo
 )
-# Returns: Fixture difficulty ratings, double gameweeks, rotation risks
+# Returns: Interactive Marimo fixture difficulty display
 ```
 
 **Squad Management Service** (`squad_management_service.py`)
@@ -206,14 +205,13 @@ lineup_analysis = squad_service.analyze_squad_composition(
 # Returns: Squad balance, formation flexibility, value distribution
 ```
 
-**Visualization Service** (`visualization_service.py`)
+**Visualization** - *Handled by charts layer*
 ```python
-from fpl_team_picker.domain.services import VisualizationService
+# Chart generation is handled directly in charts.py for Marimo
+from fpl_team_picker.visualization.charts import create_xp_results_display
 
-# Chart generation for any frontend
-viz_service = VisualizationService()
-chart_config = viz_service.generate_xp_chart_config(players_with_xp)
-# Returns: Frontend-agnostic chart configurations (Plotly, React, etc.)
+xp_display = create_xp_results_display(players_with_xp, target_gameweek, mo)
+# Returns: Ready-to-use Marimo visualization components
 ```
 
 #### Domain Models (`domain/models/`)
@@ -351,7 +349,7 @@ def _(gameweek_data, mo):
 - **Form Analytics**: Leverages `PerformanceAnalyticsService` for hot/cold analysis
 - **Chip Assessment**: Integrates `ChipAssessmentService` with traffic light recommendations
 - **Captain Selection**: Risk-adjusted recommendations via optimization results
-- **Fixture Analysis**: Uses `FixtureAnalysisService` for difficulty heatmaps
+- **Fixture Analysis**: Uses `create_fixture_difficulty_visualization()` for difficulty heatmaps
 
 #### Season Planner (`season_planner.py`) - **2257 lines**
 **Marimo notebook for season-start team building:**
