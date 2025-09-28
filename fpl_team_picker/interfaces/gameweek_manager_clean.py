@@ -594,68 +594,168 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, optimization_horizon_toggle, players_with_xp):
-    # Transfer optimization using TransferOptimizationService
-    transfer_section_display = None
+def _(mo, optimization_horizon_toggle, players_with_xp):
+    # Transfer Constraints UI
+    must_include_dropdown = mo.ui.multiselect(options=[], value=[])
+    must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
+    optimize_button = mo.ui.run_button(label="Loading...", disabled=True)
 
-    if not players_with_xp.empty and gameweek_data:
-        try:
-            from fpl_team_picker.domain.services import TransferOptimizationService
+    if not players_with_xp.empty:
+        player_options = []
+        # Use the selected horizon to determine sort column and display
+        horizon = (
+            optimization_horizon_toggle.value
+            if optimization_horizon_toggle.value
+            else "5gw"
+        )
+        sort_column = (
+            "xP_5gw"
+            if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
+            else "xP"
+        )
+        horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
 
-            _transfer_service = TransferOptimizationService()
-
-            # Get current squad if available
-            current_squad = gameweek_data.get("current_squad")
-            if current_squad is not None and not current_squad.empty:
-                # Use 5GW horizon based on toggle
-                use_5gw = optimization_horizon_toggle.value == "5gw"
-
-                # Get transfer optimization
-                transfer_results = _transfer_service.optimize_transfers_simple(
-                    players_with_xp=players_with_xp,
-                    current_squad=current_squad,
-                    gameweek_data=gameweek_data,
-                    use_5gw_horizon=use_5gw,
-                )
-
-                # Display transfer recommendations
-                _recommendations_transfer = transfer_results.get(
-                    "transfer_recommendations", []
-                )
-                horizon = transfer_results.get("optimization_horizon", "1gw")
-
-                if _recommendations_transfer:
-                    _rec_transfer = _recommendations_transfer[
-                        0
-                    ]  # Get first recommendation
-                    transfer_content = f"""
-**Optimization Horizon:** {horizon.upper()}
-**Transfer Count:** {_rec_transfer.get("transfer_count", 0)}
-**Expected Gain:** {_rec_transfer.get("net_xp_gain", 0.0):.2f} xP
-**Total Cost:** {_rec_transfer.get("total_cost", 0.0):.1f}m
-**Summary:** {_rec_transfer.get("summary", "No description")}
-"""
-                else:
-                    transfer_content = f"**Optimization Horizon:** {horizon.upper()}\n**Status:** No beneficial transfers found"
-
-                transfer_section_display = mo.md(
-                    f"### 🔄 Transfer Optimization\n{transfer_content}"
-                )
-            else:
-                transfer_section_display = mo.md(
-                    "### 🔄 Transfer Optimization\n**Status:** Current squad not available - cannot optimize transfers"
-                )
-
-        except Exception as e:
-            transfer_section_display = mo.md(
-                f"### 🔄 Transfer Optimization\n❌ Transfer optimization failed: {str(e)}"
+        for _, player in players_with_xp.sort_values(
+            ["position", sort_column], ascending=[True, False]
+        ).iterrows():
+            xp_display = player.get(sort_column, 0)
+            team_name = player.get(
+                "name", player.get("team", player.get("team_name", ""))
             )
-    else:
-        transfer_section_display = mo.md(
-            "### 🔄 Transfer Optimization\n**Status:** Waiting for expected points data"
+
+            label = f"{player['web_name']} ({player['position']}, {team_name}) - £{player['price']:.1f}m, {xp_display:.2f} {horizon_label}"
+            player_options.append({"label": label, "value": player["player_id"]})
+
+        must_include_dropdown = mo.ui.multiselect(
+            options=player_options,
+            label="Must Include Players (force these players to be bought/kept)",
+            value=[],
         )
 
-    transfer_section_display
+        must_exclude_dropdown = mo.ui.multiselect(
+            options=player_options,
+            label="Must Exclude Players (never consider these players)",
+            value=[],
+        )
+
+        button_label = (
+            f"🚀 Run {horizon.upper()} Optimization (Auto-selects 0-3 transfers)"
+        )
+        optimize_button = mo.ui.run_button(label=button_label, kind="success")
+
+        constraints_ui = mo.vstack(
+            [
+                mo.md("### 🎯 Transfer Constraints"),
+                mo.md("*Optional: Set player constraints before running optimization*"),
+                mo.md(""),
+                must_include_dropdown,
+                mo.md(""),
+                must_exclude_dropdown,
+                mo.md(""),
+                mo.md("---"),
+                mo.md("### 🚀 Run Optimization"),
+                mo.md(
+                    f"*The optimizer analyzes all transfer scenarios (0-3 transfers) using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties.*"
+                ),
+                mo.md(""),
+                optimize_button,
+                mo.md("---"),
+            ]
+        )
+    else:
+        constraints_ui = mo.vstack(
+            [
+                mo.md("### ⚠️ Optimization Unavailable"),
+                mo.md(
+                    "*Please complete the expected points calculation first to enable transfer optimization.*"
+                ),
+                mo.md(""),
+                mo.md("**Required Steps:**"),
+                mo.md("1. Select a target gameweek above"),
+                mo.md("2. Wait for XP calculations to complete"),
+                mo.md("3. Return here to run optimization"),
+                mo.md("---"),
+            ]
+        )
+
+    constraints_ui
+    return must_exclude_dropdown, must_include_dropdown, optimize_button
+
+
+@app.cell
+def _(
+    gameweek_data,
+    mo,
+    must_exclude_dropdown,
+    must_include_dropdown,
+    optimize_button,
+    optimization_horizon_toggle,
+    players_with_xp,
+):
+    # Transfer optimization using interactive optimization engine
+    if optimize_button is not None and optimize_button.value:
+        if not players_with_xp.empty and gameweek_data:
+            current_squad = gameweek_data.get("current_squad")
+            team_data = gameweek_data.get("manager_team")
+
+            if current_squad is not None and not current_squad.empty:
+                from fpl_team_picker.optimization.optimizer import (
+                    optimize_team_with_transfers,
+                )
+
+                must_include_ids = (
+                    set(must_include_dropdown.value)
+                    if must_include_dropdown.value
+                    else set()
+                )
+                must_exclude_ids = (
+                    set(must_exclude_dropdown.value)
+                    if must_exclude_dropdown.value
+                    else set()
+                )
+
+                # Override config with selected horizon
+                from fpl_team_picker.config import config as opt_config
+                import fpl_team_picker.optimization.optimizer as opt
+
+                selected_horizon = (
+                    optimization_horizon_toggle.value
+                    if optimization_horizon_toggle.value
+                    else "5gw"
+                )
+                original_horizon = opt_config.optimization.optimization_horizon
+                opt_config.optimization.optimization_horizon = selected_horizon
+                opt.config.optimization.optimization_horizon = selected_horizon
+
+                try:
+                    result = optimize_team_with_transfers(
+                        current_squad=current_squad,
+                        team_data=team_data,
+                        players_with_xp=players_with_xp,
+                        must_include_ids=must_include_ids,
+                        must_exclude_ids=must_exclude_ids,
+                    )
+                    optimization_display = (
+                        result[0] if isinstance(result, tuple) else result
+                    )
+                finally:
+                    # Restore original config
+                    opt_config.optimization.optimization_horizon = original_horizon
+                    opt.config.optimization.optimization_horizon = original_horizon
+            else:
+                optimization_display = mo.md(
+                    "❌ **Current squad not available** - cannot optimize transfers"
+                )
+        else:
+            optimization_display = mo.md(
+                "⚠️ **Calculate expected points first** to enable transfer optimization"
+            )
+    else:
+        optimization_display = mo.md(
+            "👆 **Click the optimization button above to analyze transfer scenarios**"
+        )
+
+    optimization_display
     return
 
 
