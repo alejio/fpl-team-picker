@@ -3,7 +3,6 @@
 from typing import Dict, List, Any
 import pandas as pd
 
-from fpl_team_picker.domain.common.result import Result, DomainError, ErrorType
 from fpl_team_picker.domain.repositories.player_repository import PlayerRepository
 from fpl_team_picker.domain.repositories.team_repository import TeamRepository
 from fpl_team_picker.domain.repositories.fixture_repository import FixtureRepository
@@ -24,193 +23,141 @@ class DataOrchestrationService:
 
     def load_gameweek_data(
         self, target_gameweek: int, form_window: int = 5
-    ) -> Result[Dict[str, Any]]:
-        """Load all required data for gameweek analysis.
+    ) -> Dict[str, Any]:
+        """Load all required data for gameweek analysis - FAIL FAST if data is bad.
 
         Args:
             target_gameweek: The gameweek to analyze
             form_window: Number of recent gameweeks for form analysis
 
         Returns:
-            Result containing orchestrated data or error
+            Clean data dictionary - guaranteed to be valid
+
+        Raises:
+            ValueError: If data doesn't meet contracts
         """
-        try:
-            # Use existing data loading for now (simplified approach)
-            from fpl_team_picker.core.data_loader import (
-                fetch_fpl_data,
-                get_current_gameweek_info,
-                fetch_manager_team,
-                process_current_squad,
+        # Use existing data loading - let it fail fast
+        from fpl_team_picker.core.data_loader import (
+            fetch_fpl_data,
+            get_current_gameweek_info,
+            fetch_manager_team,
+            process_current_squad,
+        )
+
+        # Get current gameweek info - fail fast if not available
+        gw_info = get_current_gameweek_info()
+        if not gw_info:
+            raise ValueError(
+                "Could not determine current gameweek - check FPL API connection"
             )
 
-            # Get current gameweek info
-            gw_info = get_current_gameweek_info()
-            if not gw_info:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.DATA_ACCESS_ERROR,
-                        message="Could not determine current gameweek",
+        # Fetch comprehensive FPL data - let core loader handle failures
+        fpl_data = fetch_fpl_data(
+            target_gameweek=target_gameweek, form_window=form_window
+        )
+        (
+            players,
+            teams,
+            xg_rates,
+            fixtures,
+            actual_target_gameweek,
+            live_data_historical,
+        ) = fpl_data
+
+        # Validate core data contracts
+        if len(players) < 100:
+            raise ValueError(
+                f"Invalid player data: expected >100 players, got {len(players)}"
+            )
+
+        if len(teams) != 20:
+            raise ValueError(f"Invalid team data: expected 20 teams, got {len(teams)}")
+
+        # Get manager team data - fail if we can't get current squad
+        manager_team = None
+        current_squad = None
+        if gw_info.get("current_gameweek", 0) > 1:
+            manager_team = fetch_manager_team(
+                previous_gameweek=gw_info["current_gameweek"] - 1
+            )
+            if manager_team is not None:
+                current_squad = process_current_squad(manager_team, players, teams)
+                if len(current_squad) != 15:
+                    raise ValueError(
+                        f"Invalid squad: expected 15 players, got {len(current_squad)}"
                     )
-                )
 
-            # Fetch comprehensive FPL data
-            fpl_data = fetch_fpl_data(
-                target_gameweek=target_gameweek, form_window=form_window
-            )
+        return {
+            "players": players,
+            "teams": teams,
+            "fixtures": fixtures,
+            "xg_rates": xg_rates,
+            "live_data_historical": live_data_historical,
+            "gameweek_info": gw_info,
+            "manager_team": manager_team,
+            "current_squad": current_squad,
+            "target_gameweek": target_gameweek,
+            "form_window": form_window,
+        }
 
-            # Unpack the tuple returned by fetch_fpl_data
-            (
-                players,
-                teams,
-                xg_rates,
-                fixtures,
-                actual_target_gameweek,
-                live_data_historical,
-            ) = fpl_data
-
-            # Get manager team data if available
-            manager_team = None
-            current_squad = None
-            try:
-                if gw_info.get("current_gameweek", 0) > 1:
-                    manager_team = fetch_manager_team(
-                        previous_gameweek=gw_info["current_gameweek"] - 1
-                    )
-                    if manager_team is not None:
-                        current_squad = process_current_squad(
-                            manager_team, players, teams
-                        )
-            except Exception:
-                # Manager team data is optional - don't fail if unavailable
-                pass
-
-            return Result(
-                value={
-                    "players": players,
-                    "teams": teams,
-                    "fixtures": fixtures,
-                    "xg_rates": xg_rates,
-                    "live_data_historical": live_data_historical,
-                    "gameweek_info": gw_info,
-                    "manager_team": manager_team,
-                    "current_squad": current_squad,
-                    "target_gameweek": target_gameweek,
-                    "form_window": form_window,
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.DATA_ACCESS_ERROR,
-                    message=f"Failed to load gameweek data: {str(e)}",
-                )
-            )
-
-    def get_current_gameweek_info(self) -> Result[Dict[str, Any]]:
+    def get_current_gameweek_info(self) -> Dict[str, Any]:
         """Get current gameweek information.
 
         Returns:
-            Result containing current gameweek info or error
+            Current gameweek info - guaranteed clean
         """
-        try:
-            from fpl_team_picker.core.data_loader import get_current_gameweek_info
+        from fpl_team_picker.core.data_loader import get_current_gameweek_info
 
-            gw_info = get_current_gameweek_info()
-            if not gw_info:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.DATA_ACCESS_ERROR,
-                        message="Could not determine current gameweek",
-                    )
-                )
-
-            return Result(value=gw_info)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.DATA_ACCESS_ERROR,
-                    message=f"Failed to get current gameweek info: {str(e)}",
-                )
+        gw_info = get_current_gameweek_info()
+        if not gw_info:
+            raise ValueError(
+                "Could not determine current gameweek - check FPL API connection"
             )
 
-    def validate_gameweek_data(self, data: Dict[str, Any]) -> Result[bool]:
+        return gw_info
+
+    def validate_gameweek_data(self, data: Dict[str, Any]) -> bool:
         """Validate that the loaded gameweek data is complete and valid.
 
         Args:
-            data: The gameweek data dictionary
+            data: The gameweek data dictionary - guaranteed clean
 
         Returns:
-            Result indicating validation success or specific errors
+            True if validation passes
         """
-        try:
-            required_keys = [
-                "players",
-                "teams",
-                "fixtures",
-                "xg_rates",
-                "gameweek_info",
-                "target_gameweek",
-            ]
-            missing_keys = [key for key in required_keys if key not in data]
+        required_keys = [
+            "players",
+            "teams",
+            "fixtures",
+            "xg_rates",
+            "gameweek_info",
+            "target_gameweek",
+        ]
+        missing_keys = [key for key in required_keys if key not in data]
 
-            if missing_keys:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Missing required data keys: {missing_keys}",
-                    )
-                )
+        if missing_keys:
+            raise ValueError(f"Missing required data keys: {missing_keys}")
 
-            # Validate data completeness
-            players = data["players"]
-            teams = data["teams"]
-            fixtures = data["fixtures"]
+        # Validate data completeness
+        players = data["players"]
+        teams = data["teams"]
+        fixtures = data["fixtures"]
 
-            if players.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="Players data is empty",
-                    )
-                )
+        if players.empty:
+            raise ValueError("Players data is empty")
 
-            if teams.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="Teams data is empty",
-                    )
-                )
+        if teams.empty:
+            raise ValueError("Teams data is empty")
 
-            if fixtures.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="Fixtures data is empty",
-                    )
-                )
+        if fixtures.empty:
+            raise ValueError("Fixtures data is empty")
 
-            # Validate target gameweek
-            target_gw = data["target_gameweek"]
-            if not isinstance(target_gw, int) or target_gw < 1 or target_gw > 38:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Invalid target gameweek: {target_gw}",
-                    )
-                )
+        # Validate target gameweek
+        target_gw = data["target_gameweek"]
+        if not isinstance(target_gw, int) or target_gw < 1 or target_gw > 38:
+            raise ValueError(f"Invalid target gameweek: {target_gw}")
 
-            return Result(value=True)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.VALIDATION_ERROR,
-                    message=f"Data validation failed: {str(e)}",
-                )
-            )
+        return True
 
     def _convert_players_to_dataframe(self, players: List[Any]) -> pd.DataFrame:
         """Convert player domain models to DataFrame for compatibility."""

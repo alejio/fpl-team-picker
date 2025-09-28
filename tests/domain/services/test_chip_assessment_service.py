@@ -36,16 +36,10 @@ class TestChipAssessmentServiceIntegration:
         xp_service = ExpectedPointsService()
 
         # Load gameweek data
-        data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result.is_success, f"Failed to load data: {data_result.error.message if data_result.error else 'Unknown'}"
-
-        gameweek_data = data_result.value
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
 
         # Calculate XP (rule-based for reliability)
-        xp_result = xp_service.calculate_combined_results(gameweek_data, use_ml_model=False)
-        assert xp_result.is_success, f"Failed to calculate XP: {xp_result.error.message if xp_result.error else 'Unknown'}"
-
-        players_with_xp = xp_result.value
+        players_with_xp = xp_service.calculate_combined_results(gameweek_data, use_ml_model=False)
         gameweek_data["players_with_xp"] = players_with_xp
 
         return gameweek_data
@@ -67,12 +61,9 @@ class TestChipAssessmentServiceIntegration:
         available_chips = ["wildcard", "bench_boost", "triple_captain"]
 
         # Test chip assessment
-        chip_result = chip_service.assess_all_chips(
+        chip_data = chip_service.assess_all_chips(
             sample_gameweek_data, mock_squad, available_chips
         )
-        assert chip_result.is_success, f"Chip assessment failed: {chip_result.error.message if chip_result.error else 'Unknown'}"
-
-        chip_data = chip_result.value
         assert "recommendations" in chip_data
         assert "summary" in chip_data
         assert "target_gameweek" in chip_data
@@ -81,12 +72,9 @@ class TestChipAssessmentServiceIntegration:
     def test_individual_chip_assessment(self, chip_service, sample_gameweek_data, mock_squad):
         """Test individual chip assessment."""
         # Test triple captain specifically
-        tc_result = chip_service.get_chip_recommendation(
+        tc_data = chip_service.get_chip_recommendation(
             "triple_captain", sample_gameweek_data, mock_squad
         )
-        assert tc_result.is_success, f"Triple captain assessment failed: {tc_result.error.message if tc_result.error else 'Unknown'}"
-
-        tc_data = tc_result.value
         assert "chip_name" in tc_data
         assert "status" in tc_data
         assert tc_data["status"] in ["🟢 RECOMMENDED", "🟡 CONSIDER", "🔴 HOLD"]
@@ -95,12 +83,9 @@ class TestChipAssessmentServiceIntegration:
         """Test chip timing analysis over multiple gameweeks."""
         available_chips = ["triple_captain"]
 
-        timing_result = chip_service.get_chip_timing_analysis(
+        timing_data = chip_service.get_chip_timing_analysis(
             sample_gameweek_data, mock_squad, available_chips, gameweeks_ahead=3
         )
-        assert timing_result.is_success, f"Timing analysis failed: {timing_result.error.message if timing_result.error else 'Unknown'}"
-
-        timing_data = timing_result.value
         assert "timing_analysis" in timing_data
         assert "triple_captain" in timing_data["timing_analysis"]
 
@@ -108,12 +93,15 @@ class TestChipAssessmentServiceIntegration:
         """Test error handling in chip service."""
         empty_df = pd.DataFrame()
 
-        # Test with invalid squad size
-        result = chip_service.assess_all_chips({}, empty_df, ["wildcard"])
-        assert result.is_failure
-        assert "15 players" in result.error.message
+        # Test with invalid gameweek data (missing required keys)
+        with pytest.raises(KeyError):
+            chip_service.assess_all_chips({}, empty_df, ["wildcard"])
 
-        # Test with invalid chip name
-        result = chip_service.get_chip_recommendation("invalid_chip", {}, empty_df)
-        assert result.is_failure
-        assert "invalid chip name" in result.error.message.lower()
+        # Test with invalid chip name - should raise ValueError
+        minimal_gameweek_data = {
+            "players": empty_df,
+            "fixtures": empty_df,
+            "target_gameweek": 1
+        }
+        with pytest.raises(ValueError, match="Invalid chip name"):
+            chip_service.get_chip_recommendation("invalid_chip", minimal_gameweek_data, empty_df)

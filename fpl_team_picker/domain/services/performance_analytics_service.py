@@ -3,8 +3,6 @@
 from typing import Dict, Any, List, Optional
 import pandas as pd
 
-from fpl_team_picker.domain.common.result import Result, DomainError, ErrorType
-
 
 class PerformanceAnalyticsService:
     """Service for analyzing player performance, form, and trends."""
@@ -26,319 +24,224 @@ class PerformanceAnalyticsService:
         self,
         players_with_xp: pd.DataFrame,
         live_data_historical: Optional[pd.DataFrame] = None,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Analyze player form and momentum indicators.
 
         Args:
-            players_with_xp: DataFrame with current player data and XP calculations
+            players_with_xp: DataFrame with current player data and XP calculations - guaranteed clean
             live_data_historical: Optional historical performance data
 
         Returns:
-            Result containing comprehensive form analysis
+            Comprehensive form analysis
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for form analysis",
-                    )
-                )
+        # Check for required form columns
+        form_columns = ["momentum", "form_multiplier"]
+        available_form_columns = [
+            col for col in form_columns if col in players_with_xp.columns
+        ]
 
-            # Check for required form columns
-            form_columns = ["momentum", "form_multiplier"]
-            available_form_columns = [
-                col for col in form_columns if col in players_with_xp.columns
-            ]
+        # Analyze different aspects of form
+        form_analysis = {}
 
-            if not available_form_columns:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No form data available - requires momentum or form_multiplier columns",
-                    )
-                )
+        # Hot and cold players analysis
+        hot_cold_analysis = self._analyze_hot_cold_players(players_with_xp)
+        form_analysis.update(hot_cold_analysis)
 
-            # Analyze different aspects of form
-            form_analysis = {}
+        # Momentum trends
+        momentum_analysis = self._analyze_momentum_trends(players_with_xp)
+        form_analysis.update(momentum_analysis)
 
-            # Hot and cold players analysis
-            hot_cold_analysis = self._analyze_hot_cold_players(players_with_xp)
-            form_analysis.update(hot_cold_analysis)
+        # Value players with good form
+        value_form_analysis = self._analyze_value_form_players(players_with_xp)
+        form_analysis.update(value_form_analysis)
 
-            # Momentum trends
-            momentum_analysis = self._analyze_momentum_trends(players_with_xp)
-            form_analysis.update(momentum_analysis)
+        # Expensive underperformers
+        underperformer_analysis = self._analyze_underperformers(players_with_xp)
+        form_analysis.update(underperformer_analysis)
 
-            # Value players with good form
-            value_form_analysis = self._analyze_value_form_players(players_with_xp)
-            form_analysis.update(value_form_analysis)
-
-            # Expensive underperformers
-            underperformer_analysis = self._analyze_underperformers(players_with_xp)
-            form_analysis.update(underperformer_analysis)
-
-            # Historical trends if data available
-            if live_data_historical is not None and not live_data_historical.empty:
-                historical_analysis = self._analyze_historical_trends(
-                    players_with_xp, live_data_historical
-                )
-                form_analysis.update(historical_analysis)
-
-            return Result(
-                value={
-                    "form_analysis": form_analysis,
-                    "total_players_analyzed": len(players_with_xp),
-                    "available_form_columns": available_form_columns,
-                    "has_historical_data": live_data_historical is not None
-                    and not live_data_historical.empty,
-                }
+        # Historical trends if data available
+        if live_data_historical is not None and not live_data_historical.empty:
+            historical_analysis = self._analyze_historical_trends(
+                players_with_xp, live_data_historical
             )
+            form_analysis.update(historical_analysis)
 
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Form analysis failed: {str(e)}",
-                )
-            )
+        return {
+            "form_analysis": form_analysis,
+            "total_players_analyzed": len(players_with_xp),
+            "available_form_columns": available_form_columns,
+            "has_historical_data": live_data_historical is not None
+            and not live_data_historical.empty,
+        }
 
     def detect_breakout_players(
         self,
         players_with_xp: pd.DataFrame,
         price_threshold: float = 7.0,
         xp_threshold: float = 6.0,
-    ) -> Result[List[Dict[str, Any]]]:
+    ) -> List[Dict[str, Any]]:
         """Detect potential breakout players based on form and value.
 
         Args:
-            players_with_xp: DataFrame with player data
+            players_with_xp: DataFrame with player data - guaranteed clean
             price_threshold: Maximum price for breakout consideration
             xp_threshold: Minimum expected points threshold
 
         Returns:
-            Result containing list of potential breakout players
+            List of potential breakout players
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for breakout analysis",
-                    )
-                )
+        # Filter potential breakout players
+        breakout_candidates = players_with_xp[
+            (players_with_xp["price"] <= price_threshold)
+            & (players_with_xp["xP"] >= xp_threshold)
+        ].copy()
 
-            # Filter potential breakout players
-            breakout_candidates = players_with_xp[
-                (players_with_xp["price"] <= price_threshold)
-                & (players_with_xp["xP"] >= xp_threshold)
-            ].copy()
+        # Add form indicators if available
+        if "momentum" in breakout_candidates.columns:
+            breakout_candidates = breakout_candidates[
+                breakout_candidates["momentum"].isin(["🔥", "📈"])
+            ]
 
-            # Add form indicators if available
-            if "momentum" in breakout_candidates.columns:
-                breakout_candidates = breakout_candidates[
-                    breakout_candidates["momentum"].isin(["🔥", "📈"])
-                ]
-
-            # Sort by expected points and value
-            if "xP_per_price" in breakout_candidates.columns:
-                breakout_candidates = breakout_candidates.sort_values(
-                    ["xP_per_price", "xP"], ascending=[False, False]
-                )
-            else:
-                breakout_candidates = breakout_candidates.sort_values(
-                    "xP", ascending=False
-                )
-
-            # Convert to list of dictionaries
-            breakout_players = breakout_candidates.head(10).to_dict("records")
-
-            return Result(value=breakout_players)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Breakout player detection failed: {str(e)}",
-                )
+        # Sort by expected points and value
+        if "xP_per_price" in breakout_candidates.columns:
+            breakout_candidates = breakout_candidates.sort_values(
+                ["xP_per_price", "xP"], ascending=[False, False]
             )
+        else:
+            breakout_candidates = breakout_candidates.sort_values("xP", ascending=False)
+
+        # Convert to list of dictionaries
+        return breakout_candidates.head(10).to_dict("records")
 
     def analyze_position_trends(
         self,
         players_with_xp: pd.DataFrame,
         position: Optional[str] = None,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Analyze performance trends by position.
 
         Args:
-            players_with_xp: DataFrame with player data
+            players_with_xp: DataFrame with player data - guaranteed clean
             position: Specific position to analyze (None for all positions)
 
         Returns:
-            Result containing position-specific trend analysis
+            Position-specific trend analysis
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for position analysis",
-                    )
+        valid_positions = ["GKP", "DEF", "MID", "FWD"]
+        position_analysis = {}
+
+        # Analyze specific position or all positions
+        positions_to_analyze = [position] if position else valid_positions
+
+        for pos in positions_to_analyze:
+            pos_players = players_with_xp[players_with_xp["position"] == pos]
+
+            if pos_players.empty:
+                continue
+
+            pos_stats = {
+                "total_players": len(pos_players),
+                "avg_xp": pos_players["xP"].mean(),
+                "max_xp": pos_players["xP"].max(),
+                "avg_price": pos_players["price"].mean(),
+                "top_player": pos_players.loc[pos_players["xP"].idxmax(), "web_name"],
+            }
+
+            # Add form statistics if available
+            if "momentum" in pos_players.columns:
+                pos_stats["hot_players"] = len(
+                    pos_players[pos_players["momentum"] == "🔥"]
+                )
+                pos_stats["cold_players"] = len(
+                    pos_players[pos_players["momentum"] == "❄️"]
                 )
 
-            # Validate position if specified
-            valid_positions = ["GKP", "DEF", "MID", "FWD"]
-            if position and position not in valid_positions:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Invalid position: {position}. Must be one of {valid_positions}",
-                    )
-                )
+            # Add value statistics if available
+            if "xP_per_price" in pos_players.columns:
+                pos_stats["avg_value"] = pos_players["xP_per_price"].mean()
+                pos_stats["best_value_player"] = pos_players.loc[
+                    pos_players["xP_per_price"].idxmax(), "web_name"
+                ]
 
-            position_analysis = {}
+            position_analysis[pos] = pos_stats
 
-            # Analyze specific position or all positions
-            positions_to_analyze = [position] if position else valid_positions
-
-            for pos in positions_to_analyze:
-                pos_players = players_with_xp[players_with_xp["position"] == pos]
-
-                if pos_players.empty:
-                    continue
-
-                pos_stats = {
-                    "total_players": len(pos_players),
-                    "avg_xp": pos_players["xP"].mean(),
-                    "max_xp": pos_players["xP"].max(),
-                    "avg_price": pos_players["price"].mean(),
-                    "top_player": pos_players.loc[
-                        pos_players["xP"].idxmax(), "web_name"
-                    ],
-                }
-
-                # Add form statistics if available
-                if "momentum" in pos_players.columns:
-                    pos_stats["hot_players"] = len(
-                        pos_players[pos_players["momentum"] == "🔥"]
-                    )
-                    pos_stats["cold_players"] = len(
-                        pos_players[pos_players["momentum"] == "❄️"]
-                    )
-
-                # Add value statistics if available
-                if "xP_per_price" in pos_players.columns:
-                    pos_stats["avg_value"] = pos_players["xP_per_price"].mean()
-                    pos_stats["best_value_player"] = pos_players.loc[
-                        pos_players["xP_per_price"].idxmax(), "web_name"
-                    ]
-
-                position_analysis[pos] = pos_stats
-
-            return Result(
-                value={
-                    "position_analysis": position_analysis,
-                    "analyzed_positions": positions_to_analyze,
-                    "total_players": len(players_with_xp),
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Position trend analysis failed: {str(e)}",
-                )
-            )
+        return {
+            "position_analysis": position_analysis,
+            "analyzed_positions": positions_to_analyze,
+            "total_players": len(players_with_xp),
+        }
 
     def get_statistical_insights(
         self,
         players_with_xp: pd.DataFrame,
         live_data_historical: Optional[pd.DataFrame] = None,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Generate statistical insights from player performance data.
 
         Args:
-            players_with_xp: DataFrame with current player data
+            players_with_xp: DataFrame with current player data - guaranteed clean
             live_data_historical: Optional historical performance data
 
         Returns:
-            Result containing statistical insights and metrics
+            Statistical insights and metrics
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for statistical analysis",
-                    )
-                )
+        insights = {}
 
-            insights = {}
+        # Basic distribution statistics
+        insights["xp_distribution"] = {
+            "mean": players_with_xp["xP"].mean(),
+            "median": players_with_xp["xP"].median(),
+            "std": players_with_xp["xP"].std(),
+            "min": players_with_xp["xP"].min(),
+            "max": players_with_xp["xP"].max(),
+        }
 
-            # Basic distribution statistics
-            insights["xp_distribution"] = {
-                "mean": players_with_xp["xP"].mean(),
-                "median": players_with_xp["xP"].median(),
-                "std": players_with_xp["xP"].std(),
-                "min": players_with_xp["xP"].min(),
-                "max": players_with_xp["xP"].max(),
+        # Price vs performance correlation
+        if "price" in players_with_xp.columns:
+            correlation = players_with_xp["xP"].corr(players_with_xp["price"])
+            insights["price_performance_correlation"] = correlation
+
+        # Form distribution if available
+        if "form_multiplier" in players_with_xp.columns:
+            insights["form_distribution"] = {
+                "mean": players_with_xp["form_multiplier"].mean(),
+                "hot_players": len(
+                    players_with_xp[
+                        players_with_xp["form_multiplier"]
+                        >= self.config["hot_threshold"]
+                    ]
+                ),
+                "cold_players": len(
+                    players_with_xp[
+                        players_with_xp["form_multiplier"]
+                        <= self.config["cold_threshold"]
+                    ]
+                ),
             }
 
-            # Price vs performance correlation
-            if "price" in players_with_xp.columns:
-                correlation = players_with_xp["xP"].corr(players_with_xp["price"])
-                insights["price_performance_correlation"] = correlation
+        # Minutes analysis if available
+        if "expected_minutes" in players_with_xp.columns:
+            insights["minutes_analysis"] = {
+                "avg_expected_minutes": players_with_xp["expected_minutes"].mean(),
+                "nailed_on_players": len(
+                    players_with_xp[players_with_xp["expected_minutes"] >= 75]
+                ),
+                "rotation_risk_players": len(
+                    players_with_xp[
+                        players_with_xp["expected_minutes"]
+                        < self.config["min_minutes_threshold"]
+                    ]
+                ),
+            }
 
-            # Form distribution if available
-            if "form_multiplier" in players_with_xp.columns:
-                insights["form_distribution"] = {
-                    "mean": players_with_xp["form_multiplier"].mean(),
-                    "hot_players": len(
-                        players_with_xp[
-                            players_with_xp["form_multiplier"]
-                            >= self.config["hot_threshold"]
-                        ]
-                    ),
-                    "cold_players": len(
-                        players_with_xp[
-                            players_with_xp["form_multiplier"]
-                            <= self.config["cold_threshold"]
-                        ]
-                    ),
-                }
-
-            # Minutes analysis if available
-            if "expected_minutes" in players_with_xp.columns:
-                insights["minutes_analysis"] = {
-                    "avg_expected_minutes": players_with_xp["expected_minutes"].mean(),
-                    "nailed_on_players": len(
-                        players_with_xp[players_with_xp["expected_minutes"] >= 75]
-                    ),
-                    "rotation_risk_players": len(
-                        players_with_xp[
-                            players_with_xp["expected_minutes"]
-                            < self.config["min_minutes_threshold"]
-                        ]
-                    ),
-                }
-
-            # Historical comparison if available
-            if live_data_historical is not None and not live_data_historical.empty:
-                historical_insights = self._generate_historical_insights(
-                    players_with_xp, live_data_historical
-                )
-                insights["historical_comparison"] = historical_insights
-
-            return Result(value=insights)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Statistical insights generation failed: {str(e)}",
-                )
+        # Historical comparison if available
+        if live_data_historical is not None and not live_data_historical.empty:
+            historical_insights = self._generate_historical_insights(
+                players_with_xp, live_data_historical
             )
+            insights["historical_comparison"] = historical_insights
+
+        return insights
 
     def _analyze_hot_cold_players(
         self, players_with_xp: pd.DataFrame
@@ -503,74 +406,55 @@ class PerformanceAnalyticsService:
         players_with_xp: pd.DataFrame,
         target_gameweek: int,
         live_data_historical: Optional[pd.DataFrame] = None,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Analyze performance trends for players.
 
         Args:
-            players_with_xp: DataFrame with current player data and XP calculations
+            players_with_xp: DataFrame with current player data and XP calculations - guaranteed clean
             target_gameweek: Target gameweek for analysis
             live_data_historical: Optional historical performance data
 
         Returns:
-            Result containing comprehensive performance trends analysis
+            Comprehensive performance trends analysis
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for trends analysis",
-                    )
-                )
+        # Get top performers
+        top_performers = players_with_xp.nlargest(15, "xP")
 
-            # Get top performers
-            top_performers = players_with_xp.nlargest(15, "xP")
+        # Generate performance insights
+        insights = {
+            "summary": f"Performance trends analysis for GW{target_gameweek}",
+            "total_players_analyzed": len(players_with_xp),
+            "top_performers_count": len(top_performers),
+            "analysis_gameweek": target_gameweek,
+        }
 
-            # Generate performance insights
-            insights = {
-                "summary": f"Performance trends analysis for GW{target_gameweek}",
-                "total_players_analyzed": len(players_with_xp),
-                "top_performers_count": len(top_performers),
-                "analysis_gameweek": target_gameweek,
+        # Add form-based insights if available
+        if "momentum" in players_with_xp.columns:
+            insights["momentum_summary"] = {
+                "hot_players": len(
+                    players_with_xp[players_with_xp["momentum"] == "🔥"]
+                ),
+                "trending_up": len(
+                    players_with_xp[players_with_xp["momentum"] == "📈"]
+                ),
+                "stable": len(players_with_xp[players_with_xp["momentum"] == "➡️"]),
+                "trending_down": len(
+                    players_with_xp[players_with_xp["momentum"] == "📉"]
+                ),
+                "cold_players": len(
+                    players_with_xp[players_with_xp["momentum"] == "❄️"]
+                ),
             }
 
-            # Add form-based insights if available
-            if "momentum" in players_with_xp.columns:
-                insights["momentum_summary"] = {
-                    "hot_players": len(
-                        players_with_xp[players_with_xp["momentum"] == "🔥"]
-                    ),
-                    "trending_up": len(
-                        players_with_xp[players_with_xp["momentum"] == "📈"]
-                    ),
-                    "stable": len(players_with_xp[players_with_xp["momentum"] == "➡️"]),
-                    "trending_down": len(
-                        players_with_xp[players_with_xp["momentum"] == "📉"]
-                    ),
-                    "cold_players": len(
-                        players_with_xp[players_with_xp["momentum"] == "❄️"]
-                    ),
-                }
-
-            # Add historical insights if available
-            if live_data_historical is not None and not live_data_historical.empty:
-                historical_insights = self._analyze_historical_trends(
-                    players_with_xp, live_data_historical
-                )
-                insights["historical_trends"] = historical_insights
-
-            return Result(
-                value={
-                    "top_performers": top_performers,
-                    "insights": insights,
-                    "analysis_period": f"GW{target_gameweek}",
-                }
+        # Add historical insights if available
+        if live_data_historical is not None and not live_data_historical.empty:
+            historical_insights = self._analyze_historical_trends(
+                players_with_xp, live_data_historical
             )
+            insights["historical_trends"] = historical_insights
 
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Performance trends analysis failed: {str(e)}",
-                )
-            )
+        return {
+            "top_performers": top_performers,
+            "insights": insights,
+            "analysis_period": f"GW{target_gameweek}",
+        }

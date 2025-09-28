@@ -3,7 +3,7 @@
 from typing import Dict, Any, List, Optional
 import pandas as pd
 
-from fpl_team_picker.domain.common.result import Result, DomainError, ErrorType
+from fpl_team_picker.domain.common.result import Result
 
 
 class FixtureAnalysisService:
@@ -38,58 +38,32 @@ class FixtureAnalysisService:
         Returns:
             Result containing fixture difficulty analysis
         """
-        try:
-            fixtures = gameweek_data.get("fixtures")
-            teams = gameweek_data.get("teams")
 
-            if fixtures is None or fixtures.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No fixtures data available",
-                    )
-                )
+        fixtures = gameweek_data.get("fixtures")
+        teams = gameweek_data.get("teams")
 
-            if teams is None or teams.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No teams data available",
-                    )
-                )
+        # Analyze upcoming fixtures
+        upcoming_fixtures = self._get_upcoming_fixtures(
+            fixtures, target_gameweek, gameweeks_ahead
+        )
 
-            # Analyze upcoming fixtures
-            upcoming_fixtures = self._get_upcoming_fixtures(
-                fixtures, target_gameweek, gameweeks_ahead
-            )
+        # Calculate difficulty ratings
+        difficulty_analysis = self._calculate_difficulty_ratings(
+            upcoming_fixtures, teams
+        )
 
-            # Calculate difficulty ratings
-            difficulty_analysis = self._calculate_difficulty_ratings(
-                upcoming_fixtures, teams
-            )
+        # Get team fixture outlook
+        team_outlook = self._analyze_team_outlook(
+            upcoming_fixtures, teams, gameweeks_ahead
+        )
 
-            # Get team fixture outlook
-            team_outlook = self._analyze_team_outlook(
-                upcoming_fixtures, teams, gameweeks_ahead
-            )
-
-            return Result(
-                value={
-                    "upcoming_fixtures": upcoming_fixtures,
-                    "difficulty_analysis": difficulty_analysis,
-                    "team_outlook": team_outlook,
-                    "analysis_period": f"GW{target_gameweek}-{target_gameweek + gameweeks_ahead - 1}",
-                    "gameweeks_analyzed": gameweeks_ahead,
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Fixture analysis failed: {str(e)}",
-                )
-            )
+        return {
+            "upcoming_fixtures": upcoming_fixtures,
+            "difficulty_analysis": difficulty_analysis,
+            "team_outlook": team_outlook,
+            "analysis_period": f"GW{target_gameweek}-{target_gameweek + gameweeks_ahead - 1}",
+            "gameweeks_analyzed": gameweeks_ahead,
+        }
 
     def _get_upcoming_fixtures(
         self, fixtures: pd.DataFrame, start_gw: int, num_gws: int

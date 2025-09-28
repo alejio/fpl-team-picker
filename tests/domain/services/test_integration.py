@@ -49,11 +49,7 @@ class TestDomainServicesIntegration:
     def test_data_orchestration_service_integration(self, data_service):
         """Test data orchestration service loads real data."""
         # Test with gameweek 1 (should always work)
-        result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-
-        assert result.is_success, f"Data loading failed: {result.error.message if result.error else 'Unknown error'}"
-
-        gameweek_data = result.value
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
         required_keys = ["players", "teams", "fixtures", "xg_rates", "gameweek_info", "target_gameweek"]
 
         for key in required_keys:
@@ -70,19 +66,12 @@ class TestDomainServicesIntegration:
     def test_expected_points_service_integration(self, data_service, xp_service):
         """Test expected points service with real data."""
         # Load gameweek data first
-        data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result.is_success
-
-        gameweek_data = data_result.value
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
 
         # Test rule-based model (more reliable than ML)
-        xp_result = xp_service.calculate_combined_results(
+        players_with_xp = xp_service.calculate_combined_results(
             gameweek_data, use_ml_model=False
         )
-
-        assert xp_result.is_success, f"XP calculation failed: {xp_result.error.message if xp_result.error else 'Unknown error'}"
-
-        players_with_xp = xp_result.value
         assert isinstance(players_with_xp, pd.DataFrame)
         assert len(players_with_xp) > 0
 
@@ -98,42 +87,31 @@ class TestDomainServicesIntegration:
     def test_transfer_optimization_service_basic(self, data_service, xp_service, transfer_service):
         """Test transfer optimization service basic functionality."""
         # Load data and calculate xP
-        data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result.is_success
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        assert isinstance(gameweek_data, dict)
 
-        gameweek_data = data_result.value
-
-        xp_result = xp_service.calculate_combined_results(
+        players_with_xp = xp_service.calculate_combined_results(
             gameweek_data, use_ml_model=False
         )
-        assert xp_result.is_success
-
-        players_with_xp = xp_result.value
+        assert not players_with_xp.empty
 
         # Test optimal team selection from full database (for testing/analysis)
-        starting_11_result = transfer_service.get_optimal_team_from_database(players_with_xp)
-        assert starting_11_result.is_success
-
-        starting_11 = starting_11_result.value
+        starting_11 = transfer_service.get_optimal_team_from_database(players_with_xp)
+        assert isinstance(starting_11, list)
         assert len(starting_11) == 11
 
         # Test captain recommendation from full database (for testing/analysis)
-        captain_result = transfer_service.get_captain_recommendation_from_database(players_with_xp)
-        assert captain_result.is_success
-
-        captain_recommendation = captain_result.value
+        captain_recommendation = transfer_service.get_captain_recommendation_from_database(players_with_xp)
+        assert isinstance(captain_recommendation, dict)
         assert "player_id" in captain_recommendation or "web_name" in captain_recommendation
 
     def test_service_error_handling(self, data_service, xp_service):
         """Test that services handle errors gracefully."""
-        # Test invalid gameweek
+        # Test invalid gameweek - should still return data but might be limited
         result = data_service.load_gameweek_data(target_gameweek=99, form_window=3)
-        # Should either succeed with empty data or fail gracefully
-        if result.is_failure:
-            assert result.error.message is not None
-            assert len(result.error.message) > 0
+        assert isinstance(result, dict)  # Should return data structure
 
-        # Test XP service with invalid data
+        # Test XP service with invalid data - should raise exceptions
         empty_data = {
             "players": pd.DataFrame(),
             "teams": pd.DataFrame(),
@@ -142,26 +120,26 @@ class TestDomainServicesIntegration:
             "target_gameweek": 1
         }
 
-        xp_result = xp_service.calculate_combined_results(empty_data, use_ml_model=False)
-        assert xp_result.is_failure
-        assert "empty" in xp_result.error.message.lower()
+        # Should raise KeyError due to missing columns in empty DataFrames
+        with pytest.raises(KeyError):
+            xp_service.calculate_combined_results(empty_data, use_ml_model=False)
 
     def test_data_validation_service(self, data_service):
         """Test data validation functionality."""
         # Load valid data
         data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result.is_success
+        assert data_result
 
-        gameweek_data = data_result.value
+        gameweek_data = data_result
 
         # Test validation passes for valid data
         validation_result = data_service.validate_gameweek_data(gameweek_data)
-        assert validation_result.is_success
+        assert validation_result
 
         # Test validation fails for invalid data
         invalid_data = {"players": pd.DataFrame()}  # Missing required keys
         validation_result = data_service.validate_gameweek_data(invalid_data)
-        assert validation_result.is_failure
+        assert validation_result is False
 
     def test_model_info_service(self, xp_service):
         """Test model information service."""
@@ -189,7 +167,7 @@ class TestDomainServicesIntegration:
             must_exclude_ids={3, 4},
             players_with_xp=mock_players
         )
-        assert result.is_success
+        assert result
 
         # Test conflicting constraints
         result = transfer_service.validate_optimization_constraints(
@@ -197,7 +175,7 @@ class TestDomainServicesIntegration:
             must_exclude_ids={2, 3},  # Player 2 in both
             players_with_xp=mock_players
         )
-        assert result.is_failure
+        assert result is False
         assert "conflict" in result.error.message.lower()
 
         # Test missing players
@@ -206,5 +184,5 @@ class TestDomainServicesIntegration:
             must_exclude_ids={3},
             players_with_xp=mock_players
         )
-        assert result.is_failure
+        assert result is False
         assert "not found" in result.error.message.lower()

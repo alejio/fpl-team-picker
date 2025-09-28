@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.15.5"
+__generated_with = "0.16.2"
 app = marimo.App(width="medium")
 
 
@@ -63,41 +63,41 @@ def _(mo):
                 deadline_formatted = deadline_time.strftime("%A, %B %d at %I:%M %p")
 
                 deadline_content = f"""
-<div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-<div style="font-size: 1.1em; margin-bottom: 4px;">
-<strong>{urgency_emoji} {event_name} Transfer Deadline</strong>
-</div>
-<div style="font-size: 1.3em; color: {urgency_color}; font-weight: bold; margin-bottom: 4px;">
-{time_remaining} remaining
-</div>
-<div style="font-size: 0.9em; color: #cbd5e1;">
-{deadline_formatted}
-</div>
-</div>
-"""
+    <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+    <div style="font-size: 1.1em; margin-bottom: 4px;">
+    <strong>{urgency_emoji} {event_name} Transfer Deadline</strong>
+    </div>
+    <div style="font-size: 1.3em; color: {urgency_color}; font-weight: bold; margin-bottom: 4px;">
+    {time_remaining} remaining
+    </div>
+    <div style="font-size: 0.9em; color: #cbd5e1;">
+    {deadline_formatted}
+    </div>
+    </div>
+    """
                 deadline_display = mo.md(deadline_content)
             else:
                 deadline_display = mo.md("""
-<div style="background: #374151; color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center;">
-<strong>📋 No upcoming transfer deadlines found</strong>
-</div>
-""")
+    <div style="background: #374151; color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center;">
+    <strong>📋 No upcoming transfer deadlines found</strong>
+    </div>
+    """)
         else:
             deadline_display = mo.md("""
-<div style="background: #374151; color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center;">
-<strong>📋 Could not fetch deadline information</strong>
-</div>
-""")
+    <div style="background: #374151; color: white; padding: 16px; margin: 12px 0; border-radius: 8px; text-align: center;">
+    <strong>📋 Could not fetch deadline information</strong>
+    </div>
+    """)
     except Exception as e:
         deadline_display = mo.md(f"""
-<div style="background: #fee2e2; border: 1px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px; text-align: center;">
-🔴 <strong>Unable to load transfer deadline</strong><br/>
-<small>Error: {str(e)}</small>
-</div>
-""")
+    <div style="background: #fee2e2; border: 1px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px; text-align: center;">
+    🔴 <strong>Unable to load transfer deadline</strong><br/>
+    <small>Error: {str(e)}</small>
+    </div>
+    """)
 
     deadline_display
-    return (deadline_display,)
+    return
 
 
 @app.cell
@@ -127,7 +127,7 @@ def _(mo):
         # Get status info
         status = freshness["overall_freshness"]["status"]
         age_desc = freshness["data_age_description"]
-        recommendations = freshness["recommendations"]
+        _recommendations_freshness = freshness["recommendations"]
 
         # Color coding based on status
         if status == "very_fresh":
@@ -145,54 +145,56 @@ def _(mo):
 
         # Create freshness display
         freshness_content = f"""
-## 📊 Data Status
+    ## 📊 Data Status
 
-<div style="background: #f8fafc; border-left: 4px solid {status_color}; padding: 12px; margin: 8px 0; border-radius: 4px;">
-<strong>{status_emoji} {age_desc}</strong><br/>
-<small style="color: #64748b;">
-Players: {freshness["raw_data_freshness"]["raw_players_bootstrap"]["age_description"]} |
-Events: {freshness["raw_data_freshness"]["raw_events_bootstrap"]["age_description"]} |
-Fixtures: {freshness["raw_data_freshness"]["raw_fixtures"]["age_description"]}
-</small>
-</div>
-"""
+    <div style="background: #f8fafc; border-left: 4px solid {status_color}; padding: 12px; margin: 8px 0; border-radius: 4px;">
+    <strong>{status_emoji} {age_desc}</strong><br/>
+    <small style="color: #64748b;">
+    Players: {freshness["raw_data_freshness"]["raw_players_bootstrap"]["age_description"]} |
+    Events: {freshness["raw_data_freshness"]["raw_events_bootstrap"]["age_description"]} |
+    Fixtures: {freshness["raw_data_freshness"]["raw_fixtures"]["age_description"]}
+    </small>
+    </div>
+    """
 
         # Add recommendations if data is stale
         if status in ["stale", "very_stale"]:
-            rec_text = "<br/>".join([f"• {rec}" for rec in recommendations])
+            rec_text = "<br/>".join([f"• {rec}" for rec in _recommendations_freshness])
             freshness_content += f"""
-<div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 0.9em;">
-<strong>💡 Recommendations:</strong><br/>
-{rec_text}
-</div>
-"""
+    <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 8px; margin: 4px 0; border-radius: 4px; font-size: 0.9em;">
+    <strong>💡 Recommendations:</strong><br/>
+    {rec_text}
+    </div>
+    """
 
         data_freshness_display = mo.md(freshness_content)
 
     except Exception as e:
         data_freshness_display = mo.md(f"""
-## 📊 Data Status
-<div style="background: #fee2e2; border-left: 4px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px;">
-🔴 <strong>Unable to check data freshness</strong><br/>
-<small>Error: {str(e)}</small>
-</div>
-""")
+    ## 📊 Data Status
+    <div style="background: #fee2e2; border-left: 4px solid #ef4444; padding: 12px; margin: 8px 0; border-radius: 4px;">
+    🔴 <strong>Unable to check data freshness</strong><br/>
+    <small>Error: {str(e)}</small>
+    </div>
+    """)
 
     data_freshness_display
-    return (data_freshness_display,)
+    return
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""
-## 1️⃣ Configure Gameweek
+    mo.md(
+        r"""
+    ## 1️⃣ Configure Gameweek
 
-**Start by selecting your target gameweek for optimization.**
+    **Start by selecting your target gameweek for optimization.**
 
-The system will load your team from the previous gameweek and analyze transfer opportunities for the upcoming fixtures.
+    The system will load your team from the previous gameweek and analyze transfer opportunities for the upcoming fixtures.
 
----
-""")
+    ---
+    """
+    )
     return
 
 
@@ -205,14 +207,10 @@ def _(mo):
         )
 
         _orchestration_service = _DataOrchestrationService()
-        current_gw_result = _orchestration_service.get_current_gameweek_info()
-
-        if current_gw_result.is_success:
-            current_gw = current_gw_result.value.get("current_gameweek", 1)
-            next_gw = current_gw_result.value.get("next_gameweek", current_gw + 1)
-            default_gw = next_gw
-        else:
-            default_gw = 1
+        current_gw_info = _orchestration_service.get_current_gameweek_info()
+        current_gw = current_gw_info.get("current_gameweek", 1)
+        next_gw = current_gw_info.get("next_gameweek", current_gw + 1)
+        default_gw = next_gw
     except Exception:
         default_gw = 1
 
@@ -242,40 +240,26 @@ def _(gameweek_input, mo):
             )
 
             _orchestration_service_2 = _DataOrchestrationService2()
-            data_result = _orchestration_service_2.load_gameweek_data(
+            gameweek_data = _orchestration_service_2.load_gameweek_data(
                 gameweek_input.value
             )
-
-            if data_result.is_success:
-                gameweek_data = data_result.value
-                status_display = mo.vstack(
-                    [
-                        mo.md("### 📊 Data Loading Status"),
-                        mo.md(
-                            f"✅ **Gameweek {gameweek_input.value} data loaded successfully**"
-                        ),
-                        mo.md(
-                            f"- **Players:** {len(gameweek_data.get('players', []))}"
-                        ),
-                        mo.md(f"- **Teams:** {len(gameweek_data.get('teams', []))}"),
-                        mo.md(
-                            f"- **Fixtures:** {len(gameweek_data.get('fixtures', []))}"
-                        ),
-                        mo.md(
-                            f"- **Current Squad:** {'✅ Found' if gameweek_data.get('current_squad') is not None else '❌ Not found'}"
-                        ),
-                        mo.md(
-                            f"- **Manager Team:** {'✅ Found' if gameweek_data.get('manager_team') is not None else '❌ Not found'}"
-                        ),
-                    ]
-                )
-            else:
-                _error_msg = (
-                    data_result.error.message if data_result.error else "Unknown error"
-                )
-                status_display = mo.md(
-                    f"❌ **Failed to load gameweek data:** {_error_msg}"
-                )
+            status_display = mo.vstack(
+                [
+                    mo.md("### 📊 Data Loading Status"),
+                    mo.md(
+                        f"✅ **Gameweek {gameweek_input.value} data loaded successfully**"
+                    ),
+                    mo.md(f"- **Players:** {len(gameweek_data.get('players', []))}"),
+                    mo.md(f"- **Teams:** {len(gameweek_data.get('teams', []))}"),
+                    mo.md(f"- **Fixtures:** {len(gameweek_data.get('fixtures', []))}"),
+                    mo.md(
+                        f"- **Current Squad:** {'✅ Found' if gameweek_data.get('current_squad') is not None else '❌ Not found'}"
+                    ),
+                    mo.md(
+                        f"- **Manager Team:** {'✅ Found' if gameweek_data.get('manager_team') is not None else '❌ Not found'}"
+                    ),
+                ]
+            )
         except Exception as e:
             status_display = mo.md(f"❌ **Error loading data:** {str(e)}")
     else:
@@ -292,7 +276,7 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, gameweek_input, mo, pd):
+def _(gameweek_data, gameweek_input, mo):
     # Team strength analysis - simplified direct display
     team_strength_analysis = None
 
@@ -313,7 +297,7 @@ def _(gameweek_data, gameweek_input, mo, pd):
                     display_cols.append(team_col)
 
             if not display_cols and len(teams_data.columns) > 0:
-                display_cols = list(teams_data.columns)[:5]
+                display_cols = list(teams_data.columns)
 
             if display_cols:
                 team_strength_analysis = mo.vstack(
@@ -367,55 +351,49 @@ def _(gameweek_data, mo, pd):
                     gameweek_data, use_ml_model=config.xp_model.use_ml_model
                 )
 
-                if xp_result.is_success:
-                    players_with_xp = xp_result.value
-                    model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
-                    xp_status = (
-                        f"✅ {model_info['type']} Model: {len(players_with_xp)} players"
-                    )
+                players_with_xp = xp_result
+                model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
+                xp_status = (
+                    f"✅ {model_info['type']} Model: {len(players_with_xp)} players"
+                )
 
-                    # Simple display of top players
-                    available_cols = []
-                    for xp_col in [
-                        "web_name",
-                        "position",
-                        "name",
-                        "price",
-                        "xP",
-                        "xP_5gw",
-                    ]:
-                        if xp_col in players_with_xp.columns:
-                            available_cols.append(xp_col)
+                # Simple display of top players
+                available_cols = []
+                for xp_col in [
+                    "web_name",
+                    "position",
+                    "name",
+                    "price",
+                    "xP",
+                    "xP_5gw",
+                ]:
+                    if xp_col in players_with_xp.columns:
+                        available_cols.append(xp_col)
 
-                    if available_cols and not players_with_xp.empty:
-                        top_players = players_with_xp.nlargest(20, "xP")[available_cols]
-                        xp_results_display = mo.vstack(
-                            [
-                                mo.md("**🎯 Top Expected Points (Current GW):**"),
-                                mo.ui.table(top_players.round(2), page_size=10),
-                                mo.md(
-                                    f"**📊 Summary:** {len(players_with_xp)} players analyzed | Average XP: {players_with_xp['xP'].mean():.2f}"
-                                ),
-                            ]
-                        )
-                    else:
-                        xp_results_display = mo.md(
-                            "❌ No player data available for display"
-                        )
-
-                    xp_section_display = mo.vstack(
+                if available_cols and not players_with_xp.empty:
+                    top_players = players_with_xp.nlargest(20, "xP")[available_cols]
+                    xp_results_display = mo.vstack(
                         [
-                            mo.md("### 🎯 Expected Points"),
-                            mo.md(f"**Status:** {xp_status}"),
-                            mo.md(f"**Model Type:** {model_info['type']}"),
-                            xp_results_display,
+                            mo.md("**🎯 Top Expected Points (Current GW):**"),
+                            mo.ui.table(top_players.round(2), page_size=10),
+                            mo.md(
+                                f"**📊 Summary:** {len(players_with_xp)} players analyzed | Average XP: {players_with_xp['xP'].mean():.2f}"
+                            ),
                         ]
                     )
                 else:
-                    xp_status = f"❌ Error: {xp_result.error.message}"
-                    xp_section_display = mo.md(
-                        f"### 🎯 Expected Points\n**Status:** {xp_status}"
+                    xp_results_display = mo.md(
+                        "❌ No player data available for display"
                     )
+
+                xp_section_display = mo.vstack(
+                    [
+                        mo.md("### 🎯 Expected Points"),
+                        mo.md(f"**Status:** {xp_status}"),
+                        mo.md(f"**Model Type:** {model_info['type']}"),
+                        xp_results_display,
+                    ]
+                )
             except Exception as e:
                 xp_status = f"❌ Service error: {str(e)}"
                 xp_section_display = mo.md(
@@ -433,7 +411,6 @@ def _(gameweek_data, mo, pd):
             f"### 🎯 Expected Points\n❌ Critical error: {str(critical_error)}"
         )
         xp_section_display
-
     return (players_with_xp,)
 
 
@@ -444,7 +421,7 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, players_with_xp):
+def _(gameweek_data, mo, pd, players_with_xp):
     # Form Analytics using PerformanceAnalyticsService
     form_analytics_display = None
 
@@ -455,51 +432,66 @@ def _(gameweek_data, mo, players_with_xp):
             _analytics_service_form = PerformanceAnalyticsService()
 
             # Get form analytics
-            form_result = _analytics_service_form.analyze_player_form(
-                players_with_xp, gameweek_data["target_gameweek"]
+            form_data = _analytics_service_form.analyze_player_form(
+                players_with_xp, gameweek_data.get("live_data_historical")
             )
+            form_analysis = form_data.get("form_analysis", {})
+            hot_players = form_analysis.get("hot_players", [])
+            cold_players = form_analysis.get("cold_players", [])
 
-            if form_result.is_success:
-                form_data = form_result.value
-                hot_players = form_data.get("hot_players", [])
-                cold_players = form_data.get("cold_players", [])
-
-                form_analytics_display = mo.vstack(
-                    [
-                        mo.md("### 📈 Form Analytics Dashboard"),
-                        mo.md(
-                            f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
-                        ),
-                        mo.md("**🔥 Hot Players (Excellent Recent Form):**"),
+            form_analytics_display = mo.vstack(
+                [
+                    mo.md("### 📈 Form Analytics Dashboard"),
+                    mo.md(
+                        f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
+                    ),
+                    mo.md("**🔥 Hot Players (Excellent Recent Form):**"),
+                    (
                         mo.ui.table(
-                            hot_players[
-                                ["web_name", "position", "xP", "form", "momentum"]
-                            ].round(2),
+                            pd.DataFrame(hot_players)[
+                                ["web_name", "position", "xP"]
+                            ].round(2)
+                            if hot_players
+                            and isinstance(hot_players, list)
+                            and len(hot_players) > 0
+                            else pd.DataFrame(
+                                {
+                                    "Player": ["No hot players found"],
+                                    "Position": [""],
+                                    "xP": [0],
+                                }
+                            ),
                             page_size=8,
                         )
-                        if not hot_players.empty
-                        else mo.md("No hot players identified"),
-                        mo.md("**🧊 Cold Players (Poor Recent Form):**"),
+                        if hot_players
+                        else mo.md("No hot players identified")
+                    ),
+                    mo.md("**🧊 Cold Players (Poor Recent Form):**"),
+                    (
                         mo.ui.table(
-                            cold_players[
-                                ["web_name", "position", "xP", "form", "momentum"]
-                            ].round(2),
+                            pd.DataFrame(cold_players)[
+                                ["web_name", "position", "xP"]
+                            ].round(2)
+                            if cold_players
+                            and isinstance(cold_players, list)
+                            and len(cold_players) > 0
+                            else pd.DataFrame(
+                                {
+                                    "Player": ["No cold players found"],
+                                    "Position": [""],
+                                    "xP": [0],
+                                }
+                            ),
                             page_size=8,
                         )
-                        if not cold_players.empty
-                        else mo.md("No cold players identified"),
-                        mo.md(
-                            f"**📊 Form Summary:** {form_data.get('summary', 'Analysis complete')}"
-                        ),
-                    ]
-                )
-            else:
-                _error_msg_form = (
-                    form_result.error.message if form_result.error else "Unknown error"
-                )
-                form_analytics_display = mo.md(
-                    f"❌ **Form analytics failed:** {_error_msg_form}"
-                )
+                        if cold_players
+                        else mo.md("No cold players identified")
+                    ),
+                    mo.md(
+                        f"**📊 Form Summary:** Analysis complete - {len(hot_players)} hot players, {len(cold_players)} cold players identified"
+                    ),
+                ]
+            )
         except Exception as e:
             form_analytics_display = mo.md(f"❌ **Form analytics error:** {str(e)}")
     else:
@@ -561,11 +553,10 @@ def _(gameweek_data, mo, pd, players_with_xp):
 
                 squad_result = _squad_service.get_starting_eleven(user_squad_with_xp)
 
-                if squad_result and squad_result.is_success:
-                    squad_data = squad_result.value
-                    starting_11 = squad_data["starting_11"]
-                    formation = squad_data["formation"]
-                    total_xp = squad_data["total_xp"]
+                if squad_result:
+                    starting_11 = squad_result["starting_11"]
+                    formation = squad_result["formation"]
+                    total_xp = squad_result["total_xp"]
 
                     starting_11_df = pd.DataFrame(starting_11)
 
@@ -582,13 +573,10 @@ def _(gameweek_data, mo, pd, players_with_xp):
                         ]
                     )
                 else:
-                    squad_error = (
-                        squad_result.error.message
-                        if squad_result and squad_result.error
-                        else "Unknown error"
-                    )
                     squad_display_components.append(
-                        mo.md(f"❌ Squad analysis failed: {squad_error}")
+                        mo.md(
+                            "❌ Squad analysis failed: No starting eleven data available"
+                        )
                     )
             except Exception as e:
                 squad_display_components.append(
@@ -660,95 +648,66 @@ def _(mo):
 @app.cell
 def _(gameweek_data, mo, optimization_horizon_toggle, pd, players_with_xp):
     # Transfer optimization using TransferOptimizationService
-    transfer_optimization_display = None
+    transfer_section_display = None
 
     if not players_with_xp.empty and gameweek_data:
-        _current_squad_transfer = gameweek_data.get("current_squad")
+        try:
+            from fpl_team_picker.domain.services import TransferOptimizationService
 
-        if _current_squad_transfer is not None and not _current_squad_transfer.empty:
-            try:
-                from fpl_team_picker.domain.services import TransferOptimizationService
+            _transfer_service = TransferOptimizationService()
 
-                transfer_service = TransferOptimizationService()
-
-                # Use optimization horizon from toggle
+            # Get current squad if available
+            current_squad = gameweek_data.get("current_squad")
+            if current_squad is not None and not current_squad.empty:
+                # Use 5GW horizon based on toggle
                 use_5gw = optimization_horizon_toggle.value == "5gw"
 
-                # Optimize transfers using the service
-                optimization_result = transfer_service.optimize_transfers_simple(
-                    gameweek_data, _current_squad_transfer, use_5gw_horizon=use_5gw
+                # Get transfer optimization
+                transfer_results = _transfer_service.optimize_transfers_simple(
+                    players_with_xp=players_with_xp,
+                    current_squad=current_squad,
+                    gameweek_data=gameweek_data,
+                    use_5gw_horizon=use_5gw,
                 )
 
-                if optimization_result.is_success:
-                    opt_data = optimization_result.value
-                    _recommendations_transfer = opt_data.get(
-                        "transfer_recommendations", []
-                    )
+                # Display transfer recommendations
+                _recommendations_transfer = transfer_results.get(
+                    "transfer_recommendations", []
+                )
+                horizon = transfer_results.get("optimization_horizon", "1gw")
 
-                    if _recommendations_transfer:
-                        best_scenario = _recommendations_transfer[
-                            0
-                        ]  # Top recommendation
-
-                        transfer_optimization_display = mo.vstack(
-                            [
-                                mo.md("### 🔄 Transfer Optimization Results"),
-                                mo.md(
-                                    f"**Horizon:** {optimization_horizon_toggle.value.upper()} | **Analysis Complete**"
-                                ),
-                                mo.md("**💡 Recommended Transfer Strategy:**"),
-                                mo.md(
-                                    f"- **Transfers:** {best_scenario.get('transfer_count', 0)}"
-                                ),
-                                mo.md(
-                                    f"- **Net XP Gain:** {best_scenario.get('net_xp_gain', 0):.2f}"
-                                ),
-                                mo.md(
-                                    f"- **Total Cost:** £{best_scenario.get('total_cost', 0):.1f}m"
-                                ),
-                                mo.md("**📊 All Transfer Scenarios:**"),
-                                mo.ui.table(
-                                    pd.DataFrame(_recommendations_transfer)[
-                                        [
-                                            "transfer_count",
-                                            "net_xp_gain",
-                                            "total_cost",
-                                            "summary",
-                                        ]
-                                    ].round(2),
-                                    page_size=5,
-                                )
-                                if len(_recommendations_transfer) > 1
-                                else mo.md("Single scenario analyzed"),
-                            ]
-                        )
-                    else:
-                        transfer_optimization_display = mo.md(
-                            "✅ **No beneficial transfers identified** - current squad is optimal"
-                        )
+                if _recommendations_transfer:
+                    _rec_transfer = _recommendations_transfer[
+                        0
+                    ]  # Get first recommendation
+                    transfer_content = f"""
+**Optimization Horizon:** {horizon.upper()}
+**Transfer Count:** {_rec_transfer.get("transfer_count", 0)}
+**Expected Gain:** {_rec_transfer.get("net_xp_gain", 0.0):.2f} xP
+**Total Cost:** {_rec_transfer.get("total_cost", 0.0):.1f}m
+**Summary:** {_rec_transfer.get("summary", "No description")}
+"""
                 else:
-                    _error_msg_transfer = (
-                        optimization_result.error.message
-                        if optimization_result.error
-                        else "Unknown error"
-                    )
-                    transfer_optimization_display = mo.md(
-                        f"❌ **Transfer optimization failed:** {_error_msg_transfer}"
-                    )
-            except Exception as e:
-                transfer_optimization_display = mo.md(
-                    f"❌ **Transfer optimization error:** {str(e)}"
+                    transfer_content = f"**Optimization Horizon:** {horizon.upper()}\n**Status:** No beneficial transfers found"
+
+                transfer_section_display = mo.md(
+                    f"### 🔄 Transfer Optimization\n{transfer_content}"
                 )
-        else:
-            transfer_optimization_display = mo.md(
-                "⚠️ **No current squad data found** - load gameweek data first"
+            else:
+                transfer_section_display = mo.md(
+                    "### 🔄 Transfer Optimization\n**Status:** Current squad not available - cannot optimize transfers"
+                )
+
+        except Exception as e:
+            transfer_section_display = mo.md(
+                f"### 🔄 Transfer Optimization\n❌ Transfer optimization failed: {str(e)}"
             )
     else:
-        transfer_optimization_display = mo.md(
-            "⚠️ **Calculate expected points first to enable transfer optimization**"
+        transfer_section_display = mo.md(
+            "### 🔄 Transfer Optimization\n**Status:** Waiting for expected points data"
         )
 
-    transfer_optimization_display
+    transfer_section_display
     return
 
 
@@ -758,100 +717,40 @@ def _(gameweek_data, mo, pd, players_with_xp):
     captain_selection_display = None
 
     if not players_with_xp.empty and gameweek_data:
-        _current_squad_captain = gameweek_data.get("current_squad")
+        try:
+            from fpl_team_picker.domain.services import SquadManagementService
 
-        if _current_squad_captain is not None and not _current_squad_captain.empty:
-            try:
-                from fpl_team_picker.domain.services import (
-                    SquadManagementService as _SquadManagementService2,
-                )
+            squad_service = SquadManagementService()
 
-                _squad_service_captain = _SquadManagementService2()
+            # Get top players as potential captains
+            top_captains = players_with_xp.nlargest(10, "xP")
+            captain_data = squad_service.get_captain_recommendation_from_database(
+                players_with_xp
+            )
 
-                # Get starting eleven first
-                starting_eleven_result = _squad_service_captain.get_starting_eleven(
-                    _current_squad_captain.merge(
-                        players_with_xp[["player_id", "xP"]], on="player_id", how="left"
-                    )
-                )
+            captain_selection_display = mo.vstack(
+                [
+                    mo.md("### 🎖️ Captain Selection"),
+                    mo.md(
+                        f"**Recommended Captain:** {captain_data['web_name']} ({captain_data['position']})"
+                    ),
+                    mo.md(f"**Expected Points:** {captain_data['xP']:.2f}"),
+                    mo.md(f"**Reasoning:** {captain_data['reason']}"),
+                    mo.md("**Top Captain Options:**"),
+                    mo.ui.table(
+                        top_captains[["web_name", "position", "xP", "price"]].round(2),
+                        page_size=5,
+                    ),
+                ]
+            )
 
-                if starting_eleven_result.is_success:
-                    starting_data = starting_eleven_result.value
-                    _starting_11_captain = starting_data["starting_11"]
-
-                    # Get captain recommendations
-                    captain_result = _squad_service_captain.select_captain(
-                        _starting_11_captain, gameweek_data["target_gameweek"]
-                    )
-
-                    if captain_result.is_success:
-                        captain_data = captain_result.value
-                        _recommendations_captain = captain_data.get(
-                            "recommendations", []
-                        )
-
-                        if _recommendations_captain:
-                            top_captains = _recommendations_captain[
-                                :3
-                            ]  # Top 3 recommendations
-
-                            captain_selection_display = mo.vstack(
-                                [
-                                    mo.md("## 9️⃣ Captain Selection"),
-                                    mo.md(
-                                        "**Risk-adjusted captaincy recommendations based on expected points analysis**"
-                                    ),
-                                    mo.md("**🎯 Top Captain Recommendations:**"),
-                                    mo.ui.table(
-                                        pd.DataFrame(top_captains)[
-                                            [
-                                                "web_name",
-                                                "position",
-                                                "xP",
-                                                "double_xP",
-                                                "captain_score",
-                                            ]
-                                        ].round(2),
-                                        page_size=3,
-                                    ),
-                                    mo.md(
-                                        f"**📊 Analysis:** {captain_data.get('summary', 'Captain selection complete')}"
-                                    ),
-                                ]
-                            )
-                        else:
-                            captain_selection_display = mo.md(
-                                "## 9️⃣ Captain Selection\n❌ **No captain recommendations available**"
-                            )
-                    else:
-                        _error_msg_captain = (
-                            captain_result.error.message
-                            if captain_result.error
-                            else "Unknown error"
-                        )
-                        captain_selection_display = mo.md(
-                            f"## 9️⃣ Captain Selection\n❌ **Captain selection failed:** {_error_msg_captain}"
-                        )
-                else:
-                    _error_msg_starting = (
-                        starting_eleven_result.error.message
-                        if starting_eleven_result.error
-                        else "Unknown error"
-                    )
-                    captain_selection_display = mo.md(
-                        f"## 9️⃣ Captain Selection\n❌ **Starting eleven selection failed:** {_error_msg_starting}"
-                    )
-            except Exception as e:
-                captain_selection_display = mo.md(
-                    f"## 9️⃣ Captain Selection\n❌ **Captain selection error:** {str(e)}"
-                )
-        else:
+        except Exception as e:
             captain_selection_display = mo.md(
-                "## 9️⃣ Captain Selection\n⚠️ **No current squad data found** - load gameweek data first"
+                f"❌ **Captain selection error:** {str(e)}"
             )
     else:
         captain_selection_display = mo.md(
-            "## 9️⃣ Captain Selection\n⚠️ **Calculate expected points first to enable captain selection**"
+            "⚠️ **Calculate expected points first to enable captain selection**"
         )
 
     captain_selection_display
@@ -908,59 +807,49 @@ def _(gameweek_data, mo, players_with_xp):
                     gameweek_data["target_gameweek"],
                 )
 
-                if assessment_result.is_success:
-                    assessment_data = assessment_result.value
-                    _recommendations_chip = assessment_data.get("recommendations", {})
-                    summary = assessment_data.get("summary", "No summary available")
+                assessment_data = assessment_result
+                _recommendations_chip = assessment_data.get("recommendations", {})
+                summary = assessment_data.get("summary", "No summary available")
 
-                    if _recommendations_chip:
-                        chip_displays = []
+                if _recommendations_chip:
+                    chip_displays = []
+                    chip_displays.extend(
+                        [
+                            mo.md("### 🔟 Chip Recommendations"),
+                            mo.md(
+                                "**Smart chip timing recommendations with traffic light system**"
+                            ),
+                            mo.md(f"**📊 Summary:** {summary}"),
+                            mo.md("---"),
+                        ]
+                    )
+
+                    # Display each chip recommendation
+                    for chip_name, rec in _recommendations_chip.items():
+                        _chip_status = rec.get("status", "🟡 UNKNOWN")
+                        reasoning = rec.get("reasoning", "No reasoning provided")
+                        chip_display_name = chip_name.replace("_", " ").title()
+
                         chip_displays.extend(
                             [
-                                mo.md("### 🔟 Chip Recommendations"),
-                                mo.md(
-                                    "**Smart chip timing recommendations with traffic light system**"
-                                ),
-                                mo.md(f"**📊 Summary:** {summary}"),
+                                mo.md(f"### {_chip_status} {chip_display_name}"),
+                                mo.md(f"**Reasoning:** {reasoning}"),
                                 mo.md("---"),
                             ]
                         )
 
-                        # Display each chip recommendation
-                        for chip_name, rec in _recommendations_chip.items():
-                            _chip_status = rec.get("status", "🟡 UNKNOWN")
-                            reasoning = rec.get("reasoning", "No reasoning provided")
-                            chip_display_name = chip_name.replace("_", " ").title()
-
-                            chip_displays.extend(
-                                [
-                                    mo.md(f"### {_chip_status} {chip_display_name}"),
-                                    mo.md(f"**Reasoning:** {reasoning}"),
-                                    mo.md("---"),
-                                ]
-                            )
-
-                        chip_assessment_display = mo.vstack(chip_displays)
-                    else:
-                        chip_assessment_display = mo.md(
-                            "### 🔟 Chip Recommendations\n✅ **No chip recommendations available**"
-                        )
+                    chip_assessment_display = mo.vstack(chip_displays)
                 else:
-                    _error_msg_chip = (
-                        assessment_result.error.message
-                        if assessment_result.error
-                        else "Unknown error"
-                    )
                     chip_assessment_display = mo.md(
-                        f"### 🔟 Chip Recommendations\n❌ **Chip assessment failed:** {_error_msg_chip}"
+                        "### 🔟 Chip Recommendations\n✅ **No chip recommendations available**"
                     )
             else:
                 chip_assessment_display = mo.md(
-                    "### 🔟 Chip Recommendations\n⚠️ **No current squad data found** - load gameweek data first"
+                    "### 🔟 Chip Recommendations\n❌ **Chip assessment failed:** Current squad not available"
                 )
         else:
             chip_assessment_display = mo.md(
-                "### 🔟 Chip Recommendations\n⚠️ **Calculate expected points first to enable chip assessment**"
+                "### 🔟 Chip Recommendations\n⚠️ **No current squad data found** - load gameweek data first"
             )
 
     except Exception as e:
@@ -988,7 +877,6 @@ def _(gameweek_data, mo, players_with_xp):
 
         trends_display = None
         player_opts = []
-        attr_opts = []
 
         if not players_with_xp.empty and gameweek_data:
             _analytics_service_trends = _PerformanceAnalyticsService()
@@ -998,67 +886,49 @@ def _(gameweek_data, mo, players_with_xp):
                 players_with_xp, gameweek_data["target_gameweek"]
             )
 
-            if trends_result.is_success:
-                trends_data = trends_result.value
-                top_performers = trends_data.get(
-                    "top_performers", players_with_xp.nlargest(15, "xP")
-                )
-                performance_insights = trends_data.get("insights", {})
+            trends_data = trends_result
+            top_performers = trends_data.get(
+                "top_performers", players_with_xp.nlargest(15, "xP")
+            )
+            performance_insights = trends_data.get("insights", {})
 
-                # Create player options for dropdown
-                if not players_with_xp.empty:
-                    for _, player in players_with_xp.iterrows():
-                        if "web_name" in player and "player_id" in player:
-                            player_opts.append(
-                                {
-                                    "label": f"{player['web_name']} ({player.get('position', 'N/A')})",
-                                    "value": player["player_id"],
-                                }
-                            )
+            # Create player options for dropdown
+            if not players_with_xp.empty:
+                for _, player in players_with_xp.iterrows():
+                    if "web_name" in player and "player_id" in player:
+                        player_opts.append(
+                            {
+                                "label": f"{player['web_name']} ({player.get('position', 'N/A')})",
+                                "value": player["player_id"],
+                            }
+                        )
 
-                # Attribute options for trends
-                attr_opts = [
-                    {"label": "Expected Points (xP)", "value": "xP"},
-                    {"label": "5GW Expected Points", "value": "xP_5gw"},
-                    {"label": "Form", "value": "form"},
-                    {"label": "Price", "value": "price"},
+            # Attribute options for trends
+
+            trends_display = mo.vstack(
+                [
+                    mo.md("### 📈 Player Performance Trends"),
+                    mo.md(
+                        f"**Analysis:** Performance trends analysis for GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
+                    ),
+                    mo.md("**🎯 Top Performers (by Expected Points):**"),
+                    mo.ui.table(
+                        top_performers[["web_name", "position", "xP", "price"]].round(2)
+                        if all(
+                            col in top_performers.columns
+                            for col in ["web_name", "position", "xP", "price"]
+                        )
+                        else top_performers.head(15),
+                        page_size=10,
+                    ),
+                    mo.md(
+                        f"**📊 Performance Insights:** {performance_insights.get('summary', 'Trends analysis complete using domain services')}"
+                    ),
+                    mo.md(
+                        "*Track how players' attributes change over gameweeks using the performance analytics service*"
+                    ),
                 ]
-
-                trends_display = mo.vstack(
-                    [
-                        mo.md("### 📈 Player Performance Trends"),
-                        mo.md(
-                            f"**Analysis:** Performance trends analysis for GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
-                        ),
-                        mo.md("**🎯 Top Performers (by Expected Points):**"),
-                        mo.ui.table(
-                            top_performers[
-                                ["web_name", "position", "xP", "price"]
-                            ].round(2)
-                            if all(
-                                col in top_performers.columns
-                                for col in ["web_name", "position", "xP", "price"]
-                            )
-                            else top_performers.head(15),
-                            page_size=10,
-                        ),
-                        mo.md(
-                            f"**📊 Performance Insights:** {performance_insights.get('summary', 'Trends analysis complete using domain services')}"
-                        ),
-                        mo.md(
-                            "*Track how players' attributes change over gameweeks using the performance analytics service*"
-                        ),
-                    ]
-                )
-            else:
-                _error_msg = (
-                    trends_result.error.message
-                    if trends_result.error
-                    else "Unknown error"
-                )
-                trends_display = mo.md(
-                    f"### 📈 Player Performance Trends\n❌ **Trends analysis failed:** {_error_msg}"
-                )
+            )
         else:
             trends_display = mo.md(
                 "### 📈 Player Performance Trends\n⚠️ **Calculate expected points first to enable trends analysis**"
@@ -1069,10 +939,9 @@ def _(gameweek_data, mo, players_with_xp):
             f"### 📈 Player Performance Trends\n❌ **Error:** {str(e)}"
         )
         player_opts = []
-        attr_opts = []
 
     trends_display
-    return player_opts, attr_opts
+    return
 
 
 @app.cell
@@ -1082,7 +951,7 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, players_with_xp, pd):
+def _(gameweek_data, mo, pd, players_with_xp):
     # Fixture Difficulty Analysis using domain services
     try:
         from fpl_team_picker.domain.services import FixtureAnalysisService
@@ -1097,77 +966,67 @@ def _(gameweek_data, mo, players_with_xp, pd):
                 gameweek_data, gameweek_data["target_gameweek"], gameweeks_ahead=5
             )
 
-            if fixture_result.is_success:
-                fixture_data = fixture_result.value
-                upcoming_fixtures = fixture_data.get("upcoming_fixtures", [])
-                difficulty_analysis = fixture_data.get("difficulty_analysis", {})
-                team_outlook = fixture_data.get("team_outlook", {})
+            fixture_data = fixture_result
+            upcoming_fixtures = fixture_data.get("upcoming_fixtures", [])
+            difficulty_analysis = fixture_data.get("difficulty_analysis", {})
+            team_outlook = fixture_data.get("team_outlook", {})
 
-                fixture_components = [
-                    mo.md("### 🎯 Fixture Difficulty Analysis"),
-                    mo.md(
-                        f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Using Domain Services Architecture**"
-                    ),
+            fixture_components = [
+                mo.md("### 🎯 Fixture Difficulty Analysis"),
+                mo.md(
+                    f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Using Domain Services Architecture**"
+                ),
+            ]
+
+            if upcoming_fixtures:
+                fixtures_df = pd.DataFrame(upcoming_fixtures)
+                _display_cols_fixture = [
+                    col
+                    for col in [
+                        "home_team",
+                        "away_team",
+                        "kickoff_time",
+                        "difficulty_home",
+                        "difficulty_away",
+                    ]
+                    if col in fixtures_df.columns
                 ]
 
-                if upcoming_fixtures:
-                    fixtures_df = pd.DataFrame(upcoming_fixtures)
-                    _display_cols_fixture = [
-                        col
-                        for col in [
-                            "home_team",
-                            "away_team",
-                            "kickoff_time",
-                            "difficulty_home",
-                            "difficulty_away",
-                        ]
-                        if col in fixtures_df.columns
+                fixture_components.extend(
+                    [
+                        mo.md("**📅 Upcoming Fixtures with Difficulty Ratings:**"),
+                        mo.ui.table(
+                            fixtures_df[_display_cols_fixture].head(10),
+                            page_size=10,
+                        )
+                        if _display_cols_fixture
+                        else mo.md("Fixture data processing..."),
                     ]
-
-                    fixture_components.extend(
-                        [
-                            mo.md("**📅 Upcoming Fixtures with Difficulty Ratings:**"),
-                            mo.ui.table(
-                                fixtures_df[_display_cols_fixture].head(10),
-                                page_size=10,
-                            )
-                            if _display_cols_fixture
-                            else mo.md("Fixture data processing..."),
-                        ]
-                    )
-
-                if team_outlook:
-                    fixture_components.extend(
-                        [
-                            mo.md("**🏆 Team Fixture Outlook (5GW):**"),
-                            mo.md(
-                                f"- **Easiest Fixtures:** {', '.join(team_outlook.get('easiest_teams', ['N/A'])[:3])}"
-                            ),
-                            mo.md(
-                                f"- **Hardest Fixtures:** {', '.join(team_outlook.get('hardest_teams', ['N/A'])[:3])}"
-                            ),
-                            mo.md(
-                                f"- **Double Gameweeks:** {', '.join(team_outlook.get('double_gameweeks', ['None']))}"
-                            ),
-                        ]
-                    )
-
-                fixture_components.append(
-                    mo.md(
-                        f"**📊 Summary:** {difficulty_analysis.get('summary', 'Fixture difficulty analysis complete using domain services')}"
-                    )
                 )
 
-                fixture_display = mo.vstack(fixture_components)
-            else:
-                _error_msg = (
-                    fixture_result.error.message
-                    if fixture_result.error
-                    else "Unknown error"
+            if team_outlook:
+                fixture_components.extend(
+                    [
+                        mo.md("**🏆 Team Fixture Outlook (5GW):**"),
+                        mo.md(
+                            f"- **Easiest Fixtures:** {', '.join(team_outlook.get('easiest_teams', ['N/A'])[:3])}"
+                        ),
+                        mo.md(
+                            f"- **Hardest Fixtures:** {', '.join(team_outlook.get('hardest_teams', ['N/A'])[:3])}"
+                        ),
+                        mo.md(
+                            f"- **Double Gameweeks:** {', '.join(team_outlook.get('double_gameweeks', ['None']))}"
+                        ),
+                    ]
                 )
-                fixture_display = mo.md(
-                    f"### 🎯 Fixture Difficulty Analysis\n❌ **Fixture analysis failed:** {_error_msg}"
+
+            fixture_components.append(
+                mo.md(
+                    f"**📊 Summary:** {difficulty_analysis.get('summary', 'Fixture difficulty analysis complete using domain services')}"
                 )
+            )
+
+            fixture_display = mo.vstack(fixture_components)
         else:
             fixture_display = mo.md(
                 "### 🎯 Fixture Difficulty Analysis\n⚠️ **Calculate expected points first to enable fixture analysis**"
@@ -1179,45 +1038,6 @@ def _(gameweek_data, mo, players_with_xp, pd):
         )
 
     fixture_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-## 🏗️ Clean Architecture Summary
-
-This notebook demonstrates **clean architecture principles** in FPL analysis:
-
-### 🎯 **Domain Services Used:**
-- **DataOrchestrationService**: Centralized data loading and coordination
-- **ExpectedPointsService**: ML and rule-based XP calculations
-- **SquadManagementService**: Starting XI, captain selection, budget analysis
-- **PerformanceAnalyticsService**: Form analytics and hot/cold player identification
-- **TransferOptimizationService**: Strategic transfer planning and budget analysis
-- **ChipAssessmentService**: Smart chip timing recommendations
-- **VisualizationService**: Player trends and fixture difficulty analysis
-
-### 🏛️ **Architecture Benefits:**
-- **Separation of Concerns**: Business logic isolated from UI
-- **Testability**: Each service can be unit tested independently
-- **Reusability**: Services can be used across different interfaces
-- **Maintainability**: Changes to business logic don't affect UI
-
-### 🔄 **Data Flow:**
-1. **Data Orchestration** → Load and prepare FPL data
-2. **Expected Points** → Calculate player predictions (ML/Rule-based)
-3. **Form Analytics** → Identify hot/cold players and performance trends
-4. **Squad Management** → Analyze current team and starting XI
-5. **Transfer Optimization** → Smart 0-3 transfer recommendations
-6. **Captain Selection** → Risk-adjusted captaincy analysis
-7. **Chip Assessment** → Strategic chip timing recommendations
-8. **Visualizations** → Player trends and fixture difficulty analysis
-
----
-
-**🎉 Clean architecture enables maintainable, testable, and scalable FPL analysis!**
-""")
     return
 
 

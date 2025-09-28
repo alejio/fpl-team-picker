@@ -1,7 +1,7 @@
 """Result types for frontend-agnostic error handling."""
 
 from enum import Enum
-from typing import Dict, Generic, Optional, TypeVar
+from typing import Dict, Optional, TypeVar, Generic
 
 from pydantic import BaseModel, Field
 

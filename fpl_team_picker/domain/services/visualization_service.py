@@ -3,8 +3,6 @@
 from typing import Dict, Any, Optional
 import pandas as pd
 
-from fpl_team_picker.domain.common.result import Result, DomainError, ErrorType
-
 
 class VisualizationService:
     """Service for creating FPL visualizations and analytics displays."""
@@ -22,296 +20,144 @@ class VisualizationService:
         players_with_xp: pd.DataFrame,
         target_gameweek: int,
         display_format: str = "comprehensive",
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Create expected points results display.
 
         Args:
-            players_with_xp: DataFrame with calculated XP data
+            players_with_xp: DataFrame with calculated XP data - guaranteed clean
             target_gameweek: Target gameweek number
             display_format: Format type ('comprehensive', 'summary', 'table_only')
 
         Returns:
-            Result containing display data and metadata
+            Display data and metadata
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No expected points data available",
-                    )
-                )
+        # Generate display data
+        display_data = self._prepare_xp_display_data(players_with_xp, target_gameweek)
 
-            # Validate required columns
-            required_columns = {"web_name", "position", "xP"}
-            missing_columns = required_columns - set(players_with_xp.columns)
-            if missing_columns:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Players data missing required columns: {missing_columns}",
-                    )
-                )
+        # Generate analysis insights
+        insights = self._generate_xp_insights(players_with_xp)
 
-            # Generate display data
-            display_data = self._prepare_xp_display_data(
-                players_with_xp, target_gameweek
-            )
-
-            # Generate analysis insights
-            insights = self._generate_xp_insights(players_with_xp)
-
-            return Result(
-                value={
-                    "display_data": display_data,
-                    "insights": insights,
-                    "target_gameweek": target_gameweek,
-                    "total_players": len(players_with_xp),
-                    "display_format": display_format,
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Expected points display creation failed: {str(e)}",
-                )
-            )
+        return {
+            "display_data": display_data,
+            "insights": insights,
+            "target_gameweek": target_gameweek,
+            "total_players": len(players_with_xp),
+            "display_format": display_format,
+        }
 
     def create_form_analytics_display(
         self,
         players_with_xp: pd.DataFrame,
         analysis_type: str = "comprehensive",
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Create form analytics display with hot/cold player detection.
 
         Args:
-            players_with_xp: DataFrame with form and XP data
+            players_with_xp: DataFrame with form and XP data - guaranteed clean
             analysis_type: Type of analysis ('comprehensive', 'hot_cold', 'value_focus')
 
         Returns:
-            Result containing form analytics data
+            Form analytics data
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for form analysis",
-                    )
-                )
+        # Check for form data availability
+        form_columns = ["momentum", "form_multiplier"]
+        available_form_columns = [
+            col for col in form_columns if col in players_with_xp.columns
+        ]
 
-            # Check for form data availability
-            form_columns = ["momentum", "form_multiplier"]
-            available_form_columns = [
-                col for col in form_columns if col in players_with_xp.columns
-            ]
+        # Generate form analytics
+        form_analytics = self._analyze_player_form(players_with_xp, analysis_type)
 
-            if not available_form_columns:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No form data available - momentum or form_multiplier columns required",
-                    )
-                )
-
-            # Generate form analytics
-            form_analytics = self._analyze_player_form(players_with_xp, analysis_type)
-
-            return Result(
-                value={
-                    "form_analytics": form_analytics,
-                    "analysis_type": analysis_type,
-                    "available_form_columns": available_form_columns,
-                    "total_players": len(players_with_xp),
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Form analytics creation failed: {str(e)}",
-                )
-            )
+        return {
+            "form_analytics": form_analytics,
+            "analysis_type": analysis_type,
+            "available_form_columns": available_form_columns,
+            "total_players": len(players_with_xp),
+        }
 
     def create_fixture_difficulty_display(
         self,
         gameweek_data: Dict[str, Any],
         start_gameweek: int,
         num_gameweeks: int = 5,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Create fixture difficulty visualization.
 
         Args:
-            gameweek_data: Complete gameweek data including fixtures and teams
+            gameweek_data: Complete gameweek data including fixtures and teams - guaranteed clean
             start_gameweek: Starting gameweek for analysis
             num_gameweeks: Number of gameweeks to analyze
 
         Returns:
-            Result containing fixture difficulty data
+            Fixture difficulty data
         """
-        try:
-            # Validate inputs
-            if start_gameweek < 1 or start_gameweek > 38:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Invalid start gameweek: {start_gameweek}. Must be between 1 and 38",
-                    )
-                )
+        # Extract required data - trust it's clean
+        fixtures = gameweek_data["fixtures"]
+        teams = gameweek_data["teams"]
 
-            if num_gameweeks < 1 or num_gameweeks > 10:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Invalid number of gameweeks: {num_gameweeks}. Must be between 1 and 10",
-                    )
-                )
+        # Generate fixture difficulty analysis
+        fixture_analysis = self._analyze_fixture_difficulty(
+            fixtures, teams, start_gameweek, num_gameweeks
+        )
 
-            # Extract required data
-            fixtures = gameweek_data.get("fixtures")
-            teams = gameweek_data.get("teams")
-
-            if fixtures is None or fixtures.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No fixtures data available",
-                    )
-                )
-
-            if teams is None or teams.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No teams data available",
-                    )
-                )
-
-            # Generate fixture difficulty analysis
-            fixture_analysis = self._analyze_fixture_difficulty(
-                fixtures, teams, start_gameweek, num_gameweeks
-            )
-
-            return Result(
-                value={
-                    "fixture_analysis": fixture_analysis,
-                    "start_gameweek": start_gameweek,
-                    "num_gameweeks": num_gameweeks,
-                    "end_gameweek": min(start_gameweek + num_gameweeks - 1, 38),
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Fixture difficulty display creation failed: {str(e)}",
-                )
-            )
+        return {
+            "fixture_analysis": fixture_analysis,
+            "start_gameweek": start_gameweek,
+            "num_gameweeks": num_gameweeks,
+            "end_gameweek": min(start_gameweek + num_gameweeks - 1, 38),
+        }
 
     def create_team_strength_display(
         self,
         gameweek_data: Dict[str, Any],
         target_gameweek: int,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Create team strength visualization.
 
         Args:
-            gameweek_data: Complete gameweek data
+            gameweek_data: Complete gameweek data - guaranteed clean
             target_gameweek: Target gameweek for strength analysis
 
         Returns:
-            Result containing team strength data
+            Team strength data
         """
-        try:
-            # Extract teams data
-            teams = gameweek_data.get("teams")
-            if teams is None or teams.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No teams data available",
-                    )
-                )
+        # Extract teams data - trust it's clean
+        teams = gameweek_data["teams"]
 
-            # Generate team strength analysis
-            team_strength_data = self._analyze_team_strength(teams, target_gameweek)
+        # Generate team strength analysis
+        team_strength_data = self._analyze_team_strength(teams, target_gameweek)
 
-            return Result(
-                value={
-                    "team_strength_data": team_strength_data,
-                    "target_gameweek": target_gameweek,
-                    "total_teams": len(teams),
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Team strength display creation failed: {str(e)}",
-                )
-            )
+        return {
+            "team_strength_data": team_strength_data,
+            "target_gameweek": target_gameweek,
+            "total_teams": len(teams),
+        }
 
     def create_player_trends_display(
         self,
         players_with_xp: pd.DataFrame,
         trend_type: str = "performance",
         top_n: int = 20,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Create player trends visualization.
 
         Args:
-            players_with_xp: DataFrame with player performance data
+            players_with_xp: DataFrame with player performance data - guaranteed clean
             trend_type: Type of trend analysis ('performance', 'value', 'form')
             top_n: Number of top players to include
 
         Returns:
-            Result containing player trends data
+            Player trends data
         """
-        try:
-            if players_with_xp.empty:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No player data available for trends analysis",
-                    )
-                )
+        # Generate trends analysis
+        trends_data = self._analyze_player_trends(players_with_xp, trend_type, top_n)
 
-            # Validate trend type
-            valid_trend_types = ["performance", "value", "form"]
-            if trend_type not in valid_trend_types:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Invalid trend type: {trend_type}. Must be one of {valid_trend_types}",
-                    )
-                )
-
-            # Generate trends analysis
-            trends_data = self._analyze_player_trends(
-                players_with_xp, trend_type, top_n
-            )
-
-            return Result(
-                value={
-                    "trends_data": trends_data,
-                    "trend_type": trend_type,
-                    "top_n": top_n,
-                    "total_players": len(players_with_xp),
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Player trends display creation failed: {str(e)}",
-                )
-            )
+        return {
+            "trends_data": trends_data,
+            "trend_type": trend_type,
+            "top_n": top_n,
+            "total_players": len(players_with_xp),
+        }
 
     def _prepare_xp_display_data(
         self, players_with_xp: pd.DataFrame, target_gameweek: int

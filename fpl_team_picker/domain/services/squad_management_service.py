@@ -3,8 +3,6 @@
 from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 
-from fpl_team_picker.domain.common.result import Result, DomainError, ErrorType
-
 
 class SquadManagementService:
     """Service for squad management operations including starting XI and captain selection."""
@@ -21,174 +19,97 @@ class SquadManagementService:
         self,
         squad: pd.DataFrame,
         xp_column: str = "xP",
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Get optimal starting eleven from squad with formation analysis.
 
         Args:
-            squad: DataFrame containing squad players (15 for manager squad, any size for analysis)
+            squad: DataFrame containing squad players - guaranteed clean
             xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_5gw' for strategic)
 
         Returns:
-            Result containing starting eleven data with formation and total XP
+            Starting eleven data with formation and total XP - guaranteed valid
         """
-        try:
-            # Validate input
-            if len(squad) < 11:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Squad must contain at least 11 players, got {len(squad)}",
-                    )
-                )
+        # Filter out unavailable players
+        available_squad = squad.copy()
+        if "status" in available_squad.columns:
+            unavailable_mask = available_squad["status"].isin(["i", "s", "u"])
+            if unavailable_mask.any():
+                available_squad = available_squad[~unavailable_mask]
 
-            required_columns = {"player_id", "position", "web_name"}
-            missing_columns = required_columns - set(squad.columns)
-            if missing_columns:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Squad missing required columns: {missing_columns}",
-                    )
-                )
+        # Determine XP column to use
+        sort_col = self._get_xp_column(available_squad, xp_column)
 
-            # Filter out unavailable players
-            available_squad = squad.copy()
-            if "status" in available_squad.columns:
-                unavailable_mask = available_squad["status"].isin(["i", "s", "u"])
-                if unavailable_mask.any():
-                    available_squad = available_squad[~unavailable_mask]
+        # Get optimal formation and players
+        starting_11, formation_name, total_xp = self._select_optimal_formation(
+            available_squad, sort_col
+        )
 
-            if len(available_squad) < 11:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Only {len(available_squad)} available players (need at least 11)",
-                    )
-                )
-
-            # Determine XP column to use
-            sort_col = self._get_xp_column(available_squad, xp_column)
-
-            # Get optimal formation and players
-            starting_11, formation_name, total_xp = self._select_optimal_formation(
-                available_squad, sort_col
-            )
-
-            if not starting_11:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.CALCULATION_ERROR,
-                        message="Failed to select starting eleven",
-                    )
-                )
-
-            return Result(
-                value={
-                    "starting_11": starting_11,
-                    "formation": formation_name,
-                    "total_xp": total_xp,
-                    "xp_column_used": sort_col,
-                }
-            )
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Starting eleven selection failed: {str(e)}",
-                )
-            )
+        return {
+            "starting_11": starting_11,
+            "formation": formation_name,
+            "total_xp": total_xp,
+            "xp_column_used": sort_col,
+        }
 
     def get_captain_recommendation(
         self,
         players: List[Dict[str, Any]],
         include_risk_analysis: bool = True,
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Get captain recommendation from a list of players.
 
         Args:
-            players: List of player dictionaries (starting XI or full squad)
+            players: List of player dictionaries - guaranteed clean
             include_risk_analysis: Whether to include detailed risk analysis
 
         Returns:
-            Result containing captain recommendation with analysis
+            Captain recommendation with analysis - guaranteed valid
         """
-        try:
-            if not players:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="No players provided for captain selection",
-                    )
-                )
+        # Sort by expected points (prefer xP, fallback to other XP columns)
+        xp_key = self._get_player_xp_key(players[0])
+        captain_candidates = sorted(
+            players, key=lambda p: p.get(xp_key, 0), reverse=True
+        )
 
-            # Validate required fields
-            required_fields = {"player_id", "web_name", "position"}
-            for player in players:
-                missing_fields = required_fields - set(player.keys())
-                if missing_fields:
-                    return Result(
-                        error=DomainError(
-                            error_type=ErrorType.VALIDATION_ERROR,
-                            message=f"Player missing required fields: {missing_fields}",
-                        )
-                    )
+        best_captain = captain_candidates[0]
+        vice_captain = (
+            captain_candidates[1] if len(captain_candidates) > 1 else best_captain
+        )
 
-            # Sort by expected points (prefer xP, fallback to other XP columns)
-            xp_key = self._get_player_xp_key(players[0])
-            captain_candidates = sorted(
-                players, key=lambda p: p.get(xp_key, 0), reverse=True
-            )
+        captain_xp = best_captain.get(xp_key, 0)
+        vice_xp = vice_captain.get(xp_key, 0)
 
-            best_captain = captain_candidates[0]
-            vice_captain = (
-                captain_candidates[1] if len(captain_candidates) > 1 else best_captain
-            )
+        recommendation = {
+            "captain": {
+                "player_id": best_captain["player_id"],
+                "web_name": best_captain["web_name"],
+                "position": best_captain["position"],
+                "xp": captain_xp,
+                "captain_points": captain_xp * 2,
+            },
+            "vice_captain": {
+                "player_id": vice_captain["player_id"],
+                "web_name": vice_captain["web_name"],
+                "position": vice_captain["position"],
+                "xp": vice_xp,
+                "captain_points": vice_xp * 2,
+            },
+            "advantage": (captain_xp - vice_xp) * 2,
+            "xp_column_used": xp_key,
+        }
 
-            captain_xp = best_captain.get(xp_key, 0)
-            vice_xp = vice_captain.get(xp_key, 0)
+        # Add risk analysis if requested
+        if include_risk_analysis:
+            recommendation["risk_analysis"] = self._analyze_captain_risk(best_captain)
 
-            recommendation = {
-                "captain": {
-                    "player_id": best_captain["player_id"],
-                    "web_name": best_captain["web_name"],
-                    "position": best_captain["position"],
-                    "xp": captain_xp,
-                    "captain_points": captain_xp * 2,
-                },
-                "vice_captain": {
-                    "player_id": vice_captain["player_id"],
-                    "web_name": vice_captain["web_name"],
-                    "position": vice_captain["position"],
-                    "xp": vice_xp,
-                    "captain_points": vice_xp * 2,
-                },
-                "advantage": (captain_xp - vice_xp) * 2,
-                "xp_column_used": xp_key,
-            }
-
-            # Add risk analysis if requested
-            if include_risk_analysis:
-                recommendation["risk_analysis"] = self._analyze_captain_risk(
-                    best_captain
-                )
-
-            return Result(value=recommendation)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Captain selection failed: {str(e)}",
-                )
-            )
+        return recommendation
 
     def get_bench_players(
         self,
         squad: pd.DataFrame,
         starting_11: List[Dict[str, Any]],
         xp_column: str = "xP",
-    ) -> Result[List[Dict[str, Any]]]:
+    ) -> List[Dict[str, Any]]:
         """Get bench players from squad excluding starting XI.
 
         Args:
@@ -199,41 +120,25 @@ class SquadManagementService:
         Returns:
             Result containing ordered bench players
         """
-        try:
-            if len(squad) < 15:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Squad must contain at least 15 players for bench, got {len(squad)}",
-                    )
-                )
 
-            # Get starting XI player IDs
-            starting_ids = {player["player_id"] for player in starting_11}
+        # Get starting XI player IDs
+        starting_ids = {player["player_id"] for player in starting_11}
 
-            # Filter bench players
-            bench_squad = squad[~squad["player_id"].isin(starting_ids)].copy()
+        # Filter bench players
+        bench_squad = squad[~squad["player_id"].isin(starting_ids)].copy()
 
-            # Determine XP column and sort
-            sort_col = self._get_xp_column(bench_squad, xp_column)
-            bench_squad = bench_squad.sort_values(sort_col, ascending=False)
+        # Determine XP column and sort
+        sort_col = self._get_xp_column(bench_squad, xp_column)
+        bench_squad = bench_squad.sort_values(sort_col, ascending=False)
 
-            # Convert to list and limit to 4 players
-            bench_players = bench_squad.head(4).to_dict("records")
+        # Convert to list and limit to 4 players
+        bench_players = bench_squad.head(4).to_dict("records")
 
-            return Result(value=bench_players)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Bench selection failed: {str(e)}",
-                )
-            )
+        return bench_players
 
     def analyze_budget_situation(
         self, squad: pd.DataFrame, team_data: Dict[str, Any]
-    ) -> Result[Dict[str, Any]]:
+    ) -> Dict[str, Any]:
         """Analyze budget situation including sellable player values.
 
         Args:
@@ -243,50 +148,15 @@ class SquadManagementService:
         Returns:
             Result containing budget analysis
         """
-        try:
-            # Validate inputs
-            if "bank_balance" not in team_data:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message="Team data missing bank_balance field",
-                    )
-                )
 
-            required_columns = {"player_id", "web_name", "price"}
-            missing_columns = required_columns - set(squad.columns)
-            if missing_columns:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.VALIDATION_ERROR,
-                        message=f"Squad missing required columns: {missing_columns}",
-                    )
-                )
+        # Use existing budget calculation from optimizer
+        from fpl_team_picker.optimization.optimizer import (
+            calculate_total_budget_pool,
+        )
 
-            # Use existing budget calculation from optimizer
-            from fpl_team_picker.optimization.optimizer import (
-                calculate_total_budget_pool,
-            )
+        budget_analysis = calculate_total_budget_pool(squad, team_data)
 
-            budget_analysis = calculate_total_budget_pool(squad, team_data)
-
-            if budget_analysis is None:
-                return Result(
-                    error=DomainError(
-                        error_type=ErrorType.CALCULATION_ERROR,
-                        message="Budget analysis returned no result",
-                    )
-                )
-
-            return Result(value=budget_analysis)
-
-        except Exception as e:
-            return Result(
-                error=DomainError(
-                    error_type=ErrorType.CALCULATION_ERROR,
-                    message=f"Budget analysis failed: {str(e)}",
-                )
-            )
+        return budget_analysis
 
     def _get_xp_column(self, squad: pd.DataFrame, preferred_column: str) -> str:
         """Determine which XP column to use based on availability."""

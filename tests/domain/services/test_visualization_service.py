@@ -36,16 +36,10 @@ class TestVisualizationServiceIntegration:
         xp_service = ExpectedPointsService()
 
         # Load gameweek data
-        data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result.is_success
-
-        gameweek_data = data_result.value
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
 
         # Calculate XP
-        xp_result = xp_service.calculate_combined_results(gameweek_data, use_ml_model=False)
-        assert xp_result.is_success
-
-        players_with_xp = xp_result.value
+        players_with_xp = xp_service.calculate_combined_results(gameweek_data, use_ml_model=False)
         gameweek_data["players_with_xp"] = players_with_xp
 
         return gameweek_data
