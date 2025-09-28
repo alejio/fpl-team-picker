@@ -384,6 +384,75 @@ def _(gameweek_data, mo, players_with_xp):
 
 @app.cell
 def _(mo):
+    mo.md(r"""## 5️⃣ Player Performance Trends""")
+    return
+
+
+@app.cell
+def _(gameweek_data, mo, players_with_xp):
+    # Player Performance Trends using visualization function
+    if not players_with_xp.empty and gameweek_data:
+        from fpl_team_picker.visualization.charts import (
+            create_player_trends_visualization,
+        )
+
+        player_opts, attr_opts, trends_data = create_player_trends_visualization(
+            players_with_xp
+        )
+
+        trends_display = mo.vstack(
+            [
+                mo.md("### 📈 Player Performance Trends"),
+                mo.md("*Track how players' attributes change over gameweeks*"),
+                mo.md("**🎯 Top Performers (by Expected Points):**"),
+                mo.ui.table(
+                    players_with_xp.nlargest(15, "xP")[
+                        ["web_name", "position", "xP", "price"]
+                    ].round(2),
+                    page_size=10,
+                ),
+                mo.md(
+                    "*Use the performance analytics service for detailed historical trends*"
+                ),
+            ]
+        )
+    else:
+        trends_display = mo.md(
+            "### 📈 Player Performance Trends\n⚠️ **Calculate expected points first to enable trends analysis**"
+        )
+
+    trends_display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""## 6️⃣ Fixture Difficulty Analysis""")
+    return
+
+
+@app.cell
+def _(gameweek_data, gameweek_input, mo):
+    # Fixture Difficulty Analysis using visualization function
+    if gameweek_input.value:
+        from fpl_team_picker.visualization.charts import (
+            create_fixture_difficulty_visualization,
+        )
+
+        fixture_analysis = create_fixture_difficulty_visualization(
+            gameweek_input.value, 5, mo
+        )
+    else:
+        fixture_analysis = mo.md(
+            "Select target gameweek to see fixture difficulty analysis"
+        )
+
+    fixture_analysis
+    return
+
+
+@app.cell
+def _(mo):
     mo.md(
         r"""
     ## 7️⃣ Squad Management Dashboard
@@ -591,6 +660,12 @@ def _(gameweek_data, mo, optimization_horizon_toggle, players_with_xp):
 
 
 @app.cell
+def _(mo):
+    mo.md(r"""## 9️⃣ Captain Selection""")
+    return
+
+
+@app.cell
 def _(gameweek_data, mo, players_with_xp):
     # Captain Selection using SquadManagementService
     captain_selection_display = None
@@ -737,186 +812,6 @@ def _(gameweek_data, mo, players_with_xp):
         )
 
     chip_assessment_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""## 5️⃣ Player Performance Trends""")
-    return
-
-
-@app.cell
-def _(gameweek_data, mo, players_with_xp):
-    # Player Performance Trends using domain services
-    try:
-        from fpl_team_picker.domain.services import (
-            PerformanceAnalyticsService as _PerformanceAnalyticsService,
-        )
-
-        trends_display = None
-        player_opts = []
-
-        if not players_with_xp.empty and gameweek_data:
-            _analytics_service_trends = _PerformanceAnalyticsService()
-
-            # Get performance trends using domain service
-            trends_result = _analytics_service_trends.analyze_performance_trends(
-                players_with_xp, gameweek_data["target_gameweek"]
-            )
-
-            trends_data = trends_result
-            top_performers = trends_data.get(
-                "top_performers", players_with_xp.nlargest(15, "xP")
-            )
-            performance_insights = trends_data.get("insights", {})
-
-            # Create player options for dropdown
-            if not players_with_xp.empty:
-                for _, player in players_with_xp.iterrows():
-                    if "web_name" in player and "player_id" in player:
-                        player_opts.append(
-                            {
-                                "label": f"{player['web_name']} ({player.get('position', 'N/A')})",
-                                "value": player["player_id"],
-                            }
-                        )
-
-            # Attribute options for trends
-
-            trends_display = mo.vstack(
-                [
-                    mo.md("### 📈 Player Performance Trends"),
-                    mo.md(
-                        f"**Analysis:** Performance trends analysis for GW{gameweek_data['target_gameweek']} | **Players Analyzed:** {len(players_with_xp)}"
-                    ),
-                    mo.md("**🎯 Top Performers (by Expected Points):**"),
-                    mo.ui.table(
-                        top_performers[["web_name", "position", "xP", "price"]].round(2)
-                        if all(
-                            col in top_performers.columns
-                            for col in ["web_name", "position", "xP", "price"]
-                        )
-                        else top_performers.head(15),
-                        page_size=10,
-                    ),
-                    mo.md(
-                        f"**📊 Performance Insights:** {performance_insights.get('summary', 'Trends analysis complete using domain services')}"
-                    ),
-                    mo.md(
-                        "*Track how players' attributes change over gameweeks using the performance analytics service*"
-                    ),
-                ]
-            )
-        else:
-            trends_display = mo.md(
-                "### 📈 Player Performance Trends\n⚠️ **Calculate expected points first to enable trends analysis**"
-            )
-
-    except Exception as e:
-        trends_display = mo.md(
-            f"### 📈 Player Performance Trends\n❌ **Error:** {str(e)}"
-        )
-        player_opts = []
-
-    trends_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""## 6️⃣ Fixture Difficulty Analysis""")
-    return
-
-
-@app.cell
-def _(gameweek_data, mo, pd, players_with_xp):
-    # Fixture Difficulty Analysis using domain services
-    try:
-        from fpl_team_picker.domain.services import FixtureAnalysisService
-
-        fixture_display = None
-
-        if not players_with_xp.empty and gameweek_data:
-            fixture_service = FixtureAnalysisService()
-
-            # Analyze fixture difficulty using domain service
-            fixture_result = fixture_service.analyze_fixture_difficulty(
-                gameweek_data, gameweek_data["target_gameweek"], gameweeks_ahead=5
-            )
-
-            fixture_data = fixture_result
-            upcoming_fixtures = fixture_data.get("upcoming_fixtures", [])
-            difficulty_analysis = fixture_data.get("difficulty_analysis", {})
-            team_outlook = fixture_data.get("team_outlook", {})
-
-            fixture_components = [
-                mo.md("### 🎯 Fixture Difficulty Analysis"),
-                mo.md(
-                    f"**Analysis Period:** GW{gameweek_data['target_gameweek']} | **Using Domain Services Architecture**"
-                ),
-            ]
-
-            if upcoming_fixtures:
-                fixtures_df = pd.DataFrame(upcoming_fixtures)
-                _display_cols_fixture = [
-                    col
-                    for col in [
-                        "home_team",
-                        "away_team",
-                        "kickoff_time",
-                        "difficulty_home",
-                        "difficulty_away",
-                    ]
-                    if col in fixtures_df.columns
-                ]
-
-                fixture_components.extend(
-                    [
-                        mo.md("**📅 Upcoming Fixtures with Difficulty Ratings:**"),
-                        mo.ui.table(
-                            fixtures_df[_display_cols_fixture].head(10),
-                            page_size=10,
-                        )
-                        if _display_cols_fixture
-                        else mo.md("Fixture data processing..."),
-                    ]
-                )
-
-            if team_outlook:
-                fixture_components.extend(
-                    [
-                        mo.md("**🏆 Team Fixture Outlook (5GW):**"),
-                        mo.md(
-                            f"- **Easiest Fixtures:** {', '.join(team_outlook.get('easiest_teams', ['N/A'])[:3])}"
-                        ),
-                        mo.md(
-                            f"- **Hardest Fixtures:** {', '.join(team_outlook.get('hardest_teams', ['N/A'])[:3])}"
-                        ),
-                        mo.md(
-                            f"- **Double Gameweeks:** {', '.join(team_outlook.get('double_gameweeks', ['None']))}"
-                        ),
-                    ]
-                )
-
-            fixture_components.append(
-                mo.md(
-                    f"**📊 Summary:** {difficulty_analysis.get('summary', 'Fixture difficulty analysis complete using domain services')}"
-                )
-            )
-
-            fixture_display = mo.vstack(fixture_components)
-        else:
-            fixture_display = mo.md(
-                "### 🎯 Fixture Difficulty Analysis\n⚠️ **Calculate expected points first to enable fixture analysis**"
-            )
-
-    except Exception as e:
-        fixture_display = mo.md(
-            f"### 🎯 Fixture Difficulty Analysis\n❌ **Error:** {str(e)}"
-        )
-
-    fixture_display
     return
 
 
