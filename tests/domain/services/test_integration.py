@@ -127,19 +127,17 @@ class TestDomainServicesIntegration:
     def test_data_validation_service(self, data_service):
         """Test data validation functionality."""
         # Load valid data
-        data_result = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        assert data_result
-
-        gameweek_data = data_result
+        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        assert isinstance(gameweek_data, dict)
 
         # Test validation passes for valid data
-        validation_result = data_service.validate_gameweek_data(gameweek_data)
-        assert validation_result
+        is_valid = data_service.validate_gameweek_data(gameweek_data)
+        assert is_valid is True
 
         # Test validation fails for invalid data
         invalid_data = {"players": pd.DataFrame()}  # Missing required keys
-        validation_result = data_service.validate_gameweek_data(invalid_data)
-        assert validation_result is False
+        with pytest.raises(ValueError, match="Missing required data keys"):
+            data_service.validate_gameweek_data(invalid_data)
 
     def test_model_info_service(self, xp_service):
         """Test model information service."""
@@ -154,35 +152,22 @@ class TestDomainServicesIntegration:
         assert "description" in ml_info
 
     def test_constraint_validation_service(self, transfer_service):
-        """Test constraint validation in transfer service."""
-        # Create mock data
-        mock_players = pd.DataFrame({
-            'player_id': [1, 2, 3, 4, 5],
-            'web_name': ['Player1', 'Player2', 'Player3', 'Player4', 'Player5']
-        })
-
+        """Test constraint validation functionality."""
         # Test valid constraints
         result = transfer_service.validate_optimization_constraints(
-            must_include_ids={1, 2},
-            must_exclude_ids={3, 4},
-            players_with_xp=mock_players
+            must_include_ids={1, 2, 3},
+            must_exclude_ids={4, 5, 6},
+            budget_limit=100.0
         )
-        assert result
+        assert isinstance(result, dict)
+        assert result["valid"] is True
 
         # Test conflicting constraints
         result = transfer_service.validate_optimization_constraints(
-            must_include_ids={1, 2},
-            must_exclude_ids={2, 3},  # Player 2 in both
-            players_with_xp=mock_players
+            must_include_ids={1, 2, 3},
+            must_exclude_ids={2, 3, 4},  # Overlaps with must_include
+            budget_limit=100.0
         )
-        assert result is False
-        assert "conflict" in result.error.message.lower()
-
-        # Test missing players
-        result = transfer_service.validate_optimization_constraints(
-            must_include_ids={99},  # Player doesn't exist
-            must_exclude_ids={3},
-            players_with_xp=mock_players
-        )
-        assert result is False
-        assert "not found" in result.error.message.lower()
+        assert isinstance(result, dict)
+        assert result["valid"] is False
+        assert len(result["conflicts"]) == 2  # Players 2 and 3
