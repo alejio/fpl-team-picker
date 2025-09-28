@@ -276,52 +276,20 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, gameweek_input, mo):
-    # Team strength analysis - simplified direct display
+def _(gameweek_input, mo):
+    # Team strength analysis using visualization service
+    from fpl_team_picker.visualization.charts import create_team_strength_visualization
+
+    # Initialize once
     team_strength_analysis = None
 
-    if gameweek_input.value and gameweek_data:
-        teams_data = gameweek_data.get("teams")
-        if teams_data is not None and not teams_data.empty:
-            # Display team data directly
-            display_cols = []
-            for team_col in [
-                "name",
-                "short_name",
-                "code",
-                "strength",
-                "strength_overall_home",
-                "strength_overall_away",
-            ]:
-                if team_col in teams_data.columns:
-                    display_cols.append(team_col)
-
-            if not display_cols and len(teams_data.columns) > 0:
-                display_cols = list(teams_data.columns)
-
-            if display_cols:
-                team_strength_analysis = mo.vstack(
-                    [
-                        mo.md(
-                            f"### 🏆 Team Strength Analysis - GW{gameweek_input.value}"
-                        ),
-                        mo.md(f"**Teams Analyzed:** {len(teams_data)} teams"),
-                        mo.md(
-                            f"**Available Columns:** {', '.join(teams_data.columns.tolist())}"
-                        ),
-                        mo.md("**📊 Team Data:**"),
-                        mo.ui.table(teams_data[display_cols], page_size=20),
-                    ]
-                )
-            else:
-                team_strength_analysis = mo.md(
-                    "❌ No displayable team data columns found"
-                )
-        else:
-            team_strength_analysis = mo.md("❌ No teams data available")
+    if gameweek_input.value:
+        team_strength_analysis = create_team_strength_visualization(
+            gameweek_input.value, mo
+        )
     else:
         team_strength_analysis = mo.md(
-            "Select target gameweek and load data to see team strength analysis"
+            "Select target gameweek to see team strength analysis"
         )
 
     team_strength_analysis
