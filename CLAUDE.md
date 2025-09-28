@@ -522,6 +522,113 @@ pytest tests/domain/services/test_integration.py -v
 - **Interactive Notebooks** - Marimo-based presentation adapters (33% code reduction achieved)
 - **CLI Integration** - Command-line entry points for all interfaces
 
+## Data Contract & Boundary Validation Principles
+
+### "Fail Fast, Validate Once" Pattern
+
+The system implements a strict **boundary validation pattern** where all data validation occurs at the boundary (DataOrchestrationService), ensuring deterministic business logic downstream.
+
+#### Core Principle: NO FALLBACKS
+**❌ Never use fallbacks or silent error handling:**
+```python
+# WRONG - Silent failure hides data integrity issues
+team_name = team_map.get(team_id, "Unknown Team")
+player_data = data.fillna("Default Value")
+```
+
+**✅ Always fail fast with actionable error messages:**
+```python
+# CORRECT - Explicit validation with clear error messages
+if not set(team_values).issubset(available_teams):
+    missing_teams = set(team_values) - available_teams
+    raise ValueError(f"Data contract violation: team IDs {missing_teams} not found in teams data")
+```
+
+#### Boundary Validation Contract
+
+**DataOrchestrationService** - THE validation boundary:
+```python
+def load_gameweek_data(self, target_gameweek: int) -> Dict[str, Any]:
+    """FAIL FAST if data is bad - guarantee clean data downstream"""
+
+    # Comprehensive validation here
+    if len(teams) != 20:
+        raise ValueError(f"Invalid team data: expected 20 teams, got {len(teams)}")
+
+    if players.empty:
+        raise ValueError("No player data available")
+
+    # Validate team ID consistency
+    player_teams = set(players["team_id"].unique())
+    available_teams = set(teams["team_id"].unique())
+    if not player_teams.issubset(available_teams):
+        missing = player_teams - available_teams
+        raise ValueError(f"Team ID mismatch: players reference teams {missing} not in teams data")
+
+    # Return: "Clean data dictionary - guaranteed to be valid"
+    return validated_data
+```
+
+**Domain Services** - Trust the data contract:
+```python
+def calculate_expected_points(self, gameweek_data: Dict[str, Any]) -> pd.DataFrame:
+    """Args: gameweek_data - guaranteed clean data
+    Returns: DataFrame with expected points - deterministic"""
+
+    # No validation needed - trust the contract
+    players = gameweek_data["players"]  # Known to be valid
+    return mathematical_transformation(players)
+```
+
+#### Data Integrity Enforcement
+
+**In optimization and display layers:**
+```python
+# Validate data contract before mapping operations
+team_values = df["team"].unique()
+available_teams = set(teams["team_id"])
+
+if not set(team_values).issubset(available_teams):
+    missing_teams = set(team_values) - available_teams
+    raise ValueError(f"Data contract violation: team IDs {missing_teams} not found")
+
+# Only proceed with mapping if validation passes
+df["name"] = df["team"].map(team_map)  # Guaranteed to work
+```
+
+#### Benefits of This Approach
+
+1. **Deterministic Behavior** - No silent failures or unpredictable fallbacks
+2. **Fast Debugging** - Clear error messages pinpoint exact data issues
+3. **Data Quality Assurance** - Forces upstream data problems to be fixed
+4. **Maintainable Code** - Business logic can trust data contracts
+5. **No Technical Debt** - Prevents accumulation of workaround code
+
+#### Common Anti-Patterns to Avoid
+
+```python
+# ❌ ANTI-PATTERN: Silent fallbacks hide problems
+df["name"] = df["team"].map(team_map).fillna("Unknown")
+
+# ❌ ANTI-PATTERN: Generic error handling
+try:
+    df["name"] = df["team"].map(team_map)
+except:
+    df["name"] = "Error"
+
+# ❌ ANTI-PATTERN: Default value masking
+team_name = team_map.get(team_id, "N/A")
+```
+
+```python
+# ✅ CORRECT PATTERN: Explicit validation and clear failures
+if team_id not in team_map:
+    raise ValueError(f"Team ID {team_id} not found in teams data. Available: {list(team_map.keys())}")
+team_name = team_map[team_id]
+```
+
+This pattern ensures that when something fails, you get **actionable debugging information** rather than mysterious "object" values or silent data corruption.
+
 ## FPL Rules Reference
 
 All implementations must comply with official FPL rules documented in `fpl_rules.md`. Key constraints include:
