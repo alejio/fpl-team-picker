@@ -455,100 +455,7 @@ def _(gameweek_data, gameweek_input, mo):
 def _(mo):
     mo.md(
         r"""
-    ## 7️⃣ Squad Management Dashboard
-
-    **Analyze your current squad with enhanced starting XI selection and bench analysis.**
-
-    ### Squad Analysis Features:
-    - **Formation-Flexible Selection**: Automatically selects optimal starting XI from your 15-player squad
-    - **Expected Points Integration**: Uses latest XP calculations for lineup decisions
-    - **Bench Value Analysis**: Shows expected points from bench players for rotation planning
-    - **Captain Integration**: Starting XI feeds into captain selection recommendations
-
-    ---
-    """
-    )
-    return
-
-
-@app.cell
-def _(gameweek_data, mo, pd, players_with_xp):
-    # Squad Management using domain services
-    squad_display_components = []
-
-    if not players_with_xp.empty and gameweek_data:
-        user_squad = gameweek_data.get("current_squad")
-
-        squad_display_components.append(mo.md("### 👥 Squad Management"))
-
-        if user_squad is not None and not user_squad.empty:
-            try:
-                from fpl_team_picker.domain.services.squad_management_service import (
-                    SquadManagementService as _SquadManagementService,
-                )
-
-                _squad_service = _SquadManagementService()
-
-                # Merge squad with XP data
-                if "xP" not in user_squad.columns and not players_with_xp.empty:
-                    user_squad_with_xp = user_squad.merge(
-                        players_with_xp[["player_id", "xP", "xP_5gw"]],
-                        on="player_id",
-                        how="left",
-                    )
-                else:
-                    user_squad_with_xp = user_squad.copy()
-
-                squad_result = _squad_service.get_starting_eleven(user_squad_with_xp)
-
-                if squad_result:
-                    starting_11 = squad_result["starting_11"]
-                    formation = squad_result["formation"]
-                    total_xp = squad_result["total_xp"]
-
-                    starting_11_df = pd.DataFrame(starting_11)
-
-                    squad_display_components.extend(
-                        [
-                            mo.md("**Squad Type:** Your Current Squad"),
-                            mo.md(f"**Formation:** {formation}"),
-                            mo.md(f"**Total Expected Points:** {total_xp:.2f}"),
-                            mo.md("**Starting XI:**"),
-                            mo.ui.table(
-                                starting_11_df[["web_name", "position", "xP"]].round(2),
-                                page_size=11,
-                            ),
-                        ]
-                    )
-                else:
-                    squad_display_components.append(
-                        mo.md(
-                            "❌ Squad analysis failed: No starting eleven data available"
-                        )
-                    )
-            except Exception as e:
-                squad_display_components.append(
-                    mo.md(f"⚠️ Squad management error: {str(e)}")
-                )
-        else:
-            squad_display_components.append(mo.md("⚠️ No current squad data found"))
-    else:
-        squad_display_components.extend(
-            [
-                mo.md("### 👥 Squad Management"),
-                mo.md("⚠️ Calculate expected points first to enable squad management"),
-            ]
-        )
-
-    mo.vstack(squad_display_components) if squad_display_components else mo.md("")
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 8️⃣ Strategic Transfer Optimization
+    ## 7️⃣ Strategic Transfer Optimization
 
     **Smart 0-3 transfer analysis with advanced budget pool calculations.**
 
@@ -693,15 +600,21 @@ def _(
     players_with_xp,
 ):
     # Transfer optimization using interactive optimization engine
+    optimal_starting_11 = []
+
     if optimize_button is not None and optimize_button.value:
         if not players_with_xp.empty and gameweek_data:
             current_squad = gameweek_data.get("current_squad")
             team_data = gameweek_data.get("manager_team")
+            teams = gameweek_data.get("teams")
 
             if current_squad is not None and not current_squad.empty:
                 from fpl_team_picker.optimization.optimizer import (
                     optimize_team_with_transfers,
+                    get_best_starting_11,
+                    get_bench_players,
                 )
+                import pandas as _pd
 
                 must_include_ids = (
                     set(must_include_dropdown.value)
@@ -735,9 +648,136 @@ def _(
                         must_include_ids=must_include_ids,
                         must_exclude_ids=must_exclude_ids,
                     )
-                    optimization_display = (
-                        result[0] if isinstance(result, tuple) else result
-                    )
+
+                    if isinstance(result, tuple) and len(result) == 3:
+                        optimization_display, optimal_squad_df, best_scenario = result
+
+                        # Add starting 11 and bench display
+                        if not optimal_squad_df.empty:
+                            optimal_starting_11, _formation, xp_total = (
+                                get_best_starting_11(optimal_squad_df, "xP")
+                            )
+
+                            if optimal_starting_11:
+                                _starting_11_df = _pd.DataFrame(optimal_starting_11)
+
+                                # Fix team names
+                                if (
+                                    "team" in _starting_11_df.columns
+                                    and teams is not None
+                                    and not teams.empty
+                                ):
+                                    team_id_col = (
+                                        "id" if "id" in teams.columns else "team_id"
+                                    )
+                                    team_map = dict(
+                                        zip(teams[team_id_col], teams["name"])
+                                    )
+                                    _starting_11_df["name"] = _starting_11_df[
+                                        "team"
+                                    ].map(team_map)
+
+                                display_cols = [
+                                    col
+                                    for col in [
+                                        "web_name",
+                                        "position",
+                                        "name",
+                                        "price",
+                                        "xP",
+                                        "xP_5gw",
+                                        "fixture_outlook",
+                                    ]
+                                    if col in _starting_11_df.columns
+                                ]
+
+                                # Get bench players
+                                bench_players = get_bench_players(
+                                    optimal_squad_df, optimal_starting_11, "xP"
+                                )
+                                bench_components = []
+
+                                if bench_players:
+                                    bench_df = _pd.DataFrame(bench_players)
+                                    bench_xp_total = sum(
+                                        p.get("xP", 0) for p in bench_players
+                                    )
+
+                                    # Fix team names for bench
+                                    if (
+                                        "team" in bench_df.columns
+                                        and teams is not None
+                                        and not teams.empty
+                                    ):
+                                        team_id_col = (
+                                            "id" if "id" in teams.columns else "team_id"
+                                        )
+                                        team_map = dict(
+                                            zip(teams[team_id_col], teams["name"])
+                                        )
+                                        bench_df["name"] = bench_df["team"].map(
+                                            team_map
+                                        )
+
+                                    bench_display_cols = [
+                                        col
+                                        for col in [
+                                            "web_name",
+                                            "position",
+                                            "name",
+                                            "price",
+                                            "xP",
+                                            "xP_5gw",
+                                            "fixture_outlook",
+                                        ]
+                                        if col in bench_df.columns
+                                    ]
+
+                                    bench_components.extend(
+                                        [
+                                            mo.md("---"),
+                                            mo.md("### 🪑 Bench - Current Gameweek"),
+                                            mo.md(
+                                                f"**Total Bench GW XP:** {bench_xp_total:.2f} | *Ordered by expected points*"
+                                            ),
+                                            mo.ui.table(
+                                                bench_df[bench_display_cols].round(2)
+                                                if bench_display_cols
+                                                else bench_df,
+                                                page_size=4,
+                                            ),
+                                        ]
+                                    )
+
+                                starting_11_display = mo.vstack(
+                                    [
+                                        optimization_display,
+                                        mo.md("---"),
+                                        mo.md(
+                                            f"### 🏆 Optimal Starting 11 - Current Gameweek ({_formation})"
+                                        ),
+                                        mo.md(
+                                            f"**Total Current GW XP:** {xp_total:.2f} | *Optimized for this gameweek only*"
+                                        ),
+                                        mo.ui.table(
+                                            _starting_11_df[display_cols].round(2)
+                                            if display_cols
+                                            else _starting_11_df,
+                                            page_size=11,
+                                        ),
+                                    ]
+                                    + bench_components
+                                )
+                                optimization_display = starting_11_display
+                    else:
+                        optimization_display = (
+                            result
+                            if result
+                            else mo.md(
+                                "⚠️ Optimization completed but no results returned"
+                            )
+                        )
+
                 finally:
                     # Restore original config
                     opt_config.optimization.optimization_horizon = original_horizon
@@ -756,58 +796,45 @@ def _(
         )
 
     optimization_display
-    return
+    return (optimal_starting_11,)
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 9️⃣ Captain Selection""")
+    mo.md(r"""## 8️⃣ Captain Selection""")
     return
 
 
 @app.cell
-def _(gameweek_data, mo, players_with_xp):
-    # Captain Selection using SquadManagementService
-    captain_selection_display = None
+def _(mo, optimal_starting_11):
+    # Captain Selection using optimization results
+    if isinstance(optimal_starting_11, list) and len(optimal_starting_11) > 0:
+        from fpl_team_picker.optimization.optimizer import select_captain
 
-    if not players_with_xp.empty and gameweek_data:
-        try:
-            from fpl_team_picker.domain.services import SquadManagementService
-
-            squad_service = SquadManagementService()
-
-            # Get top players as potential captains
-            top_captains = players_with_xp.nlargest(10, "xP")
-            captain_data = squad_service.get_captain_recommendation_from_database(
-                players_with_xp
-            )
-
-            captain_selection_display = mo.vstack(
-                [
-                    mo.md("### 🎖️ Captain Selection"),
-                    mo.md(
-                        f"**Recommended Captain:** {captain_data['web_name']} ({captain_data['position']})"
-                    ),
-                    mo.md(f"**Expected Points:** {captain_data['xP']:.2f}"),
-                    mo.md(f"**Reasoning:** {captain_data['reason']}"),
-                    mo.md("**Top Captain Options:**"),
-                    mo.ui.table(
-                        top_captains[["web_name", "position", "xP", "price"]].round(2),
-                        page_size=5,
-                    ),
-                ]
-            )
-
-        except Exception as e:
-            captain_selection_display = mo.md(
-                f"❌ **Captain selection error:** {str(e)}"
-            )
-    else:
-        captain_selection_display = mo.md(
-            "⚠️ **Calculate expected points first to enable captain selection**"
+        captain_recommendations = select_captain(optimal_starting_11, mo)
+        captain_display = mo.vstack(
+            [
+                mo.md(
+                    "**Risk-adjusted captaincy recommendations based on expected points analysis.**"
+                ),
+                mo.md("---"),
+                captain_recommendations,
+            ]
         )
+    else:
+        captain_display = mo.md("""
+**Please run transfer optimization first to enable captain selection.**
 
-    captain_selection_display
+Once you have an optimal starting 11, captain recommendations will appear here based on:
+- Double points potential (XP × 2)
+- Fixture difficulty and opponent strength
+- Recent form and momentum indicators
+- Minutes certainty and injury risk
+
+---
+""")
+
+    captain_display
     return
 
 
@@ -815,7 +842,7 @@ def _(gameweek_data, mo, players_with_xp):
 def _(mo):
     mo.md(
         r"""
-    ## 🔟 Chip Assessment
+    ## 9️⃣ Chip Assessment
 
     **Smart chip timing recommendations with traffic light system.**
 
@@ -833,82 +860,105 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, players_with_xp):
-    # Chip Assessment using ChipAssessmentService
-    chip_assessment_display = None
+def _(gameweek_data, gameweek_input, mo, players_with_xp):
+    # Chip Assessment using ChipAssessmentEngine
+    def _format_chip_metrics(metrics: dict) -> str:
+        """Format chip metrics for display"""
+        formatted_lines = []
+        for key, value in metrics.items():
+            if isinstance(value, float):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value:.2f}"
+                )
+            elif isinstance(value, int):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value}"
+                )
+            elif isinstance(value, str):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value}"
+                )
+            else:
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {str(value)}"
+                )
+        return "\n".join(formatted_lines)
 
-    try:
-        if not players_with_xp.empty and gameweek_data:
-            _current_squad_chip = gameweek_data.get("current_squad")
+    if gameweek_input.value and not players_with_xp.empty and gameweek_data:
+        _current_squad = gameweek_data.get("current_squad")
+        _team_data = gameweek_data.get("manager_team")
+        _fixtures = gameweek_data.get("fixtures")
 
-            if _current_squad_chip is not None and not _current_squad_chip.empty:
-                from fpl_team_picker.domain.services import ChipAssessmentService
+        if _current_squad is not None and not _current_squad.empty and _team_data:
+            from fpl_team_picker.core.chip_assessment import ChipAssessmentEngine
+            from fpl_team_picker.config import config as chip_config
 
-                chip_service = ChipAssessmentService()
+            # Get available chips from team data
+            available_chips = _team_data.get(
+                "chips_available",
+                ["wildcard", "bench_boost", "triple_captain", "free_hit"],
+            )
+            used_chips = _team_data.get("chips_used", [])
 
-                # Assess all available chips (assuming all chips are available for demo)
-                available_chips = [
-                    "wildcard",
-                    "free_hit",
-                    "bench_boost",
-                    "triple_captain",
-                ]
-
-                assessment_result = chip_service.assess_all_chips(
-                    gameweek_data,
-                    _current_squad_chip,
-                    available_chips,
-                    gameweek_data["target_gameweek"],
+            if available_chips:
+                # Initialize chip assessment engine
+                chip_engine = ChipAssessmentEngine(
+                    chip_config.chip_assessment.model_dump()
                 )
 
-                assessment_data = assessment_result
-                _recommendations_chip = assessment_data.get("recommendations", {})
-                summary = assessment_data.get("summary", "No summary available")
+                # Merge current squad with xP data for chip assessment
+                current_squad_with_xp = _current_squad.merge(
+                    players_with_xp[["player_id", "xP", "xP_5gw"]],
+                    on="player_id",
+                    how="left",
+                )
 
-                if _recommendations_chip:
-                    chip_displays = []
-                    chip_displays.extend(
-                        [
-                            mo.md("### 🔟 Chip Recommendations"),
-                            mo.md(
-                                "**Smart chip timing recommendations with traffic light system**"
-                            ),
-                            mo.md(f"**📊 Summary:** {summary}"),
-                            mo.md("---"),
-                        ]
+                # Run chip assessments
+                chip_recommendations = chip_engine.assess_all_chips(
+                    current_squad=current_squad_with_xp,
+                    all_players=players_with_xp,
+                    fixtures=_fixtures,
+                    target_gameweek=gameweek_input.value,
+                    team_data=_team_data,
+                    available_chips=available_chips,
+                )
+
+                # Create display components for each chip
+                chip_displays = []
+
+                # Chip status overview
+                chip_displays.append(
+                    mo.md(f"""
+### 🎯 Chip Status Overview
+- **Available:** {", ".join(available_chips) if available_chips else "None"}
+- **Used this season:** {", ".join(used_chips) if used_chips else "None"}
+""")
+                )
+
+                # Individual chip recommendations
+                for chip_name, recommendation in chip_recommendations.items():
+                    chip_displays.append(
+                        mo.md(f"""
+### {recommendation.status} {recommendation.chip_name}
+**{recommendation.reasoning}**
+
+**Key Metrics:**
+{_format_chip_metrics(recommendation.key_metrics)}
+""")
                     )
 
-                    # Display each chip recommendation
-                    for chip_name, rec in _recommendations_chip.items():
-                        _chip_status = rec.get("status", "🟡 UNKNOWN")
-                        reasoning = rec.get("reasoning", "No reasoning provided")
-                        chip_display_name = chip_name.replace("_", " ").title()
-
-                        chip_displays.extend(
-                            [
-                                mo.md(f"### {_chip_status} {chip_display_name}"),
-                                mo.md(f"**Reasoning:** {reasoning}"),
-                                mo.md("---"),
-                            ]
-                        )
-
-                    chip_assessment_display = mo.vstack(chip_displays)
-                else:
-                    chip_assessment_display = mo.md(
-                        "### 🔟 Chip Recommendations\n✅ **No chip recommendations available**"
-                    )
+                chip_assessment_display = mo.vstack(chip_displays)
             else:
                 chip_assessment_display = mo.md(
-                    "### 🔟 Chip Recommendations\n❌ **Chip assessment failed:** Current squad not available"
+                    "✅ **All chips used** - No chips available for this season"
                 )
         else:
             chip_assessment_display = mo.md(
-                "### 🔟 Chip Recommendations\n⚠️ **No current squad data found** - load gameweek data first"
+                "⚠️ **Load team data and calculate xP first** to enable chip assessment"
             )
-
-    except Exception as e:
+    else:
         chip_assessment_display = mo.md(
-            f"### 🔟 Chip Recommendations\n❌ **Chip assessment error:** {str(e)}"
+            "⚠️ **Select gameweek and calculate expected points** to enable chip assessment"
         )
 
     chip_assessment_display
