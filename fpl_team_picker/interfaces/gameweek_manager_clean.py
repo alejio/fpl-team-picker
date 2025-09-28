@@ -303,82 +303,36 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, pd):
+def _(gameweek_data, mo):
     # Calculate expected points using domain service
-    players_with_xp = pd.DataFrame()
+    if gameweek_data:
+        from fpl_team_picker.domain.services import ExpectedPointsService
+        from fpl_team_picker.config import config
+        from fpl_team_picker.visualization.charts import create_xp_results_display
 
-    try:
-        xp_status = "Load gameweek data first"
-        if gameweek_data:
-            try:
-                from fpl_team_picker.domain.services import ExpectedPointsService
-                from fpl_team_picker.config import config
-
-                xp_service = ExpectedPointsService()
-                xp_result = xp_service.calculate_combined_results(
-                    gameweek_data, use_ml_model=config.xp_model.use_ml_model
-                )
-
-                players_with_xp = xp_result
-                model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
-                xp_status = (
-                    f"✅ {model_info['type']} Model: {len(players_with_xp)} players"
-                )
-
-                # Simple display of top players
-                available_cols = []
-                for xp_col in [
-                    "web_name",
-                    "position",
-                    "name",
-                    "price",
-                    "xP",
-                    "xP_5gw",
-                ]:
-                    if xp_col in players_with_xp.columns:
-                        available_cols.append(xp_col)
-
-                if available_cols and not players_with_xp.empty:
-                    top_players = players_with_xp.nlargest(20, "xP")[available_cols]
-                    xp_results_display = mo.vstack(
-                        [
-                            mo.md("**🎯 Top Expected Points (Current GW):**"),
-                            mo.ui.table(top_players.round(2), page_size=10),
-                            mo.md(
-                                f"**📊 Summary:** {len(players_with_xp)} players analyzed | Average XP: {players_with_xp['xP'].mean():.2f}"
-                            ),
-                        ]
-                    )
-                else:
-                    xp_results_display = mo.md(
-                        "❌ No player data available for display"
-                    )
-
-                xp_section_display = mo.vstack(
-                    [
-                        mo.md("### 🎯 Expected Points"),
-                        mo.md(f"**Status:** {xp_status}"),
-                        mo.md(f"**Model Type:** {model_info['type']}"),
-                        xp_results_display,
-                    ]
-                )
-            except Exception as e:
-                xp_status = f"❌ Service error: {str(e)}"
-                xp_section_display = mo.md(
-                    f"### 🎯 Expected Points\n**Status:** {xp_status}"
-                )
-        else:
-            xp_section_display = mo.md(
-                f"### 🎯 Expected Points\n**Status:** {xp_status}"
-            )
-
-        xp_section_display
-
-    except Exception as critical_error:
-        xp_section_display = mo.md(
-            f"### 🎯 Expected Points\n❌ Critical error: {str(critical_error)}"
+        xp_service = ExpectedPointsService()
+        players_with_xp = xp_service.calculate_combined_results(
+            gameweek_data, use_ml_model=config.xp_model.use_ml_model
         )
-        xp_section_display
+        model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
+
+        xp_results_display = create_xp_results_display(
+            players_with_xp, gameweek_data["target_gameweek"], mo
+        )
+
+        xp_section_display = mo.vstack(
+            [
+                mo.md(f"**Model Type:** {model_info['type']}"),
+                xp_results_display,
+            ]
+        )
+    else:
+        import pandas as _pd
+
+        players_with_xp = _pd.DataFrame()
+        xp_section_display = mo.md("### 🎯 Expected Points\nLoad gameweek data first")
+
+    xp_section_display
     return (players_with_xp,)
 
 
@@ -614,7 +568,7 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, optimization_horizon_toggle, pd, players_with_xp):
+def _(gameweek_data, mo, optimization_horizon_toggle, players_with_xp):
     # Transfer optimization using TransferOptimizationService
     transfer_section_display = None
 
@@ -680,7 +634,7 @@ def _(gameweek_data, mo, optimization_horizon_toggle, pd, players_with_xp):
 
 
 @app.cell
-def _(gameweek_data, mo, pd, players_with_xp):
+def _(gameweek_data, mo, players_with_xp):
     # Captain Selection using SquadManagementService
     captain_selection_display = None
 
