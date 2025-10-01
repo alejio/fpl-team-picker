@@ -209,8 +209,8 @@ def _(mo):
         _orchestration_service = _DataOrchestrationService()
         current_gw_info = _orchestration_service.get_current_gameweek_info()
         current_gw = current_gw_info.get("current_gameweek", 1)
-        next_gw = current_gw_info.get("next_gameweek", current_gw + 1)
-        default_gw = next_gw
+        current_gw_info.get("next_gameweek", current_gw + 1)
+        default_gw = current_gw  # Use current gameweek as default, not next
     except Exception:
         default_gw = 1
 
@@ -267,6 +267,132 @@ def _(gameweek_input, mo):
 
     status_display
     return (gameweek_data,)
+
+
+@app.cell
+def _(gameweek_data, gameweek_input, mo):
+    # Squad Performance Review - Simple Implementation
+    if not gameweek_data or not gameweek_input.value:
+        performance_review = mo.md(
+            "📊 Select gameweek and load data to see performance analysis"
+        )
+    else:
+        try:
+            from fpl_team_picker.domain.services import (
+                DataOrchestrationService as _DataServicePerf,
+                ExpectedPointsService as _XPServicePerf,
+                PerformanceAnalyticsService as _AnalyticsServicePerf,
+            )
+            from client import FPLDataClient as _ClientPerf
+
+            _current_gw_perf = gameweek_input.value
+            previous_gw = max(1, _current_gw_perf - 1)
+
+            # Get team data
+            _team_data_perf = gameweek_data.get("manager_team")
+
+            if _team_data_perf and "picks" in _team_data_perf:
+                # Load previous gameweek predictions
+                _data_svc = _DataServicePerf()
+                prev_data = _data_svc.load_gameweek_data(
+                    target_gameweek=previous_gw, form_window=5
+                )
+
+                _xp_svc = _XPServicePerf()
+                prev_predictions = _xp_svc.calculate_combined_results(
+                    prev_data, use_ml_model=False
+                )
+
+                # Get actual results
+                _client = _ClientPerf()
+                actual_results = _client.get_gameweek_performance(previous_gw)
+
+                if not actual_results.empty:
+                    # Analyze performance
+                    _analytics_svc = _AnalyticsServicePerf()
+                    analysis = _analytics_svc.analyze_squad_performance(
+                        prev_predictions,
+                        actual_results,
+                        _team_data_perf["picks"],
+                        previous_gw,
+                    )
+
+                    if "error" not in analysis:
+                        sa = analysis["squad_analysis"]
+                        performance_review = mo.md(
+                            f"""
+## 🎯 GW{previous_gw} Squad Performance
+
+**Total:** {sa["total_predicted"]} xP → {sa["total_actual"]} pts ({sa["difference"]:+.1f})
+**Accuracy:** {sa["accuracy_percentage"]:.1f}% • **Players:** {sa["players_analyzed"]}
+
+**Top 5 Performers:**
+"""
+                            + "\n".join(
+                                [
+                                    f"• {p['web_name']} ({p['position']}): {p['xP']:.1f} → {p['total_points']} ({p['xP_diff']:+.1f})"
+                                    for p in analysis["individual_performance"][:5]
+                                ]
+                            )
+                        )
+                    else:
+                        performance_review = mo.md(f"❌ {analysis['error']}")
+                else:
+                    performance_review = mo.md(
+                        f"❌ No actual data available for GW{previous_gw}"
+                    )
+            else:
+                performance_review = mo.md(
+                    "📊 Load your team data to see squad performance"
+                )
+
+        except Exception as e:
+            performance_review = mo.md(f"❌ Error: {str(e)}")
+
+    performance_review
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""## 🎯 Last Gameweek Performance Review
+
+**Compare actual player performance vs predicted xP from the previous gameweek**
+
+This section analyzes how well the expected points model predicted actual results, including your specific team's performance.
+""")
+    return
+
+
+@app.cell
+def _(mo):
+    # Simple test to ensure this cell always shows
+    test_display = mo.md("""
+🔄 **Performance Review Section**
+""")
+    test_display
+    return (test_display,)
+
+
+@app.cell
+def _(mo):
+    # Performance review cell with minimal dependencies
+    performance_review_status = mo.md("""
+📊 **Ready for Performance Analysis**
+
+To see performance review:
+1. Select a gameweek (GW2 or higher)
+2. Load gameweek data in the section above
+3. The analysis will appear here automatically
+
+*Features:*
+- Model accuracy metrics
+- Your team's specific performance
+- Best/worst predictions
+- Detailed player comparisons
+""")
+    performance_review_status
+    return
 
 
 @app.cell

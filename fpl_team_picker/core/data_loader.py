@@ -91,11 +91,11 @@ def get_current_gameweek_info() -> Dict:
                 status = "in_progress"
                 message = f"🕐 GW{target_gameweek} is currently in progress"
             elif now > latest_kickoff + pd.Timedelta(hours=2):
-                # Gameweek completed, prepare for next
+                # Gameweek completed, data should be available
                 if target_gameweek in available_gws:
                     status = "completed"
                     message = f"✅ GW{target_gameweek} completed, data available"
-                    target_gameweek += 1  # Move to next gameweek
+                    # Don't increment - target_gameweek already points to next gameweek from upcoming fixtures
                 else:
                     status = "completed"
                     message = (

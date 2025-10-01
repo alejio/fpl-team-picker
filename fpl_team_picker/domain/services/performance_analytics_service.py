@@ -458,3 +458,105 @@ class PerformanceAnalyticsService:
             "insights": insights,
             "analysis_period": f"GW{target_gameweek}",
         }
+
+    def analyze_squad_performance(
+        self,
+        previous_predictions: pd.DataFrame,
+        actual_results: pd.DataFrame,
+        squad_picks: List[Dict[str, Any]],
+        previous_gameweek: int,
+    ) -> Dict[str, Any]:
+        """Analyze squad performance comparing predicted vs actual results.
+
+        Args:
+            previous_predictions: DataFrame with xP predictions - guaranteed clean
+            actual_results: DataFrame with actual gameweek results - guaranteed clean
+            squad_picks: List of squad player picks with element IDs
+            previous_gameweek: Gameweek number for analysis
+
+        Returns:
+            Squad performance analysis with xP vs actual comparison
+        """
+        import pandas as pd
+
+        try:
+            # Get squad player IDs
+            squad_player_ids = [pick["element"] for pick in squad_picks]
+
+            # Merge predictions with actual results
+            comparison_df = pd.merge(
+                previous_predictions[["player_id", "web_name", "position", "xP"]],
+                actual_results[
+                    ["player_id", "total_points", "minutes", "goals_scored", "assists"]
+                ],
+                on="player_id",
+                how="inner",
+            )
+
+            # Filter for squad players only
+            squad_comparison = comparison_df[
+                comparison_df["player_id"].isin(squad_player_ids)
+            ].copy()
+
+            if squad_comparison.empty:
+                return {
+                    "error": "No matching players found between predictions and actual results",
+                    "gameweek": previous_gameweek,
+                    "squad_size": len(squad_player_ids),
+                }
+
+            # Calculate performance metrics
+            squad_comparison["xP_diff"] = (
+                squad_comparison["total_points"] - squad_comparison["xP"]
+            )
+            squad_comparison["accuracy_pct"] = (
+                1
+                - abs(squad_comparison["xP_diff"])
+                / squad_comparison["xP"].clip(lower=0.1)
+            ) * 100
+
+            # Summary statistics
+            total_predicted = squad_comparison["xP"].sum()
+            total_actual = squad_comparison["total_points"].sum()
+            total_difference = total_actual - total_predicted
+            avg_accuracy = squad_comparison["accuracy_pct"].mean()
+
+            # Best and worst performers
+            best_performer = squad_comparison.loc[squad_comparison["xP_diff"].idxmax()]
+            worst_performer = squad_comparison.loc[squad_comparison["xP_diff"].idxmin()]
+
+            return {
+                "gameweek": previous_gameweek,
+                "squad_analysis": {
+                    "total_predicted": round(total_predicted, 1),
+                    "total_actual": int(total_actual),
+                    "difference": round(total_difference, 1),
+                    "accuracy_percentage": round(avg_accuracy, 1),
+                    "players_analyzed": len(squad_comparison),
+                },
+                "individual_performance": squad_comparison[
+                    ["web_name", "position", "xP", "total_points", "xP_diff"]
+                ]
+                .sort_values("xP_diff", ascending=False)
+                .to_dict("records"),
+                "best_performer": {
+                    "name": best_performer["web_name"],
+                    "position": best_performer["position"],
+                    "predicted": round(best_performer["xP"], 1),
+                    "actual": int(best_performer["total_points"]),
+                    "difference": round(best_performer["xP_diff"], 1),
+                },
+                "worst_performer": {
+                    "name": worst_performer["web_name"],
+                    "position": worst_performer["position"],
+                    "predicted": round(worst_performer["xP"], 1),
+                    "actual": int(worst_performer["total_points"]),
+                    "difference": round(worst_performer["xP_diff"], 1),
+                },
+            }
+
+        except Exception as e:
+            return {
+                "error": f"Analysis failed: {str(e)}",
+                "gameweek": previous_gameweek,
+            }
