@@ -440,6 +440,9 @@ def _(gameweek_data, mo):
         players_with_xp = xp_service.calculate_combined_results(
             gameweek_data, use_ml_model=config.xp_model.use_ml_model
         )
+
+        # Enrich with additional season statistics
+        players_with_xp = xp_service.enrich_players_with_season_stats(players_with_xp)
         model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
 
         xp_results_display = create_xp_results_display(

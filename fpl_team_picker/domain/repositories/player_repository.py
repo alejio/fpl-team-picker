@@ -1,10 +1,14 @@
 """Repository interface for player data access."""
 
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 
 from ..common.result import Result
 from ..models.player import LiveDataDomain, PlayerDomain
+
+if TYPE_CHECKING:
+    import pandas
+    from ..models.player import EnrichedPlayerDomain
 
 
 class PlayerRepository(ABC):
@@ -90,5 +94,36 @@ class PlayerRepository(ABC):
 
         Returns:
             Result containing live data or None if not found, or error information
+        """
+        pass
+
+    @abstractmethod
+    def get_enriched_players(self) -> Result[List["EnrichedPlayerDomain"]]:
+        """
+        Get all current players with enriched season statistics.
+
+        Returns enriched player data including:
+        - Season performance stats (total_points, form, minutes, etc.)
+        - Match statistics (goals, assists, clean sheets, etc.)
+        - ICT index components (influence, creativity, threat)
+        - Expected stats (xG, xA per 90)
+        - Market data (transfers, value)
+        - Availability info (injury status, chance of playing)
+
+        Returns:
+            Result containing list of EnrichedPlayerDomain objects with full validation
+        """
+        pass
+
+    @abstractmethod
+    def get_enriched_players_dataframe(self) -> Result["pandas.DataFrame"]:
+        """
+        Get enriched players as DataFrame for compatibility with existing visualization code.
+
+        This is a temporary compatibility method during the migration to Pydantic models.
+        Eventually this will be replaced by get_enriched_players() returning domain objects.
+
+        Returns:
+            Result containing DataFrame with enriched player data
         """
         pass

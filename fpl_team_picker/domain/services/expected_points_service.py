@@ -226,3 +226,73 @@ class ExpectedPointsService:
             return {"type": "ML", "description": f"ML{ensemble_info}"}
         else:
             return {"type": "Rule-Based", "description": "Rule-Based"}
+
+    def enrich_players_with_season_stats(
+        self, players_with_xp: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Enrich expected points data with additional season statistics using repository pattern.
+
+        Args:
+            players_with_xp: DataFrame with XP calculations
+
+        Returns:
+            DataFrame with additional season stats merged in
+
+        Raises:
+            ValueError: If enrichment fails
+        """
+        try:
+            # Use repository pattern for data access
+            from fpl_team_picker.adapters.database_repositories import (
+                DatabasePlayerRepository,
+            )
+
+            player_repo = DatabasePlayerRepository()
+            enriched_result = player_repo.get_enriched_players_dataframe()
+
+            if enriched_result.is_failure:
+                print(
+                    f"⚠️ Could not load enriched data: {enriched_result.error.message}"
+                )
+                print("⚠️ Falling back to basic player data")
+                return players_with_xp
+
+            enriched_players = enriched_result.value
+            print(
+                f"✅ Loaded enriched data for {len(enriched_players)} players with {len(enriched_players.columns)} additional attributes"
+            )
+
+            # Merge with existing XP data, handling overlapping columns
+            enriched_xp = players_with_xp.merge(
+                enriched_players,
+                on="player_id",
+                how="left",
+                suffixes=(
+                    "",
+                    "_season",
+                ),  # Keep original names, add _season to enriched data when conflict
+            )
+
+            # Validate merge was successful
+            if len(enriched_xp) != len(players_with_xp):
+                raise ValueError(
+                    "Player enrichment resulted in unexpected row count change"
+                )
+
+            # Fill missing values with 0 for numeric columns (except news)
+            for col in enriched_players.columns:
+                if col != "player_id" and col in enriched_xp.columns:
+                    if col == "news":
+                        enriched_xp[col] = enriched_xp[col].fillna("")
+                    else:
+                        enriched_xp[col] = enriched_xp[col].fillna(0)
+
+            print(
+                f"✅ Successfully enriched {len(enriched_xp)} players with additional season statistics"
+            )
+            return enriched_xp
+
+        except Exception as e:
+            # If enrichment fails, return original data with warning
+            print(f"⚠️ Warning: Could not enrich player data - {str(e)}")
+            return players_with_xp

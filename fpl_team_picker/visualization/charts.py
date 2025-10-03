@@ -118,7 +118,7 @@ def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
                 ),
                 mo_ref.md("""
             **💡 How to Use This:**
-            - **🔴 Very Strong teams**: Avoid their opponents (hard fixtures) 
+            - **🔴 Very Strong teams**: Avoid their opponents (hard fixtures)
             - **🟢 Weak teams**: Target their opponents (easy fixtures)
             - **Attack Rating**: Expected goals scoring ability
             - **Defense Rating**: Expected goals conceded (lower = better defense)
@@ -858,7 +858,7 @@ def create_fixture_difficulty_visualization(
 
         analysis_md = """
         ### 🎯 Fixture Difficulty Analysis Summary
-        
+
         **🟢 EASIEST FIXTURE RUNS (Target for FPL assets):**
         """
 
@@ -875,10 +875,10 @@ def create_fixture_difficulty_visualization(
             )
 
         analysis_md += """
-        
+
         **💡 FPL Strategy:**
         - 🎯 **Target players** from teams with green fixtures (easy runs)
-        - ⚠️ **Avoid players** from teams with red fixtures (tough runs)  
+        - ⚠️ **Avoid players** from teams with red fixtures (tough runs)
         - 🏠 **Home advantage**: Teams playing at home have easier fixtures
         - 📊 **Difficulty Scale**: 0.7=Very Easy, 1.0=Average, 1.3=Very Hard
         """
@@ -934,7 +934,7 @@ def create_xp_results_display(
         display_columns = [
             "web_name",
             "position",
-            "name",
+            "name",  # Team name - will be placed right after player info
             "price",
             "selected_by_percent",
         ]
@@ -966,10 +966,50 @@ def create_xp_results_display(
                 display_columns.append(form_col)
 
         # Add statistical data if available
-        stats_columns = ["xG90", "xA90", "minutes", "p_60_plus_mins"]
+        stats_columns = ["xG90", "xA90", "p_60_plus_mins"]
         for stat_col in stats_columns:
             if stat_col in players_xp.columns:
                 display_columns.append(stat_col)
+
+        # Add all enriched season stats if available
+        enriched_season_stats = [
+            "total_points_season",
+            "form_season",
+            "points_per_game_season",
+            "minutes",
+            "starts",
+            "goals_scored",
+            "assists",
+            "clean_sheets",
+            "goals_conceded",
+            "yellow_cards",
+            "red_cards",
+            "saves",
+            "bonus",
+            "bps",
+            "influence",
+            "creativity",
+            "threat",
+            "ict_index",
+            "expected_goals",
+            "expected_assists",
+            "expected_goals_per_90",
+            "expected_assists_per_90",
+            "value_form",
+            "value_season",
+            "transfers_in",
+            "transfers_out",
+            "transfers_in_event",
+            "transfers_out_event",
+            "chance_of_playing_this_round",
+            "chance_of_playing_next_round",
+            "penalties_order",
+            "corners_and_indirect_freekicks_order",
+            "news",
+        ]
+        for enriched_stat in enriched_season_stats:
+            if enriched_stat in players_xp.columns:
+                display_columns.append(enriched_stat)
 
         # Add availability status at the end
         if "status" in players_xp.columns:
@@ -1008,7 +1048,7 @@ def create_xp_results_display(
                     "**All Players - Strategic Comparison (Sorted by 5-GW XP):**"
                 ),
                 mo_ref.md(
-                    "*Showing: 1-GW vs 5-GW XP, fixture outlook, horizon advantage, form data*"
+                    "*Showing: Season stats (total points, form, minutes, goals, assists, etc.), 1-GW vs 5-GW XP, fixture outlook, ICT components, expected stats, and more*"
                 ),
                 mo_ref.ui.table(display_df, page_size=25),
             ]

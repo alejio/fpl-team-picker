@@ -129,3 +129,127 @@ class LiveDataDomain(BaseModel):
         if round(v * 10) != v * 10:
             raise ValueError("Value must be in 0.1m increments")
         return v
+
+
+class EnrichedPlayerDomain(PlayerDomain):
+    """
+    Enhanced player domain model with complete season statistics.
+
+    Extends base PlayerDomain with all available FPL statistics
+    for comprehensive analysis and decision making.
+    """
+
+    # Season Performance Stats (beyond basic PlayerDomain)
+    total_points_season: int = Field(ge=0, description="Total FPL points this season")
+    form_season: float = Field(ge=0.0, description="Recent form score")
+    points_per_game_season: float = Field(ge=0.0, description="Average points per game")
+    minutes: int = Field(ge=0, description="Total minutes played")
+    starts: int = Field(ge=0, description="Number of starts")
+
+    # Match Statistics
+    goals_scored: int = Field(ge=0, description="Goals scored this season")
+    assists: int = Field(ge=0, description="Assists this season")
+    clean_sheets: int = Field(ge=0, description="Clean sheets (for DEF/GKP)")
+    goals_conceded: int = Field(ge=0, description="Goals conceded (for DEF/GKP)")
+    yellow_cards: int = Field(ge=0, description="Yellow cards received")
+    red_cards: int = Field(ge=0, description="Red cards received")
+    saves: int = Field(ge=0, description="Saves (for GKP)")
+
+    # Bonus Points System
+    bonus: int = Field(ge=0, description="Bonus points earned")
+    bps: int = Field(ge=0, description="Bonus points system score")
+
+    # ICT Index Components (0-200 scale typically)
+    influence: float = Field(ge=0.0, description="Influence score")
+    creativity: float = Field(ge=0.0, description="Creativity score")
+    threat: float = Field(ge=0.0, description="Threat score")
+    ict_index: float = Field(ge=0.0, description="Combined ICT index")
+
+    # Expected Statistics
+    expected_goals: float = Field(ge=0.0, description="Expected goals (xG)")
+    expected_assists: float = Field(ge=0.0, description="Expected assists (xA)")
+    expected_goals_per_90: float = Field(
+        ge=0.0, description="Expected goals per 90 minutes"
+    )
+    expected_assists_per_90: float = Field(
+        ge=0.0, description="Expected assists per 90 minutes"
+    )
+
+    # Market Data
+    value_form: float = Field(ge=0.0, description="Value based on recent form")
+    value_season: float = Field(ge=0.0, description="Value based on season performance")
+    transfers_in: int = Field(ge=0, description="Total transfers in")
+    transfers_out: int = Field(ge=0, description="Total transfers out")
+    transfers_in_event: int = Field(ge=0, description="Transfers in this gameweek")
+    transfers_out_event: int = Field(ge=0, description="Transfers out this gameweek")
+
+    # Availability Information
+    chance_of_playing_this_round: Optional[float] = Field(
+        None, ge=0.0, le=100.0, description="Chance of playing this round (%)"
+    )
+    chance_of_playing_next_round: Optional[float] = Field(
+        None, ge=0.0, le=100.0, description="Chance of playing next round (%)"
+    )
+
+    # Set Piece Responsibilities
+    penalties_order: Optional[int] = Field(
+        None, ge=1, le=5, description="Penalty taking order (1=first choice)"
+    )
+    corners_and_indirect_freekicks_order: Optional[int] = Field(
+        None, ge=1, le=5, description="Corner/free kick taking order"
+    )
+
+    # News and Updates
+    news: str = Field(default="", description="Latest injury/availability news")
+
+    @field_validator("total_points_season", "goals_scored", "assists")
+    @classmethod
+    def validate_non_negative_stats(cls, v: int) -> int:
+        """Ensure key stats are non-negative."""
+        if v < 0:
+            raise ValueError(f"Stat cannot be negative: {v}")
+        return v
+
+    @field_validator("chance_of_playing_this_round", "chance_of_playing_next_round")
+    @classmethod
+    def validate_percentage_or_none(cls, v: Optional[float]) -> Optional[float]:
+        """Validate percentage values or None."""
+        if v is not None and not (0.0 <= v <= 100.0):
+            raise ValueError(f"Percentage must be between 0-100 or None: {v}")
+        return v
+
+    @property
+    def goals_per_90(self) -> float:
+        """Calculate goals per 90 minutes."""
+        if self.minutes == 0:
+            return 0.0
+        return (self.goals_scored * 90) / self.minutes
+
+    @property
+    def assists_per_90(self) -> float:
+        """Calculate assists per 90 minutes."""
+        if self.minutes == 0:
+            return 0.0
+        return (self.assists * 90) / self.minutes
+
+    @property
+    def is_penalty_taker(self) -> bool:
+        """Check if player is likely penalty taker."""
+        return self.penalties_order is not None and self.penalties_order <= 2
+
+    @property
+    def is_set_piece_taker(self) -> bool:
+        """Check if player takes set pieces."""
+        return (self.penalties_order is not None and self.penalties_order <= 3) or (
+            self.corners_and_indirect_freekicks_order is not None
+            and self.corners_and_indirect_freekicks_order <= 3
+        )
+
+    class Config:
+        """Pydantic configuration for enriched player data."""
+
+        str_strip_whitespace = True
+        validate_assignment = True
+        extra = "forbid"  # Prevent extra fields for data integrity
+        json_encoders = {datetime: lambda v: v.isoformat()}
+        use_enum_values = True
