@@ -6,12 +6,12 @@ import pandas as pd
 from fpl_team_picker.domain.services import (
     DataOrchestrationService,
     ExpectedPointsService,
-    TransferOptimizationService
+    TransferOptimizationService,
 )
 from fpl_team_picker.adapters.database_repositories import (
     DatabasePlayerRepository,
     DatabaseTeamRepository,
-    DatabaseFixtureRepository
+    DatabaseFixtureRepository,
 )
 
 
@@ -22,18 +22,18 @@ class TestDomainServicesIntegration:
     def repositories(self):
         """Create repository instances."""
         return {
-            'player_repo': DatabasePlayerRepository(),
-            'team_repo': DatabaseTeamRepository(),
-            'fixture_repo': DatabaseFixtureRepository()
+            "player_repo": DatabasePlayerRepository(),
+            "team_repo": DatabaseTeamRepository(),
+            "fixture_repo": DatabaseFixtureRepository(),
         }
 
     @pytest.fixture
     def data_service(self, repositories):
         """Create data orchestration service."""
         return DataOrchestrationService(
-            repositories['player_repo'],
-            repositories['team_repo'],
-            repositories['fixture_repo']
+            repositories["player_repo"],
+            repositories["team_repo"],
+            repositories["fixture_repo"],
         )
 
     @pytest.fixture
@@ -49,8 +49,17 @@ class TestDomainServicesIntegration:
     def test_data_orchestration_service_integration(self, data_service):
         """Test data orchestration service loads real data."""
         # Test with gameweek 1 (should always work)
-        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
-        required_keys = ["players", "teams", "fixtures", "xg_rates", "gameweek_info", "target_gameweek"]
+        gameweek_data = data_service.load_gameweek_data(
+            target_gameweek=1, form_window=3
+        )
+        required_keys = [
+            "players",
+            "teams",
+            "fixtures",
+            "xg_rates",
+            "gameweek_info",
+            "target_gameweek",
+        ]
 
         for key in required_keys:
             assert key in gameweek_data, f"Missing key: {key}"
@@ -66,7 +75,9 @@ class TestDomainServicesIntegration:
     def test_expected_points_service_integration(self, data_service, xp_service):
         """Test expected points service with real data."""
         # Load gameweek data first
-        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        gameweek_data = data_service.load_gameweek_data(
+            target_gameweek=1, form_window=3
+        )
 
         # Test rule-based model (more reliable than ML)
         players_with_xp = xp_service.calculate_combined_results(
@@ -84,10 +95,14 @@ class TestDomainServicesIntegration:
         assert players_with_xp["xP"].min() >= 0
         assert players_with_xp["xP"].max() <= 20  # Sanity check
 
-    def test_transfer_optimization_service_basic(self, data_service, xp_service, transfer_service):
+    def test_transfer_optimization_service_basic(
+        self, data_service, xp_service, transfer_service
+    ):
         """Test transfer optimization service basic functionality."""
         # Load data and calculate xP
-        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        gameweek_data = data_service.load_gameweek_data(
+            target_gameweek=1, form_window=3
+        )
         assert isinstance(gameweek_data, dict)
 
         players_with_xp = xp_service.calculate_combined_results(
@@ -101,9 +116,14 @@ class TestDomainServicesIntegration:
         assert len(starting_11) == 11
 
         # Test captain recommendation from full database (for testing/analysis)
-        captain_recommendation = transfer_service.get_captain_recommendation_from_database(players_with_xp)
+        captain_recommendation = (
+            transfer_service.get_captain_recommendation_from_database(players_with_xp)
+        )
         assert isinstance(captain_recommendation, dict)
-        assert "player_id" in captain_recommendation or "web_name" in captain_recommendation
+        assert (
+            "player_id" in captain_recommendation
+            or "web_name" in captain_recommendation
+        )
 
     def test_service_error_handling(self, data_service, xp_service):
         """Test that services handle errors gracefully."""
@@ -117,7 +137,7 @@ class TestDomainServicesIntegration:
             "teams": pd.DataFrame(),
             "fixtures": pd.DataFrame(),
             "xg_rates": pd.DataFrame(),
-            "target_gameweek": 1
+            "target_gameweek": 1,
         }
 
         # Should raise KeyError due to missing columns in empty DataFrames
@@ -127,7 +147,9 @@ class TestDomainServicesIntegration:
     def test_data_validation_service(self, data_service):
         """Test data validation functionality."""
         # Load valid data
-        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        gameweek_data = data_service.load_gameweek_data(
+            target_gameweek=1, form_window=3
+        )
         assert isinstance(gameweek_data, dict)
 
         # Test validation passes for valid data
@@ -155,9 +177,7 @@ class TestDomainServicesIntegration:
         """Test constraint validation functionality."""
         # Test valid constraints
         result = transfer_service.validate_optimization_constraints(
-            must_include_ids={1, 2, 3},
-            must_exclude_ids={4, 5, 6},
-            budget_limit=100.0
+            must_include_ids={1, 2, 3}, must_exclude_ids={4, 5, 6}, budget_limit=100.0
         )
         assert isinstance(result, dict)
         assert result["valid"] is True
@@ -166,7 +186,7 @@ class TestDomainServicesIntegration:
         result = transfer_service.validate_optimization_constraints(
             must_include_ids={1, 2, 3},
             must_exclude_ids={2, 3, 4},  # Overlaps with must_include
-            budget_limit=100.0
+            budget_limit=100.0,
         )
         assert isinstance(result, dict)
         assert result["valid"] is False

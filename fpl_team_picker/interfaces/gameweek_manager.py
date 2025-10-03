@@ -630,37 +630,67 @@ def _(mo):
 
 
 @app.cell
-def _(mo, optimization_horizon_toggle, players_with_xp):
+def _(gameweek_data, mo, optimization_horizon_toggle, players_with_xp):
     # Transfer Constraints UI
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
     optimize_button = mo.ui.run_button(label="Loading...", disabled=True)
 
     if not players_with_xp.empty:
-        player_options = []
-        # Use the selected horizon to determine sort column and display
-        horizon = (
-            optimization_horizon_toggle.value
-            if optimization_horizon_toggle.value
-            else "5gw"
+        # Use Pydantic validation for transfer constraint players
+        from fpl_team_picker.interfaces.data_contracts import (
+            validate_teams_dataframe,
+            create_transfer_constraint_players,
+            DataContractError as _DataContractError,
         )
-        sort_column = (
-            "xP_5gw"
-            if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
-            else "xP"
-        )
-        horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
 
-        for _, player in players_with_xp.sort_values(
-            ["position", sort_column], ascending=[True, False]
-        ).iterrows():
-            xp_display = player.get(sort_column, 0)
-            team_name = player.get(
-                "name", player.get("team", player.get("team_name", ""))
+        try:
+            # Determine horizon and sort column
+            horizon = (
+                optimization_horizon_toggle.value
+                if optimization_horizon_toggle.value
+                else "5gw"
+            )
+            sort_column = (
+                "xP_5gw"
+                if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
+                else "xP"
+            )
+            horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
+
+            # Get teams data for validation
+            _teams = gameweek_data.get("teams") if gameweek_data else None
+            if _teams is None or _teams.empty:
+                raise _DataContractError(
+                    "Teams data not available for transfer constraints"
+                )
+
+            # Create validated transfer constraint players using Pydantic
+            validated_players = create_transfer_constraint_players(
+                players_with_xp,
+                validate_teams_dataframe(_teams),
+                sort_column=sort_column,
+                context="transfer constraint generation",
             )
 
-            label = f"{player['web_name']} ({player['position']}, {team_name}) - £{player['price']:.1f}m, {xp_display:.2f} {horizon_label}"
-            player_options.append({"label": label, "value": player["player_id"]})
+            # Sort players by position and XP value
+            validated_players.sort(key=lambda p: (p.position.value, -p.xP))
+
+            # Generate UI options from validated Pydantic models
+            player_options = []
+            for player in validated_players:
+                label = player.to_display_label(horizon_label)
+                player_options.append({"label": label, "value": player.player_id})
+
+        except _DataContractError as e:
+            # Fallback to basic player list if validation fails
+            print(f"⚠️ Transfer constraint validation failed: {e}")
+            player_options = []
+            for _, player in players_with_xp.head(
+                10
+            ).iterrows():  # Limit to 10 for safety
+                label = f"{player['web_name']} ({player['position']}) - £{player['price']:.1f}m"
+                player_options.append({"label": label, "value": player["player_id"]})
 
         must_include_dropdown = mo.ui.multiselect(
             options=player_options,
@@ -729,13 +759,22 @@ def _(
     players_with_xp,
 ):
     # Transfer optimization using interactive optimization engine
+    from fpl_team_picker.interfaces.data_contracts import (
+        resolve_team_names_pydantic,
+        DataContractError as _DataContractError2,
+    )
+    from fpl_team_picker.domain.services.transfer_optimization_service import (
+        TransferOptimizationService as _TransferOptimizationService,
+    )
+    import pandas as _pd
+
     optimal_starting_11 = []
 
     if optimize_button is not None and optimize_button.value:
         if not players_with_xp.empty and gameweek_data:
             current_squad = gameweek_data.get("current_squad")
             team_data = gameweek_data.get("manager_team")
-            teams = gameweek_data.get("teams")
+            _teams2 = gameweek_data.get("teams")
 
             if current_squad is not None and not current_squad.empty:
                 from fpl_team_picker.domain.services import (
@@ -769,7 +808,7 @@ def _(
                         players_with_xp=players_with_xp,
                         current_squad=current_squad,
                         team_data=team_data,
-                        teams=teams,
+                        teams=_teams2,
                         optimization_horizon=selected_horizon,
                         must_include_ids=must_include_ids,
                         must_exclude_ids=must_exclude_ids,
@@ -796,30 +835,16 @@ def _(
                         if optimal_starting_11:
                             _starting_11_df = _pd.DataFrame(optimal_starting_11)
 
-                            # Fix team names - enforce data contract
+                            # Fix team names - enforce data contract using Pydantic validation
                             if (
                                 "team" in _starting_11_df.columns
-                                and teams is not None
-                                and not teams.empty
+                                and _teams2 is not None
+                                and not _teams2.empty
                             ):
-                                # Ensure consistent column naming in data contract
-                                team_id_col = (
-                                    "id" if "id" in teams.columns else "team_id"
-                                )
-                                team_map = dict(zip(teams[team_id_col], teams["name"]))
-
-                                # Check if mapping will work - fail fast if data contract violated
-                                team_values = _starting_11_df["team"].unique()
-                                available_teams = set(teams[team_id_col])
-
-                                if not set(team_values).issubset(available_teams):
-                                    missing_teams = set(team_values) - available_teams
-                                    raise ValueError(
-                                        f"Data contract violation: team IDs {missing_teams} not found in teams data. Expected teams: {available_teams}"
-                                    )
-
-                                _starting_11_df["name"] = _starting_11_df["team"].map(
-                                    team_map
+                                _starting_11_df = resolve_team_names_pydantic(
+                                    _starting_11_df,
+                                    _teams2,
+                                    context="starting 11 display",
                                 )
 
                             display_cols = [
@@ -851,32 +876,15 @@ def _(
                                     p.get("xP", 0) for p in bench_players
                                 )
 
-                                # Fix team names for bench - enforce data contract
+                                # Fix team names for bench - enforce data contract using Pydantic validation
                                 if (
                                     "team" in bench_df.columns
-                                    and teams is not None
-                                    and not teams.empty
+                                    and _teams2 is not None
+                                    and not _teams2.empty
                                 ):
-                                    team_id_col = (
-                                        "id" if "id" in teams.columns else "team_id"
+                                    bench_df = resolve_team_names_pydantic(
+                                        bench_df, _teams2, context="bench display"
                                     )
-                                    team_map = dict(
-                                        zip(teams[team_id_col], teams["name"])
-                                    )
-
-                                    # Check if mapping will work - fail fast if data contract violated
-                                    team_values = bench_df["team"].unique()
-                                    available_teams = set(teams[team_id_col])
-
-                                    if not set(team_values).issubset(available_teams):
-                                        missing_teams = (
-                                            set(team_values) - available_teams
-                                        )
-                                        raise ValueError(
-                                            f"Data contract violation: bench team IDs {missing_teams} not found in teams data. Expected teams: {available_teams}"
-                                        )
-
-                                    bench_df["name"] = bench_df["team"].map(team_map)
 
                                 bench_display_cols = [
                                     col
@@ -937,8 +945,21 @@ def _(
                             )
                         )
 
+                except (ValueError, _DataContractError2) as e:
+                    # Data contract violations - actionable error messages
+                    optimization_display = mo.md(
+                        f"❌ **Data contract violation:** {str(e)}"
+                    )
+                except (KeyError, TypeError) as e:
+                    # Missing fields or type mismatches - indicates upstream data issues
+                    optimization_display = mo.md(
+                        f"❌ **Data structure error:** {str(e)} - Fix data loading upstream"
+                    )
                 except Exception as e:
-                    optimization_display = mo.md(f"⚠️ Optimization failed: {str(e)}")
+                    # Unexpected errors - preserve for debugging but minimize scope
+                    optimization_display = mo.md(
+                        f"⚠️ **Unexpected optimization error:** {str(e)}"
+                    )
             else:
                 optimization_display = mo.md(
                     "❌ **Current squad not available** - cannot optimize transfers"
@@ -1062,6 +1083,9 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 
         if _current_squad is not None and not _current_squad.empty and _team_data:
             from fpl_team_picker.domain.services import ChipAssessmentService
+            from fpl_team_picker.interfaces.data_contracts import (
+                DataContractError as _DataContractError3,
+            )
 
             # Get available chips from team data
             available_chips = _team_data.get(
@@ -1132,9 +1156,20 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 
                     chip_assessment_display = mo.vstack(chip_displays)
 
-                except Exception as e:
+                except (ValueError, _DataContractError3) as e:
+                    # Data contract violations in chip assessment
                     chip_assessment_display = mo.md(
-                        f"⚠️ **Chip assessment failed:** {str(e)}"
+                        f"❌ **Chip assessment data error:** {str(e)}"
+                    )
+                except (KeyError, TypeError, AttributeError) as e:
+                    # Missing fields or structure issues in chip data
+                    chip_assessment_display = mo.md(
+                        f"❌ **Chip data structure error:** {str(e)} - Fix data upstream"
+                    )
+                except Exception as e:
+                    # Unexpected chip assessment errors
+                    chip_assessment_display = mo.md(
+                        f"⚠️ **Unexpected chip assessment error:** {str(e)}"
                     )
             else:
                 chip_assessment_display = mo.md(

@@ -7,11 +7,13 @@ from fpl_team_picker.domain.services import (
     DataOrchestrationService,
     ExpectedPointsService,
 )
-from fpl_team_picker.domain.services.performance_analytics_service import PerformanceAnalyticsService
+from fpl_team_picker.domain.services.performance_analytics_service import (
+    PerformanceAnalyticsService,
+)
 from fpl_team_picker.adapters.database_repositories import (
     DatabasePlayerRepository,
     DatabaseTeamRepository,
-    DatabaseFixtureRepository
+    DatabaseFixtureRepository,
 )
 
 
@@ -36,10 +38,14 @@ class TestPerformanceAnalyticsServiceIntegration:
         xp_service = ExpectedPointsService()
 
         # Load gameweek data
-        gameweek_data = data_service.load_gameweek_data(target_gameweek=1, form_window=3)
+        gameweek_data = data_service.load_gameweek_data(
+            target_gameweek=1, form_window=3
+        )
 
         # Calculate XP
-        players_with_xp = xp_service.calculate_combined_results(gameweek_data, use_ml_model=False)
+        players_with_xp = xp_service.calculate_combined_results(
+            gameweek_data, use_ml_model=False
+        )
         gameweek_data["players_with_xp"] = players_with_xp
 
         return gameweek_data
@@ -69,14 +75,18 @@ class TestPerformanceAnalyticsServiceIntegration:
         # Check that we have data for standard positions
         positions = position_data["position_analysis"].keys()
         expected_positions = {"GKP", "DEF", "MID", "FWD"}
-        assert expected_positions.intersection(positions), "Should have at least some standard positions"
+        assert expected_positions.intersection(positions), (
+            "Should have at least some standard positions"
+        )
 
     def test_specific_position_analysis(self, analytics_service, sample_gameweek_data):
         """Test analysis for a specific position."""
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Test specific position analysis
-        mid_data = analytics_service.analyze_position_trends(players_with_xp, position="MID")
+        mid_data = analytics_service.analyze_position_trends(
+            players_with_xp, position="MID"
+        )
         assert isinstance(mid_data, dict)
         assert "position_analysis" in mid_data
         assert "MID" in mid_data["position_analysis"]
@@ -102,12 +112,16 @@ class TestPerformanceAnalyticsServiceIntegration:
             assert player["price"] <= 7.0
             assert player["xP"] >= 5.0
 
-    def test_form_analysis_without_form_data(self, analytics_service, sample_gameweek_data):
+    def test_form_analysis_without_form_data(
+        self, analytics_service, sample_gameweek_data
+    ):
         """Test form analysis when form data is not available."""
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
         # Remove form columns if they exist to test fallback behavior
-        players_no_form = players_with_xp.drop(columns=["momentum", "form_multiplier"], errors="ignore")
+        players_no_form = players_with_xp.drop(
+            columns=["momentum", "form_multiplier"], errors="ignore"
+        )
 
         # This should work or return empty results when no form data is available
         form_result = analytics_service.analyze_player_form(players_no_form)
@@ -122,22 +136,23 @@ class TestPerformanceAnalyticsServiceIntegration:
             analytics_service.get_statistical_insights(empty_df)
 
         # Test with invalid position but proper column structure
-        df_with_columns = pd.DataFrame({
-            'xP': [],
-            'position': [],
-            'price': [],
-            'web_name': []
-        })
+        df_with_columns = pd.DataFrame(
+            {"xP": [], "position": [], "price": [], "web_name": []}
+        )
 
         # Invalid position should handle gracefully or return empty results
-        result = analytics_service.analyze_position_trends(df_with_columns, position="INVALID")
+        result = analytics_service.analyze_position_trends(
+            df_with_columns, position="INVALID"
+        )
         assert isinstance(result, dict)  # Should return something, even if empty
 
         # Test breakout detection with empty data - should raise exception
         with pytest.raises((KeyError, ValueError)):
             analytics_service.detect_breakout_players(empty_df)
 
-    def test_price_performance_correlation(self, analytics_service, sample_gameweek_data):
+    def test_price_performance_correlation(
+        self, analytics_service, sample_gameweek_data
+    ):
         """Test price-performance correlation analysis."""
         players_with_xp = sample_gameweek_data["players_with_xp"]
 
