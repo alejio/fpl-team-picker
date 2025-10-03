@@ -2,7 +2,7 @@
 
 import sys
 import os
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Union
 from datetime import datetime
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -78,51 +78,51 @@ class RawEnrichedPlayerData(BaseModel):
     status: str = Field(default="a", description="Availability status")
     as_of_utc: datetime = Field(..., description="Data timestamp")
 
-    # Season performance (all should be numeric strings or numbers)
-    total_points: Optional[str] = Field(None)
-    form: Optional[str] = Field(None)
-    points_per_game: Optional[str] = Field(None)
-    minutes: Optional[str] = Field(None)
-    starts: Optional[str] = Field(None)
+    # Season performance (allow both strings and numbers for flexible DB sources)
+    total_points: Optional[Union[str, int, float]] = Field(None)
+    form: Optional[Union[str, float]] = Field(None)
+    points_per_game: Optional[Union[str, float]] = Field(None)
+    minutes: Optional[Union[str, int]] = Field(None)
+    starts: Optional[Union[str, int]] = Field(None)
 
     # Match statistics
-    goals_scored: Optional[str] = Field(None)
-    assists: Optional[str] = Field(None)
-    clean_sheets: Optional[str] = Field(None)
-    goals_conceded: Optional[str] = Field(None)
-    yellow_cards: Optional[str] = Field(None)
-    red_cards: Optional[str] = Field(None)
-    saves: Optional[str] = Field(None)
+    goals_scored: Optional[Union[str, int]] = Field(None)
+    assists: Optional[Union[str, int]] = Field(None)
+    clean_sheets: Optional[Union[str, int]] = Field(None)
+    goals_conceded: Optional[Union[str, int]] = Field(None)
+    yellow_cards: Optional[Union[str, int]] = Field(None)
+    red_cards: Optional[Union[str, int]] = Field(None)
+    saves: Optional[Union[str, int]] = Field(None)
 
     # Bonus and ICT
-    bonus: Optional[str] = Field(None)
-    bps: Optional[str] = Field(None)
-    influence: Optional[str] = Field(None)
-    creativity: Optional[str] = Field(None)
-    threat: Optional[str] = Field(None)
-    ict_index: Optional[str] = Field(None)
+    bonus: Optional[Union[str, int]] = Field(None)
+    bps: Optional[Union[str, int]] = Field(None)
+    influence: Optional[Union[str, float]] = Field(None)
+    creativity: Optional[Union[str, float]] = Field(None)
+    threat: Optional[Union[str, float]] = Field(None)
+    ict_index: Optional[Union[str, float]] = Field(None)
 
     # Expected stats
-    expected_goals: Optional[str] = Field(None)
-    expected_assists: Optional[str] = Field(None)
-    expected_goals_per_90: Optional[str] = Field(None)
-    expected_assists_per_90: Optional[str] = Field(None)
+    expected_goals: Optional[Union[str, float]] = Field(None)
+    expected_assists: Optional[Union[str, float]] = Field(None)
+    expected_goals_per_90: Optional[Union[str, float]] = Field(None)
+    expected_assists_per_90: Optional[Union[str, float]] = Field(None)
 
     # Market data
-    value_form: Optional[str] = Field(None)
-    value_season: Optional[str] = Field(None)
-    transfers_in: Optional[str] = Field(None)
-    transfers_out: Optional[str] = Field(None)
-    transfers_in_event: Optional[str] = Field(None)
-    transfers_out_event: Optional[str] = Field(None)
+    value_form: Optional[Union[str, float]] = Field(None)
+    value_season: Optional[Union[str, float]] = Field(None)
+    transfers_in: Optional[Union[str, int]] = Field(None)
+    transfers_out: Optional[Union[str, int]] = Field(None)
+    transfers_in_event: Optional[Union[str, int]] = Field(None)
+    transfers_out_event: Optional[Union[str, int]] = Field(None)
 
     # Availability
-    chance_of_playing_this_round: Optional[str] = Field(None)
-    chance_of_playing_next_round: Optional[str] = Field(None)
+    chance_of_playing_this_round: Optional[Union[str, float]] = Field(None)
+    chance_of_playing_next_round: Optional[Union[str, float]] = Field(None)
 
     # Set pieces
-    penalties_order: Optional[str] = Field(None)
-    corners_and_indirect_freekicks_order: Optional[str] = Field(None)
+    penalties_order: Optional[Union[str, int]] = Field(None)
+    corners_and_indirect_freekicks_order: Optional[Union[str, int]] = Field(None)
 
     # News
     news: Optional[str] = Field(None)
@@ -133,9 +133,12 @@ class RawEnrichedPlayerData(BaseModel):
         extra = "allow"
 
     def to_numeric(self, field_name: str, default: float = 0.0) -> float:
-        """Safely convert string field to numeric with validation."""
+        """Safely convert Union[str, int, float] field to numeric with validation."""
         value = getattr(self, field_name)
         if value is None or value == "":
+            return default
+        # Handle pandas NaN values
+        if isinstance(value, float) and pd.isna(value):
             return default
         try:
             return float(value)
@@ -143,8 +146,9 @@ class RawEnrichedPlayerData(BaseModel):
             raise ValueError(f"Invalid numeric value for {field_name}: {value}")
 
     def to_int(self, field_name: str, default: int = 0) -> int:
-        """Safely convert string field to integer with validation."""
-        return int(self.to_numeric(field_name, default))
+        """Safely convert Union[str, int, float] field to integer with validation."""
+        numeric_value = self.to_numeric(field_name, default)
+        return int(numeric_value)
 
 
 class DatabaseConfiguration(BaseModel):

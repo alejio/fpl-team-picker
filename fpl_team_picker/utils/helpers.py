@@ -13,27 +13,46 @@ from typing import List
 
 def get_safe_columns(df: pd.DataFrame, preferred_columns: List[str]) -> List[str]:
     """
-    Get columns that exist in the DataFrame, with fallback to first few columns
+    Get columns that exist in the DataFrame - FAIL FAST if data contract is violated.
 
     Args:
         df: DataFrame to check columns for
         preferred_columns: List of preferred column names
 
     Returns:
-        List of safe column names that exist in the DataFrame
+        List of column names that exist in the DataFrame
+
+    Raises:
+        ValueError: If critical data contract violations are detected
     """
     if df.empty:
-        return preferred_columns[:3]  # Return first 3 as fallback
+        raise ValueError("Cannot process empty DataFrame - fix data loading upstream")
 
     available_columns = list(df.columns)
     safe_columns = []
+    missing_columns = []
 
     for col in preferred_columns:
         if col in available_columns:
             safe_columns.append(col)
+        else:
+            missing_columns.append(col)
 
-    # Fallback to first 3 columns if none of preferred are found
-    return safe_columns if safe_columns else available_columns[:3]
+    # Report missing columns for debugging (but don't fail for optional columns)
+    if missing_columns:
+        print(f"ℹ️ Missing optional columns: {missing_columns}")
+        print(f"ℹ️ Available columns: {len(available_columns)} total")
+
+    # Only fail if we have NO matching columns (indicates major data contract violation)
+    if not safe_columns:
+        raise ValueError(
+            f"Data contract violation: No preferred columns found in DataFrame.\n"
+            f"Expected: {preferred_columns[:5]}...\n"
+            f"Available: {available_columns[:10]}...\n"
+            f"Fix data processing upstream."
+        )
+
+    return safe_columns
 
 
 def create_display_dataframe(
@@ -45,7 +64,10 @@ def create_display_dataframe(
     round_decimals: int = 2,
 ) -> pd.DataFrame:
     """
-    Create a cleaned DataFrame for display with safe column handling
+    Create a cleaned DataFrame for display with explicit column contracts.
+
+    FAIL FAST principle: If data contract is violated, error clearly rather than
+    silently falling back to subset of data.
 
     Args:
         df: Source DataFrame
@@ -57,18 +79,33 @@ def create_display_dataframe(
 
     Returns:
         Cleaned DataFrame ready for display
+
+    Raises:
+        ValueError: If critical data contract violations detected
     """
     if df.empty:
-        return pd.DataFrame()
+        raise ValueError(
+            "Cannot create display from empty DataFrame - fix data upstream"
+        )
 
-    # Get safe core columns
+    print(
+        f"📊 Creating display from DataFrame with {len(df.columns)} columns, {len(df)} rows"
+    )
+
+    # Get core columns (will fail fast if major contract violation)
     display_columns = get_safe_columns(df, core_columns)
+    print(f"📋 Core columns found: {len(display_columns)}/{len(core_columns)}")
 
     # Add optional columns that exist
     if optional_columns:
+        optional_found = 0
         for col in optional_columns:
             if col in df.columns and col not in display_columns:
                 display_columns.append(col)
+                optional_found += 1
+        print(f"📋 Optional columns found: {optional_found}/{len(optional_columns)}")
+
+    print(f"📋 Total display columns: {len(display_columns)}")
 
     # Create display DataFrame
     display_df = df[display_columns].copy()
@@ -81,5 +118,10 @@ def create_display_dataframe(
     # Sort if column is available
     if sort_by and sort_by in display_df.columns:
         display_df = display_df.sort_values(sort_by, ascending=ascending)
+    elif sort_by:
+        print(f"⚠️ Warning: Sort column '{sort_by}' not found in display columns")
 
+    print(
+        f"✅ Display DataFrame created: {len(display_df)} rows × {len(display_df.columns)} columns"
+    )
     return display_df
