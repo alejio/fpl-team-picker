@@ -296,47 +296,61 @@ class DataOrchestrationService:
 
         # 3. Override player prices with historical prices from gameweek performance
         # Use the last available price before target_gameweek
-        try:
-            price_gw = target_gameweek - 1 if target_gameweek > 1 else 1
-            historical_prices = client.get_gameweek_performance(price_gw)
+        price_gw = target_gameweek - 1 if target_gameweek > 1 else 1
+        historical_prices = client.get_gameweek_performance(price_gw)
 
-            if not historical_prices.empty and "value" in historical_prices.columns:
-                # Merge historical prices into players dataframe
-                price_map = historical_prices.set_index("player_id")["value"].to_dict()
-                players["now_cost"] = players["player_id"].map(
-                    lambda pid: price_map.get(
-                        pid,
-                        players.loc[players["player_id"] == pid, "now_cost"].iloc[0],
-                    )
-                )
-        except Exception:
-            # If we can't get historical prices, use current prices (acceptable degradation)
-            pass
+        if historical_prices.empty:
+            raise ValueError(
+                f"No historical price data available for GW{price_gw}. "
+                f"Cannot recompute GW{target_gameweek} without accurate historical prices. "
+                f"Fix data quality in dataset-builder."
+            )
 
-        # 4. Load availability snapshot (if available and requested)
+        if "value" not in historical_prices.columns:
+            raise ValueError(
+                f"Historical price data for GW{price_gw} missing 'value' column. "
+                f"Data contract violation - fix dataset-builder schema."
+            )
+
+        # Merge historical prices into players dataframe
+        price_map = historical_prices.set_index("player_id")["value"].to_dict()
+
+        # Validate all players have historical prices
+        missing_prices = set(players["player_id"]) - set(price_map.keys())
+        if missing_prices:
+            raise ValueError(
+                f"Historical prices missing for {len(missing_prices)} players in GW{price_gw}. "
+                f"Data quality issue - fix dataset-builder. Missing player IDs: {list(missing_prices)[:10]}"
+            )
+
+        players["now_cost"] = players["player_id"].map(price_map)
+
+        # 4. Load availability snapshot (required for accurate recomputation)
         availability_snapshot = None
-        if include_snapshots and target_gameweek >= 8:
-            try:
-                availability_snapshot = client.get_player_availability_snapshot(
-                    gameweek=target_gameweek, include_backfilled=True
-                )
-            except Exception:
-                # Snapshots may not be available for all gameweeks
-                pass
+        if include_snapshots:
+            availability_snapshot = client.get_player_availability_snapshot(
+                gameweek=target_gameweek, include_backfilled=True
+            )
 
-        # 5. Approximate availability for pre-snapshot gameweeks (GW1-7)
-        if availability_snapshot is None and live_data_historical is not None:
-            # Infer availability: if player had 0 minutes → likely unavailable
-            recent_performance = live_data_historical[
-                live_data_historical["gameweek"] == target_gameweek - 1
+            if availability_snapshot.empty:
+                raise ValueError(
+                    f"No availability snapshot data for GW{target_gameweek}. "
+                    f"Cannot recompute without player availability/injury status. "
+                    f"Run snapshot capture in dataset-builder first: "
+                    f"'uv run main.py snapshot --gameweek {target_gameweek}'"
+                )
+
+            # Validate snapshot has required fields
+            required_snapshot_fields = ["player_id", "status", "gameweek"]
+            missing_fields = [
+                f
+                for f in required_snapshot_fields
+                if f not in availability_snapshot.columns
             ]
-            if not recent_performance.empty:
-                unavailable_players = recent_performance[
-                    recent_performance["minutes"] == 0
-                ]["player_id"].unique()
-                # Mark these players as potentially unavailable
-                players["inferred_unavailable"] = players["player_id"].isin(
-                    unavailable_players
+            if missing_fields:
+                raise ValueError(
+                    f"Availability snapshot for GW{target_gameweek} missing required fields: {missing_fields}. "
+                    f"Data contract violation - fix dataset-builder snapshot schema."
                 )
 
         # 6. Load teams data (unchanged - stable reference)

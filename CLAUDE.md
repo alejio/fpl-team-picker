@@ -466,26 +466,42 @@ for gw in range(2, 6):  # GW2-5 for training
 - ✅ Future-proof for evaluating new algorithms against 2+ seasons of data
 - ✅ Minimal storage overhead (reuse existing gameweek_performance data)
 
-**Current Accuracy:**
-- **~95% accuracy** now (using existing historical data - prices, performance, fixtures)
-- **~99% accuracy** once availability snapshots populated (GW8+)
+### Historical Data Requirements
 
-### Historical Data Availability
-
-**Available Now (95% Accuracy):**
+**Required Data (Fail Fast if Missing):**
 - ✅ **Historical prices**: `raw_player_gameweek_performance.value` field
 - ✅ **Historical performance**: Goals, assists, minutes, bonus points, ICT
 - ✅ **Historical fixtures**: Team matchups, home/away, difficulty
 - ✅ **Historical team data**: Stable team references
-
-**Recently Added (99% Accuracy - GW8+):**
 - ✅ **Historical availability**: `get_player_availability_snapshot(gw)` from dataset-builder
-- ✅ **Injury/suspension status**: Player status, chance_of_playing, news
-- ✅ **Availability snapshots**: APPEND-ONLY capture per gameweek
+  - Player status (available, injured, suspended, etc.)
+  - Chance of playing percentages
+  - Injury/suspension news
 
-**Workaround for GW1-7:**
-- Infer availability from 0 minutes played (approximation)
-- ~5% prediction error from missing availability data in early season
+**Data Quality Philosophy:**
+- ❌ **No fallbacks** - If data is missing, fail fast with actionable error message
+- ✅ **Boundary validation** - Validate at data loading boundary, trust downstream
+- ✅ **Upstream fixes** - Missing data indicates dataset-builder quality issue to fix
+
+**Before Recomputing Historical Gameweeks:**
+Ensure dataset-builder has captured snapshots for target gameweeks:
+```bash
+# Capture snapshot for specific gameweek
+cd ../fpl-dataset-builder
+uv run main.py snapshot --gameweek 8
+
+# Verify snapshot exists
+python -c "from client import FPLDataClient; print(FPLDataClient().get_player_availability_snapshot(8))"
+```
+
+**Error Handling:**
+Recomputation will fail with clear error messages if:
+- Historical prices missing for any gameweek
+- Availability snapshots not captured
+- Required data fields missing from dataset-builder schema
+- Player data incomplete or inconsistent
+
+Fix upstream data quality issues in dataset-builder rather than working around them.
 
 ### Core Components
 
@@ -505,8 +521,13 @@ historical_data = orchestration_service.load_historical_gameweek_state(
 
 # Returns: Same structure as load_gameweek_data() but with historical values
 # - players: with historical prices from gameweek_performance.value
-# - availability_snapshot: from dataset-builder (GW8+) or inferred (GW1-7)
+# - availability_snapshot: from dataset-builder (required - fails if missing)
 # - live_data_historical: cumulative up to target_gameweek only (no future data)
+
+# Fails fast with actionable error if:
+# - Historical prices missing for target gameweek
+# - Availability snapshot not captured
+# - Required fields missing from data
 ```
 
 #### 2. Algorithm Version Management (`PerformanceAnalyticsService`)
@@ -1004,3 +1025,4 @@ marimo check fpl_team_picker/interfaces/ --fix
 The clean architecture transformation enables rapid iteration across multiple frontends while maintaining a single source of truth for all FPL analysis logic. Domain services can be developed, tested, and deployed independently of any specific UI technology.
 - Remember to run ruff formatting and linting/checking. Create tests parsimoniously but where necessary don't omit them. Stop to make commits. Remember to update @CLAUDE.md
 - Use pydantic instead of dataclass.
+- Don't do fallbacks in application code when the issue lies in upstream data quality problems.
