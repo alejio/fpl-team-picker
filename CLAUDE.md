@@ -453,6 +453,220 @@ for gw in range(2, 6):  # GW2-5 for training
 - Validates against actual FPL results with performance metrics
 - Experimental interface for model development and accuracy testing
 
+## Historical xP Recomputation Framework
+
+**Recomputation Strategy** - Instead of storing predictions at prediction time, we recompute historical xP using arbitrary algorithms to enable retroactive testing and model improvement.
+
+### Why Recomputation Over Storage?
+
+**Benefits:**
+- ✅ Test unlimited algorithm variations retroactively on historical data
+- ✅ Not locked into predictions made with old/buggy algorithm versions
+- ✅ Enable scientific hypothesis testing and A/B comparisons
+- ✅ Future-proof for evaluating new algorithms against 2+ seasons of data
+- ✅ Minimal storage overhead (reuse existing gameweek_performance data)
+
+### Historical Data Requirements
+
+**Required Data (Fail Fast if Missing):**
+- ✅ **Historical prices**: `raw_player_gameweek_performance.value` field
+- ✅ **Historical performance**: Goals, assists, minutes, bonus points, ICT
+- ✅ **Historical fixtures**: Team matchups, home/away, difficulty
+- ✅ **Historical team data**: Stable team references
+- ✅ **Historical availability**: `get_player_availability_snapshot(gw)` from dataset-builder
+  - Player status (available, injured, suspended, etc.)
+  - Chance of playing percentages
+  - Injury/suspension news
+
+**Data Quality Philosophy:**
+- ❌ **No fallbacks** - If data is missing, fail fast with actionable error message
+- ✅ **Boundary validation** - Validate at data loading boundary, trust downstream
+- ✅ **Upstream fixes** - Missing data indicates dataset-builder quality issue to fix
+
+**Before Recomputing Historical Gameweeks:**
+Ensure dataset-builder has captured snapshots for target gameweeks:
+```bash
+# Capture snapshot for specific gameweek
+cd ../fpl-dataset-builder
+uv run main.py snapshot --gameweek 8
+
+# Verify snapshot exists
+python -c "from client import FPLDataClient; print(FPLDataClient().get_player_availability_snapshot(8))"
+```
+
+**Error Handling:**
+Recomputation will fail with clear error messages if:
+- Historical prices missing for any gameweek
+- Availability snapshots not captured
+- Required data fields missing from dataset-builder schema
+- Player data incomplete or inconsistent
+
+Fix upstream data quality issues in dataset-builder rather than working around them.
+
+### Core Components
+
+#### 1. Historical Data Loader (`DataOrchestrationService`)
+
+```python
+from fpl_team_picker.domain.services import DataOrchestrationService
+
+orchestration_service = DataOrchestrationService()
+
+# Load gameweek state as it existed historically
+historical_data = orchestration_service.load_historical_gameweek_state(
+    target_gameweek=5,
+    form_window=5,
+    include_snapshots=True  # Use availability snapshots if available
+)
+
+# Returns: Same structure as load_gameweek_data() but with historical values
+# - players: with historical prices from gameweek_performance.value
+# - availability_snapshot: from dataset-builder (required - fails if missing)
+# - live_data_historical: cumulative up to target_gameweek only (no future data)
+
+# Fails fast with actionable error if:
+# - Historical prices missing for target gameweek
+# - Availability snapshot not captured
+# - Required fields missing from data
+```
+
+#### 2. Algorithm Version Management (`PerformanceAnalyticsService`)
+
+```python
+from fpl_team_picker.domain.services.performance_analytics_service import (
+    AlgorithmVersion,
+    ALGORITHM_VERSIONS,
+)
+
+# Pydantic-based algorithm configuration
+class AlgorithmVersion(BaseModel):
+    name: str
+    form_weight: float  # 0.0-1.0
+    form_window: int    # 1-10 gameweeks
+    use_team_strength: bool
+    team_strength_params: Dict[str, Any]
+    minutes_model_params: Dict[str, Any]
+    statistical_estimation_params: Dict[str, Any]
+
+# Pre-configured algorithm versions
+ALGORITHM_VERSIONS = {
+    "v1.0": AlgorithmVersion(form_weight=0.7, form_window=5, ...),
+    "current": AlgorithmVersion(form_weight=0.7, form_window=5, ...),
+    "experimental_high_form": AlgorithmVersion(form_weight=0.9, form_window=3, ...),
+    "experimental_low_form": AlgorithmVersion(form_weight=0.5, form_window=8, ...),
+}
+```
+
+#### 3. Historical Recomputation Engine
+
+```python
+from fpl_team_picker.domain.services import PerformanceAnalyticsService
+
+analytics_service = PerformanceAnalyticsService()
+
+# Recompute xP for a single historical gameweek
+predictions_gw5 = analytics_service.recompute_historical_xp(
+    target_gameweek=5,
+    algorithm_version="current",
+    include_snapshots=True
+)
+# Returns: DataFrame with xP, xP_5gw, algorithm_version, computed_at, target_gameweek
+
+# Batch recompute across multiple gameweeks and algorithms
+comparison_df = analytics_service.batch_recompute_season(
+    start_gw=1,
+    end_gw=7,
+    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"],
+    include_snapshots=True
+)
+# Returns: Multi-index DataFrame (gameweek, player_id, algorithm_version) → xP
+```
+
+#### 4. Accuracy Metrics Calculation
+
+```python
+# Get actual results from dataset-builder
+from client import FPLDataClient
+client = FPLDataClient()
+actual_results = client.get_gameweek_performance(5)
+
+# Calculate accuracy metrics
+accuracy_metrics = analytics_service.calculate_accuracy_metrics(
+    predictions_df=predictions_gw5,
+    actual_results_df=actual_results,
+    by_position=True  # Position-specific metrics
+)
+
+# Returns:
+# {
+#   "overall": {"mae": 2.1, "rmse": 2.8, "correlation": 0.65, ...},
+#   "by_position": {
+#     "GKP": {"mae": 1.5, "rmse": 2.0, "correlation": 0.70, ...},
+#     "DEF": {"mae": 2.0, "rmse": 2.5, "correlation": 0.60, ...},
+#     "MID": {"mae": 2.3, "rmse": 3.0, "correlation": 0.62, ...},
+#     "FWD": {"mae": 2.5, "rmse": 3.2, "correlation": 0.58, ...}
+#   },
+#   "player_count": 587
+# }
+```
+
+### Use Cases
+
+**1. Algorithm Optimization:**
+```python
+# Test 3 different form weights on GW1-7
+results = analytics_service.batch_recompute_season(
+    start_gw=1, end_gw=7,
+    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"]
+)
+
+# Compare accuracy for each algorithm version
+for algo in ["current", "experimental_high_form", "experimental_low_form"]:
+    algo_predictions = results.xs(algo, level="algorithm_version")
+    metrics = analytics_service.calculate_accuracy_metrics(
+        algo_predictions, actual_results
+    )
+    print(f"{algo}: MAE={metrics['overall']['mae']}")
+```
+
+**2. Transfer ROI Analysis:**
+```python
+# Reconstruct what xP would have predicted at GW3 (before transfer decision)
+gw3_predictions = analytics_service.recompute_historical_xp(target_gameweek=3)
+
+# Compare transferred-in vs transferred-out players
+# Calculate net points over 5GW horizon
+# Identify systematic transfer biases
+```
+
+**3. Model Validation:**
+```python
+# Validate current algorithm against last 10 gameweeks
+validation_results = []
+for gw in range(1, 11):
+    predictions = analytics_service.recompute_historical_xp(target_gameweek=gw)
+    actual = client.get_gameweek_performance(gw)
+    metrics = analytics_service.calculate_accuracy_metrics(predictions, actual)
+    validation_results.append(metrics)
+
+# Analyze accuracy trends over time
+```
+
+### Testing
+
+```bash
+# Run historical recomputation tests
+pytest tests/domain/services/test_historical_recomputation.py -v
+
+# Test coverage includes:
+# - Historical data loading with temporal consistency
+# - Algorithm version validation
+# - Single gameweek recomputation
+# - Batch recomputation across gameweeks and algorithms
+# - Accuracy metrics calculation (overall + position-specific)
+# - Error handling for invalid inputs
+```
+
 ## Development Commands
 
 **Primary Interfaces:**
@@ -809,3 +1023,6 @@ marimo check fpl_team_picker/interfaces/ --fix
 ```
 
 The clean architecture transformation enables rapid iteration across multiple frontends while maintaining a single source of truth for all FPL analysis logic. Domain services can be developed, tested, and deployed independently of any specific UI technology.
+- Remember to run ruff formatting and linting/checking. Create tests parsimoniously but where necessary don't omit them. Stop to make commits. Remember to update @CLAUDE.md
+- Use pydantic instead of dataclass.
+- Don't do fallbacks in application code when the issue lies in upstream data quality problems.

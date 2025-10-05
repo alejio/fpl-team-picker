@@ -2,6 +2,85 @@
 
 from typing import Dict, Any, List, Optional
 import pandas as pd
+import numpy as np
+from pydantic import BaseModel, Field
+
+
+class AlgorithmVersion(BaseModel):
+    """Configuration for a specific xP algorithm version.
+
+    This enables retroactive testing of different algorithm parameters
+    on historical data to optimize model accuracy.
+    """
+
+    name: str = Field(description="Algorithm version identifier")
+    form_weight: float = Field(
+        default=0.7, ge=0.0, le=1.0, description="Weight for recent form (0-1)"
+    )
+    form_window: int = Field(
+        default=5, ge=1, le=10, description="Number of gameweeks for form calculation"
+    )
+    use_team_strength: bool = Field(
+        default=True, description="Whether to use dynamic team strength"
+    )
+    team_strength_params: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "historical_transition_gw": 8,
+            "rolling_window": 6,
+        },
+        description="Team strength calculation parameters",
+    )
+    minutes_model_params: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "use_sbp": True,
+            "use_availability": True,
+            "use_form_adjustment": True,
+        },
+        description="Minutes prediction model parameters",
+    )
+    statistical_estimation_params: Dict[str, Any] = Field(
+        default_factory=lambda: {
+            "use_position_averages": True,
+            "use_team_context": True,
+        },
+        description="xG/xA statistical estimation parameters",
+    )
+
+    class Config:
+        frozen = True  # Make immutable
+
+
+# Algorithm version registry - add new versions here for testing
+ALGORITHM_VERSIONS: Dict[str, AlgorithmVersion] = {
+    "v1.0": AlgorithmVersion(
+        name="v1.0",
+        form_weight=0.7,
+        form_window=5,
+        use_team_strength=True,
+        team_strength_params={
+            "historical_transition_gw": 8,
+            "rolling_window": 6,
+        },
+    ),
+    "current": AlgorithmVersion(
+        name="current",
+        form_weight=0.7,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "experimental_high_form": AlgorithmVersion(
+        name="experimental_high_form",
+        form_weight=0.9,
+        form_window=3,
+        use_team_strength=True,
+    ),
+    "experimental_low_form": AlgorithmVersion(
+        name="experimental_low_form",
+        form_weight=0.5,
+        form_window=8,
+        use_team_strength=True,
+    ),
+}
 
 
 class PerformanceAnalyticsService:
@@ -400,6 +479,226 @@ class PerformanceAnalyticsService:
             insights["comparison_error"] = "Could not compare with historical data"
 
         return insights
+
+    def recompute_historical_xp(
+        self,
+        target_gameweek: int,
+        algorithm_version: str = "current",
+        include_snapshots: bool = True,
+    ) -> pd.DataFrame:
+        """Recompute historical xP for a specific gameweek using specified algorithm.
+
+        This enables retroactive testing of algorithm variants on historical data
+        to optimize model accuracy and validate improvements.
+
+        Args:
+            target_gameweek: Which gameweek to recompute (1-38)
+            algorithm_version: Algorithm version to use (key from ALGORITHM_VERSIONS)
+            include_snapshots: Whether to use availability snapshots (if available)
+
+        Returns:
+            DataFrame with recomputed xP predictions using only data available at that time
+            Columns: player_id, web_name, position, xP, xP_5gw, algorithm_version, computed_at
+
+        Raises:
+            ValueError: If algorithm_version not found or target_gameweek invalid
+        """
+        from fpl_team_picker.domain.services.data_orchestration_service import (
+            DataOrchestrationService,
+        )
+        from fpl_team_picker.domain.services.expected_points_service import (
+            ExpectedPointsService,
+        )
+
+        # Validate algorithm version
+        if algorithm_version not in ALGORITHM_VERSIONS:
+            available = list(ALGORITHM_VERSIONS.keys())
+            raise ValueError(
+                f"Unknown algorithm version: {algorithm_version}. Available: {available}"
+            )
+
+        algo_config = ALGORITHM_VERSIONS[algorithm_version]
+
+        # Load historical gameweek state
+        orchestration_service = DataOrchestrationService()
+        historical_data = orchestration_service.load_historical_gameweek_state(
+            target_gameweek=target_gameweek,
+            form_window=algo_config.form_window,
+            include_snapshots=include_snapshots,
+        )
+
+        # Configure xP service with algorithm parameters
+        # Note: Current ExpectedPointsService uses global config, but we can override
+        # by creating a modified config dict
+        algo_params = {
+            "form_weight": algo_config.form_weight,
+            "form_window": algo_config.form_window,
+            "use_team_strength": algo_config.use_team_strength,
+            "team_strength_params": algo_config.team_strength_params,
+            "minutes_model_params": algo_config.minutes_model_params,
+            "statistical_estimation_params": algo_config.statistical_estimation_params,
+        }
+
+        xp_service = ExpectedPointsService(config=algo_params)
+
+        # Calculate xP using historical data
+        players_with_xp = xp_service.calculate_combined_results(
+            historical_data, use_ml_model=False
+        )
+
+        # Add metadata
+        players_with_xp["algorithm_version"] = algorithm_version
+        players_with_xp["computed_at"] = pd.Timestamp.now()
+        players_with_xp["target_gameweek"] = target_gameweek
+
+        return players_with_xp
+
+    def batch_recompute_season(
+        self,
+        start_gw: int,
+        end_gw: int,
+        algorithm_versions: Optional[List[str]] = None,
+        include_snapshots: bool = True,
+    ) -> pd.DataFrame:
+        """Recompute xP across multiple gameweeks and algorithm versions.
+
+        This enables comprehensive algorithm comparison and optimization across
+        historical data to identify best-performing parameter sets.
+
+        Args:
+            start_gw: Starting gameweek (inclusive, 1-38)
+            end_gw: Ending gameweek (inclusive, 1-38)
+            algorithm_versions: List of algorithm versions to test (None = all registered)
+            include_snapshots: Whether to use availability snapshots (if available)
+
+        Returns:
+            Multi-index DataFrame with columns:
+            (gameweek, player_id, algorithm_version) → xP, xP_5gw, web_name, position
+
+        Raises:
+            ValueError: If gameweek range invalid
+        """
+        if start_gw < 1 or end_gw > 38 or start_gw > end_gw:
+            raise ValueError(
+                f"Invalid gameweek range: {start_gw}-{end_gw}. Must be 1-38 and start <= end."
+            )
+
+        # Use all versions if not specified
+        if algorithm_versions is None:
+            algorithm_versions = list(ALGORITHM_VERSIONS.keys())
+
+        # Validate all algorithm versions exist
+        invalid_versions = [
+            v for v in algorithm_versions if v not in ALGORITHM_VERSIONS
+        ]
+        if invalid_versions:
+            raise ValueError(f"Unknown algorithm versions: {invalid_versions}")
+
+        # Batch recomputation
+        all_results = []
+        for gw in range(start_gw, end_gw + 1):
+            for algo_version in algorithm_versions:
+                try:
+                    gw_results = self.recompute_historical_xp(
+                        target_gameweek=gw,
+                        algorithm_version=algo_version,
+                        include_snapshots=include_snapshots,
+                    )
+                    all_results.append(gw_results)
+                except Exception as e:
+                    # Log error but continue with other gameweeks/algorithms
+                    print(f"⚠️ Failed to recompute GW{gw} with {algo_version}: {e}")
+                    continue
+
+        if not all_results:
+            raise ValueError(
+                f"No results computed for GW{start_gw}-{end_gw} with algorithms {algorithm_versions}"
+            )
+
+        # Combine all results
+        combined_df = pd.concat(all_results, ignore_index=True)
+
+        # Create multi-index for efficient lookups
+        combined_df = combined_df.set_index(
+            ["target_gameweek", "player_id", "algorithm_version"]
+        ).sort_index()
+
+        return combined_df
+
+    def calculate_accuracy_metrics(
+        self,
+        predictions_df: pd.DataFrame,
+        actual_results_df: pd.DataFrame,
+        by_position: bool = True,
+    ) -> Dict[str, Any]:
+        """Calculate accuracy metrics comparing predicted vs actual points.
+
+        Args:
+            predictions_df: DataFrame with predicted xP (requires: player_id, xP)
+            actual_results_df: DataFrame with actual points (requires: player_id, total_points)
+            by_position: Whether to calculate position-specific metrics
+
+        Returns:
+            Dictionary with accuracy metrics:
+            - overall: MAE, RMSE, correlation
+            - by_position: Position-specific metrics (if by_position=True)
+            - player_count: Number of players analyzed
+        """
+        # Merge predictions with actual results
+        comparison_df = pd.merge(
+            predictions_df[["player_id", "xP", "position", "web_name"]],
+            actual_results_df[["player_id", "total_points"]],
+            on="player_id",
+            how="inner",
+        )
+
+        if comparison_df.empty:
+            return {
+                "error": "No matching players between predictions and actual results",
+                "player_count": 0,
+            }
+
+        # Calculate error metrics
+        errors = comparison_df["total_points"] - comparison_df["xP"]
+        abs_errors = errors.abs()
+
+        # Overall metrics
+        mae = abs_errors.mean()
+        rmse = np.sqrt((errors**2).mean())
+        correlation = comparison_df["xP"].corr(comparison_df["total_points"])
+
+        metrics = {
+            "overall": {
+                "mae": round(mae, 2),
+                "rmse": round(rmse, 2),
+                "correlation": round(correlation, 3),
+                "mean_predicted": round(comparison_df["xP"].mean(), 2),
+                "mean_actual": round(comparison_df["total_points"].mean(), 2),
+            },
+            "player_count": len(comparison_df),
+        }
+
+        # Position-specific metrics
+        if by_position and "position" in comparison_df.columns:
+            position_metrics = {}
+            for position in ["GKP", "DEF", "MID", "FWD"]:
+                pos_df = comparison_df[comparison_df["position"] == position]
+                if not pos_df.empty:
+                    pos_errors = pos_df["total_points"] - pos_df["xP"]
+                    pos_abs_errors = pos_errors.abs()
+
+                    position_metrics[position] = {
+                        "mae": round(pos_abs_errors.mean(), 2),
+                        "rmse": round(np.sqrt((pos_errors**2).mean()), 2),
+                        "correlation": round(
+                            pos_df["xP"].corr(pos_df["total_points"]), 3
+                        ),
+                        "player_count": len(pos_df),
+                    }
+
+            metrics["by_position"] = position_metrics
+
+        return metrics
 
     def analyze_performance_trends(
         self,
