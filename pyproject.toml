@@ -32,6 +32,7 @@ dev = [
 fpl-season-planner = "fpl_team_picker.interfaces.season_planner:main"
 fpl-gameweek-manager = "fpl_team_picker.interfaces.gameweek_manager:main"
 fpl-ml-experiment = "fpl_team_picker.interfaces.ml_xp_experiment:main"
+fpl-xp-accuracy = "fpl_team_picker.interfaces.xp_accuracy_tracking:main"
 
 [tool.uv]
 package = true

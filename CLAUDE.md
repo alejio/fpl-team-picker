@@ -366,23 +366,59 @@ def _(gameweek_data, mo):
 - Form-weighted training data using historical gameweek performance
 - Model comparison and performance validation against actual FPL results
 
+#### xP Accuracy Tracking (`xp_accuracy_tracking.py`) - **Experimentation Notebook**
+**Marimo notebook for model accuracy analysis and algorithm optimization:**
+
+**Purpose:** Development and validation tool for algorithm experimentation (not for end-user predictions)
+
+**Key Features:**
+- **Historical Accuracy Tracking** - Monitor MAE/RMSE/correlation trends over completed gameweeks
+- **Algorithm A/B Testing** - Compare multiple algorithm versions side-by-side
+- **Position-Specific Analysis** - Identify which positions need model improvements
+- **Parameter Optimization** - Test form_weight (0.5, 0.7, 0.9) and form_window (3GW, 5GW, 8GW) variations
+
+**Interactive Controls:**
+- Gameweek range selection for analysis
+- Algorithm version selector (current, experimental_high_form, experimental_low_form, v1.0)
+- Position-specific accuracy breakdown
+- Real-time algorithm comparison with winner recommendations
+
+**Use Cases:**
+1. **Model Validation** - Measure prediction accuracy against actual FPL results
+2. **Algorithm Development** - Test new parameters on historical data before deployment
+3. **Performance Monitoring** - Track accuracy trends to detect model degradation
+4. **Evidence-Based Optimization** - Data-driven algorithm selection for gameweek manager
+
+**Workflow:**
+```bash
+# Run accuracy tracking notebook
+fpl-xp-accuracy
+
+# Analyze accuracy trends → Identify improvements → Test algorithm variants →
+# Validate on historical data → Select best performer → Update gameweek manager algorithm
+```
+
 ## Command Line Interface
 
-The project provides CLI entry points for both interfaces:
+The project provides CLI entry points for all interfaces:
 
 ```bash
 # Season-start team building
 fpl-season-planner
 
-# Weekly gameweek management
+# Weekly gameweek management (production)
 fpl-gameweek-manager
 
+# Model accuracy analysis & experimentation (development)
+fpl-xp-accuracy
+
 # ML model development
-marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
+fpl-ml-experiment
 
 # Or run directly with Marimo
 marimo run fpl_team_picker/interfaces/season_planner.py
 marimo run fpl_team_picker/interfaces/gameweek_manager.py
+marimo run fpl_team_picker/interfaces/xp_accuracy_tracking.py
 marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
 ```
 
