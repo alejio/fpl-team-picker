@@ -10,11 +10,6 @@ from fpl_team_picker.domain.services import (
 from fpl_team_picker.domain.services.performance_analytics_service import (
     PerformanceAnalyticsService,
 )
-from fpl_team_picker.adapters.database_repositories import (
-    DatabasePlayerRepository,
-    DatabaseTeamRepository,
-    DatabaseFixtureRepository,
-)
 
 
 class TestPerformanceAnalyticsServiceIntegration:
@@ -28,13 +23,8 @@ class TestPerformanceAnalyticsServiceIntegration:
     @pytest.fixture
     def sample_gameweek_data(self):
         """Load sample gameweek data with XP calculations."""
-        # Initialize repositories
-        player_repo = DatabasePlayerRepository()
-        team_repo = DatabaseTeamRepository()
-        fixture_repo = DatabaseFixtureRepository()
-
         # Create services
-        data_service = DataOrchestrationService(player_repo, team_repo, fixture_repo)
+        data_service = DataOrchestrationService()
         xp_service = ExpectedPointsService()
 
         # Load gameweek data
@@ -166,3 +156,230 @@ class TestPerformanceAnalyticsServiceIntegration:
             # Correlation should be a valid number between -1 and 1
             assert -1 <= correlation <= 1
             assert not pd.isna(correlation)
+
+
+class TestAccuracyTracking:
+    """Tests for model accuracy tracking and recomputation functionality."""
+
+    @pytest.fixture
+    def analytics_service(self):
+        """Create performance analytics service."""
+        return PerformanceAnalyticsService()
+
+    def test_recompute_historical_xp(self, analytics_service):
+        """Test historical xP recomputation for a single gameweek."""
+        # Test recomputation for GW7 (where we have complete historical data)
+        # Note: Using include_snapshots=False since snapshots aren't available for past GWs
+        predictions = analytics_service.recompute_historical_xp(
+            target_gameweek=7, algorithm_version="current", include_snapshots=False
+        )
+
+        # Validate results structure
+        assert isinstance(predictions, pd.DataFrame)
+        assert not predictions.empty
+        assert "player_id" in predictions.columns
+        assert "xP" in predictions.columns
+        assert "algorithm_version" in predictions.columns
+        assert "computed_at" in predictions.columns
+        assert "target_gameweek" in predictions.columns
+
+        # Validate metadata
+        assert all(predictions["algorithm_version"] == "current")
+        assert all(predictions["target_gameweek"] == 7)
+
+        # Validate xP values are reasonable
+        assert predictions["xP"].min() >= 0
+        assert predictions["xP"].max() <= 20  # Reasonable upper bound
+
+    def test_recompute_invalid_algorithm(self, analytics_service):
+        """Test that invalid algorithm version raises error."""
+        with pytest.raises(ValueError, match="Unknown algorithm version"):
+            analytics_service.recompute_historical_xp(
+                target_gameweek=7,
+                algorithm_version="invalid_algo",
+                include_snapshots=False,
+            )
+
+    def test_batch_recompute_season(self, analytics_service):
+        """Test batch recomputation across multiple gameweeks."""
+        # Test batch recomputation for GW7 with current algorithm
+        # Note: Using include_snapshots=False since snapshots aren't available for past GWs
+        # Note: GW6 has data quality issues, so testing with GW7 only
+        predictions_df = analytics_service.batch_recompute_season(
+            start_gw=7,
+            end_gw=7,
+            algorithm_versions=["current"],
+            include_snapshots=False,
+        )
+
+        # Validate structure
+        assert isinstance(predictions_df, pd.DataFrame)
+        assert not predictions_df.empty
+
+        # Check multi-index structure
+        assert predictions_df.index.names == [
+            "target_gameweek",
+            "player_id",
+            "algorithm_version",
+        ]
+
+        # Check we have data for gameweek 7
+        gameweeks = predictions_df.index.get_level_values("target_gameweek").unique()
+        assert 7 in gameweeks
+
+    def test_batch_recompute_multiple_algorithms(self, analytics_service):
+        """Test batch recomputation with multiple algorithm versions."""
+        # Note: Using include_snapshots=False since snapshots aren't available for past GWs
+        predictions_df = analytics_service.batch_recompute_season(
+            start_gw=7,
+            end_gw=7,
+            algorithm_versions=["current", "experimental_high_form"],
+            include_snapshots=False,
+        )
+
+        # Validate we have results for both algorithms
+        algorithms = predictions_df.index.get_level_values("algorithm_version").unique()
+        assert "current" in algorithms
+        assert "experimental_high_form" in algorithms
+
+    def test_batch_recompute_invalid_gameweek_range(self, analytics_service):
+        """Test that invalid gameweek range raises error."""
+        with pytest.raises(ValueError, match="Invalid gameweek range"):
+            analytics_service.batch_recompute_season(
+                start_gw=10, end_gw=5, algorithm_versions=["current"]
+            )
+
+        with pytest.raises(ValueError, match="Invalid gameweek range"):
+            analytics_service.batch_recompute_season(
+                start_gw=0, end_gw=5, algorithm_versions=["current"]
+            )
+
+        with pytest.raises(ValueError, match="Invalid gameweek range"):
+            analytics_service.batch_recompute_season(
+                start_gw=1, end_gw=39, algorithm_versions=["current"]
+            )
+
+    def test_calculate_accuracy_metrics(self, analytics_service):
+        """Test accuracy metrics calculation."""
+        from client import FPLDataClient
+
+        client = FPLDataClient()
+
+        # Recompute predictions for GW7
+        # Note: Using include_snapshots=False since snapshots aren't available for past GWs
+        predictions = analytics_service.recompute_historical_xp(
+            target_gameweek=7, algorithm_version="current", include_snapshots=False
+        )
+
+        # Get actual results
+        actual_results = client.get_gameweek_performance(7)
+
+        # Calculate accuracy metrics
+        metrics = analytics_service.calculate_accuracy_metrics(
+            predictions, actual_results, by_position=True
+        )
+
+        # Validate overall metrics
+        assert "overall" in metrics
+        assert "mae" in metrics["overall"]
+        assert "rmse" in metrics["overall"]
+        assert "correlation" in metrics["overall"]
+        assert "mean_predicted" in metrics["overall"]
+        assert "mean_actual" in metrics["overall"]
+
+        # Validate metric values
+        assert metrics["overall"]["mae"] >= 0
+        assert metrics["overall"]["rmse"] >= 0
+        assert -1 <= metrics["overall"]["correlation"] <= 1
+
+        # Validate position-specific metrics
+        assert "by_position" in metrics
+        for position in ["GKP", "DEF", "MID", "FWD"]:
+            if position in metrics["by_position"]:
+                pos_metrics = metrics["by_position"][position]
+                assert "mae" in pos_metrics
+                assert "rmse" in pos_metrics
+                assert "correlation" in pos_metrics
+                assert pos_metrics["mae"] >= 0
+
+    def test_accuracy_metrics_with_no_matching_players(self, analytics_service):
+        """Test accuracy metrics when no players match."""
+        # Create empty predictions and actuals
+        predictions = pd.DataFrame(
+            {
+                "player_id": [9999],
+                "xP": [5.0],
+                "position": ["MID"],
+                "web_name": ["Test"],
+            }
+        )
+
+        actual_results = pd.DataFrame(
+            {"player_id": [8888], "total_points": [10]}  # Different player ID
+        )
+
+        metrics = analytics_service.calculate_accuracy_metrics(
+            predictions, actual_results, by_position=True
+        )
+
+        # Should return error
+        assert "error" in metrics
+        assert metrics["player_count"] == 0
+
+    def test_algorithm_versions_registry(self):
+        """Test that algorithm versions are properly registered."""
+        from fpl_team_picker.domain.services.performance_analytics_service import (
+            ALGORITHM_VERSIONS,
+        )
+
+        # Check required versions exist
+        assert "current" in ALGORITHM_VERSIONS
+        assert "v1.0" in ALGORITHM_VERSIONS
+        assert "experimental_high_form" in ALGORITHM_VERSIONS
+        assert "experimental_low_form" in ALGORITHM_VERSIONS
+
+        # Validate algorithm configurations
+        for name, algo in ALGORITHM_VERSIONS.items():
+            assert algo.name == name
+            assert 0.0 <= algo.form_weight <= 1.0
+            assert 1 <= algo.form_window <= 10
+            assert isinstance(algo.use_team_strength, bool)
+            assert isinstance(algo.team_strength_params, dict)
+            assert isinstance(algo.minutes_model_params, dict)
+            assert isinstance(algo.statistical_estimation_params, dict)
+
+    def test_position_specific_accuracy(self, analytics_service):
+        """Test position-specific accuracy analysis."""
+        from client import FPLDataClient
+
+        client = FPLDataClient()
+
+        # Recompute predictions for GW7
+        # Note: Using include_snapshots=False since snapshots aren't available for past GWs
+        predictions = analytics_service.recompute_historical_xp(
+            target_gameweek=7, algorithm_version="current", include_snapshots=False
+        )
+
+        # Get actual results
+        actual_results = client.get_gameweek_performance(7)
+
+        # Calculate position-specific metrics
+        metrics = analytics_service.calculate_accuracy_metrics(
+            predictions, actual_results, by_position=True
+        )
+
+        # Validate we have position breakdowns
+        if "by_position" in metrics:
+            positions_analyzed = set(metrics["by_position"].keys())
+
+            # Should have at least some positions
+            assert len(positions_analyzed) > 0
+
+            # Each position should have complete metrics
+            for pos in positions_analyzed:
+                pos_data = metrics["by_position"][pos]
+                assert "mae" in pos_data
+                assert "rmse" in pos_data
+                assert "correlation" in pos_data
+                assert "player_count" in pos_data
+                assert pos_data["player_count"] > 0
