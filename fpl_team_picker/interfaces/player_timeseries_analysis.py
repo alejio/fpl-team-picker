@@ -37,12 +37,10 @@ def _():
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from client import FPLDataClient
-    import numpy as np
 
     # Initialize client
     client = FPLDataClient()
-
-    return FPLDataClient, go, make_subplots, np, pd, px, client
+    return client, go, make_subplots, pd, px
 
 
 @app.cell
@@ -76,17 +74,21 @@ def _(mo):
 
 @app.cell
 def _(client, mo, pd):
-    # Load enhanced players data with all available metrics
+    # Load players using PlayerAnalyticsService with domain models
     try:
-        # Use get_players_enhanced() for richer data
-        players_df = client.get_players_enhanced()
-        teams_df = client.get_current_teams()
+        from fpl_team_picker.domain.services import PlayerAnalyticsService
+        from fpl_team_picker.adapters.database_repositories import (
+            DatabasePlayerRepository,
+        )
 
-        # Also load derived metrics for even more stats
-        derived_metrics = client.get_derived_player_metrics()
+        # Initialize analytics service
+        _player_repo = DatabasePlayerRepository()
+        _analytics_service = PlayerAnalyticsService(_player_repo)
 
-        # Debug: Check if we have players
-        if players_df.empty:
+        # Get all enriched players with 70+ validated attributes
+        enriched_players = _analytics_service.get_all_players_enriched()
+
+        if not enriched_players:
             status_message = mo.md("❌ **No players loaded from database**")
             player_selector = mo.ui.multiselect(
                 options=[],
@@ -94,20 +96,34 @@ def _(client, mo, pd):
                 label="Select Players:",
             )
         else:
-            # Merge with teams to get team names
-            players_with_teams = players_df.merge(
-                teams_df[["team_id", "short_name"]], on="team_id", how="left"
-            )
+            # Get team names for display
+            teams_df = client.get_current_teams()
+            team_map = dict(zip(teams_df["team_id"], teams_df["short_name"]))
 
-            # Create player options for selector
+            # Create player options from domain models with type safety
             player_options = []
-            for _, _player in players_with_teams.iterrows():
-                team_name = _player.get("short_name", "Unknown")
-                # Get position name from position_id mapping
-                position_map = {1: "GKP", 2: "DEF", 3: "MID", 4: "FWD"}
-                position = position_map.get(_player.get("position_id"), "UNK")
-                display_name = f"{_player['web_name']} ({team_name}) - {position}"
-                player_options.append((display_name, _player["player_id"]))
+            for player in enriched_players:
+                team_name = team_map.get(player.team_id, "Unknown")
+                # Type-safe access to domain model properties
+                display_name = (
+                    f"{player.web_name} ({team_name}) - {player.position.value}"
+                )
+
+                # Add indicators for quick identification
+                indicators = []
+                if player.is_premium:
+                    indicators.append("💎")
+                if player.is_penalty_taker:
+                    indicators.append("⚽")
+                if player.is_differential:
+                    indicators.append("🔥")
+                if player.has_injury_concern:
+                    indicators.append("🤕")
+
+                if indicators:
+                    display_name += f" {' '.join(indicators)}"
+
+                player_options.append((display_name, player.player_id))
 
             player_options.sort(key=lambda x: x[0])  # Sort alphabetically
 
@@ -115,15 +131,20 @@ def _(client, mo, pd):
             player_selector = mo.ui.multiselect(
                 options=player_options,
                 value=[],
-                label="Select Players (choose multiple for comparison):",
+                label="Select Players (💎=Premium ⚽=PK taker 🔥=Differential 🤕=Injury):",
             )
 
             status_message = mo.md(
-                f"✅ **Loaded {len(player_options)} players with enhanced metrics**"
+                f"✅ **Loaded {len(player_options)} players with type-safe domain models** (70+ attributes per player)"
             )
 
     except Exception as e:
-        status_message = mo.md(f"❌ **Error loading players:** {str(e)}")
+        import traceback
+
+        error_details = traceback.format_exc()
+        status_message = mo.md(
+            f"❌ **Error loading players:** {str(e)}\n\n```\n{error_details}\n```"
+        )
         player_selector = mo.ui.multiselect(
             options=[],
             value=[],
@@ -131,11 +152,7 @@ def _(client, mo, pd):
         )
 
     mo.vstack([status_message, player_selector])
-    return (
-        derived_metrics,
-        player_selector,
-        players_df,
-    )
+    return (player_selector,)
 
 
 @app.cell
@@ -154,7 +171,7 @@ def _(mo):
 
 
 @app.cell
-def _(derived_metrics, mo, players_df):
+def _(mo):
     # Comprehensive stats from multiple data sources
 
     # Stats from gameweek_performance (31 columns)
@@ -327,8 +344,7 @@ def _(derived_metrics, mo, players_df):
         category_info.append(f"**{category}:** {', '.join(stats)}")
 
     mo.vstack([stat_selector, mo.md("\n".join(category_info))])
-
-    return available_stats, category_info, stat_categories, stat_selector
+    return (stat_selector,)
 
 
 @app.cell
@@ -504,7 +520,7 @@ def _(
             timeseries_viz = mo.md(f"❌ **Error loading data:** {str(e)}")
 
     timeseries_viz
-    return (timeseries_viz,)
+    return
 
 
 @app.cell
@@ -514,14 +530,7 @@ def _(mo):
 
 
 @app.cell
-def _(
-    client,
-    end_gw,
-    mo,
-    pd,
-    player_selector,
-    start_gw,
-):
+def _(client, end_gw, mo, pd, player_selector, start_gw):
     # Create player summary table for multiple players
     if not player_selector.value or len(player_selector.value) == 0:
         summary_viz = mo.md("⚠️ **Please select at least one player first**")
@@ -683,7 +692,7 @@ def _(
             )
 
     summary_viz
-    return (summary_viz,)
+    return
 
 
 if __name__ == "__main__":

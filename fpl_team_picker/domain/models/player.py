@@ -334,6 +334,121 @@ class EnrichedPlayerDomain(PlayerDomain):
         """Check if player has reliable data quality (>= 0.7)."""
         return self.data_quality_score >= 0.7
 
+    # Position helpers
+    @property
+    def is_goalkeeper(self) -> bool:
+        """Is a goalkeeper."""
+        return self.position == Position.GKP
+
+    @property
+    def is_defender(self) -> bool:
+        """Is a defender."""
+        return self.position == Position.DEF
+
+    @property
+    def is_midfielder(self) -> bool:
+        """Is a midfielder."""
+        return self.position == Position.MID
+
+    @property
+    def is_forward(self) -> bool:
+        """Is a forward."""
+        return self.position == Position.FWD
+
+    # Price brackets
+    @property
+    def is_budget_enabler(self) -> bool:
+        """Cheap player (<= £5.0m) enabling premium purchases."""
+        return self.price <= 5.0
+
+    @property
+    def is_premium(self) -> bool:
+        """Premium player (>= £10.0m)."""
+        return self.price >= 10.0
+
+    @property
+    def is_mid_price(self) -> bool:
+        """Mid-price player (£6.5m - £9.5m)."""
+        return 6.5 <= self.price <= 9.5
+
+    # Ownership indicators
+    @property
+    def is_differential(self) -> bool:
+        """Low ownership (< 5%) potential differential pick."""
+        return self.selected_by_percent < 5.0
+
+    @property
+    def is_template(self) -> bool:
+        """High ownership (> 40%) template player."""
+        return self.selected_by_percent > 40.0
+
+    # Performance per 90
+    @property
+    def goal_involvement_per_90(self) -> float:
+        """Goals + Assists per 90 minutes."""
+        if self.minutes == 0:
+            return 0.0
+        return ((self.goals_scored + self.assists) * 90) / self.minutes
+
+    @property
+    def expected_involvement_per_90(self) -> float:
+        """xG + xA per 90 (expected goal involvements)."""
+        return self.expected_goals_per_90 + self.expected_assists_per_90
+
+    @property
+    def bonus_per_90(self) -> float:
+        """Bonus points per 90 minutes."""
+        if self.minutes == 0:
+            return 0.0
+        return (self.bonus * 90) / self.minutes
+
+    # Performance analysis
+    @property
+    def is_outperforming_xg(self) -> bool:
+        """Scoring significantly more than expected (overperforming)."""
+        return self.points_above_expected > 5.0
+
+    @property
+    def is_underperforming_xg(self) -> bool:
+        """Scoring significantly less than expected (underperforming)."""
+        return self.points_above_expected < -5.0
+
+    # Risk aggregations
+    @property
+    def has_any_concern(self) -> bool:
+        """Any risk flag raised (injury, rotation, overperformance)."""
+        return (
+            self.has_injury_concern
+            or self.has_rotation_concern
+            or self.has_overperformance_risk
+        )
+
+    @property
+    def is_safe_pick(self) -> bool:
+        """Low risk profile (no concerns, good data quality, available)."""
+        return not self.has_any_concern and self.is_reliable_data and self.is_available
+
+    # Trend indicators
+    @property
+    def is_rising_star(self) -> bool:
+        """Improving form + rising ownership."""
+        return self.is_form_improving and self.is_ownership_rising
+
+    @property
+    def is_falling_knife(self) -> bool:
+        """Declining form + falling ownership - avoid!"""
+        return self.is_form_declining and self.ownership_trend.lower() == "falling"
+
+    @property
+    def is_under_the_radar(self) -> bool:
+        """Good value + low ownership + improving form."""
+        return self.is_high_value and self.is_differential and self.is_form_improving
+
+    @property
+    def is_attacking_defender(self) -> bool:
+        """Defender with attacking returns (goals + assists >= 3)."""
+        return self.position == Position.DEF and (self.goals_scored + self.assists) >= 3
+
     class Config:
         """Pydantic configuration for enriched player data."""
 
