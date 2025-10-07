@@ -1492,7 +1492,8 @@ def create_model_accuracy_visualization(
             for algo in algorithm_versions:
                 try:
                     # Get predictions for this gameweek and algorithm
-                    gw_predictions = predictions_df.xs((gw, algo), level=(0, 2))
+                    # Use .loc with slice(None) for player_id level since we want all players
+                    gw_predictions = predictions_df.loc[(gw, slice(None), algo)]
 
                     # Calculate accuracy metrics
                     metrics = analytics_service.calculate_accuracy_metrics(
@@ -1800,7 +1801,8 @@ def create_algorithm_comparison_visualization(
             for gw in range(start_gw, end_gw + 1):
                 try:
                     # Get predictions for this gameweek
-                    gw_predictions = predictions_df.xs((gw, algo), level=(0, 2))
+                    # Use .loc with slice(None) for player_id level since we want all players
+                    gw_predictions = predictions_df.loc[(gw, slice(None), algo)]
 
                     # Get actual results
                     actual_results = client.get_gameweek_performance(gw)
