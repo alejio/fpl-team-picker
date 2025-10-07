@@ -362,6 +362,8 @@ provides-extras = ["fbref"]
 [package.metadata.requires-dev]
 dev = [
     { name = "pre-commit", specifier = ">=3.5.0" },
+    { name = "pytest", specifier = ">=7.4.0" },
+    { name = "pytest-cov", specifier = ">=4.1.0" },
     { name = "ruff", specifier = ">=0.12.7" },
 ]
 

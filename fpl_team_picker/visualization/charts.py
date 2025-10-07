@@ -1433,3 +1433,498 @@ def create_squad_form_analysis(
 
         debug_msg = ", ".join(debug_parts)
         return mo_ref.md(f"⚠️ **Squad form analysis unavailable**\n\n_{debug_msg}_")
+
+
+def create_model_accuracy_visualization(
+    target_gameweek: int,
+    lookback_gameweeks: int = 5,
+    algorithm_versions: Optional[List[str]] = None,
+    mo_ref=None,
+) -> object:
+    """
+    Create model accuracy tracking visualization comparing predicted vs actual results.
+
+    Args:
+        target_gameweek: Current gameweek for analysis
+        lookback_gameweeks: Number of completed gameweeks to analyze
+        algorithm_versions: List of algorithm versions to compare (None = current only)
+        mo_ref: Marimo reference for UI components
+
+    Returns:
+        Marimo UI component with accuracy visualization
+    """
+    from fpl_team_picker.domain.services.performance_analytics_service import (
+        PerformanceAnalyticsService,
+    )
+    from client import FPLDataClient
+
+    try:
+        analytics_service = PerformanceAnalyticsService()
+        client = FPLDataClient()
+
+        # Calculate gameweek range for completed gameweeks only
+        start_gw = max(1, target_gameweek - lookback_gameweeks)
+        end_gw = target_gameweek - 1  # Only completed gameweeks
+
+        if end_gw < start_gw:
+            return mo_ref.md(
+                "⚠️ **No completed gameweeks available for accuracy analysis**"
+            )
+
+        # Use current algorithm if no versions specified
+        if algorithm_versions is None:
+            algorithm_versions = ["current"]
+
+        # Recompute predictions for historical gameweeks
+        predictions_df = analytics_service.batch_recompute_season(
+            start_gw=start_gw,
+            end_gw=end_gw,
+            algorithm_versions=algorithm_versions,
+            include_snapshots=True,
+        )
+
+        # Collect accuracy metrics for each gameweek and algorithm
+        accuracy_data = []
+        for gw in range(start_gw, end_gw + 1):
+            # Get actual results
+            actual_results = client.get_gameweek_performance(gw)
+
+            for algo in algorithm_versions:
+                try:
+                    # Get predictions for this gameweek and algorithm
+                    # Use .loc with slice(None) for player_id level since we want all players
+                    gw_predictions = predictions_df.loc[(gw, slice(None), algo)]
+
+                    # Calculate accuracy metrics
+                    metrics = analytics_service.calculate_accuracy_metrics(
+                        gw_predictions.reset_index(),
+                        actual_results,
+                        by_position=True,
+                    )
+
+                    if "overall" in metrics:
+                        accuracy_data.append(
+                            {
+                                "gameweek": gw,
+                                "algorithm": algo,
+                                "mae": metrics["overall"]["mae"],
+                                "rmse": metrics["overall"]["rmse"],
+                                "correlation": metrics["overall"]["correlation"],
+                                "mean_predicted": metrics["overall"]["mean_predicted"],
+                                "mean_actual": metrics["overall"]["mean_actual"],
+                                "player_count": metrics["player_count"],
+                            }
+                        )
+                except Exception as e:
+                    print(f"⚠️ Failed to calculate accuracy for GW{gw} {algo}: {e}")
+                    continue
+
+        if not accuracy_data:
+            return mo_ref.md("⚠️ **No accuracy data available for visualization**")
+
+        accuracy_df = pd.DataFrame(accuracy_data)
+
+        # Create visualization components
+        components = []
+
+        # Overall accuracy summary
+        components.append(mo_ref.md("## 📊 Model Accuracy Tracking"))
+
+        # Summary statistics
+        summary_stats = (
+            accuracy_df.groupby("algorithm")
+            .agg(
+                {
+                    "mae": "mean",
+                    "rmse": "mean",
+                    "correlation": "mean",
+                    "player_count": "mean",
+                }
+            )
+            .round(2)
+        )
+
+        components.append(mo_ref.md("### 📈 Overall Performance (Average)"))
+        components.append(mo_ref.ui.table(summary_stats))
+
+        # Accuracy trends chart
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        for algo in algorithm_versions:
+            algo_data = accuracy_df[accuracy_df["algorithm"] == algo]
+
+            # MAE trend
+            fig.add_trace(
+                go.Scatter(
+                    x=algo_data["gameweek"],
+                    y=algo_data["mae"],
+                    mode="lines+markers",
+                    name=f"{algo} - MAE",
+                    hovertemplate="GW%{x}<br>MAE: %{y:.2f}<extra></extra>",
+                )
+            )
+
+        fig.update_layout(
+            title="Mean Absolute Error (MAE) Trends",
+            xaxis_title="Gameweek",
+            yaxis_title="MAE (points)",
+            hovermode="x unified",
+            height=400,
+        )
+
+        components.append(mo_ref.ui.plotly(fig))
+
+        # Correlation trends
+        fig_corr = go.Figure()
+
+        for algo in algorithm_versions:
+            algo_data = accuracy_df[accuracy_df["algorithm"] == algo]
+
+            fig_corr.add_trace(
+                go.Scatter(
+                    x=algo_data["gameweek"],
+                    y=algo_data["correlation"],
+                    mode="lines+markers",
+                    name=f"{algo} - Correlation",
+                    hovertemplate="GW%{x}<br>Correlation: %{y:.3f}<extra></extra>",
+                )
+            )
+
+        fig_corr.update_layout(
+            title="Prediction Correlation with Actual Points",
+            xaxis_title="Gameweek",
+            yaxis_title="Correlation Coefficient",
+            hovermode="x unified",
+            height=400,
+        )
+
+        components.append(mo_ref.ui.plotly(fig_corr))
+
+        # Gameweek-by-gameweek breakdown
+        components.append(mo_ref.md("### 📋 Gameweek-by-Gameweek Breakdown"))
+        display_cols = [
+            "gameweek",
+            "algorithm",
+            "mae",
+            "rmse",
+            "correlation",
+            "player_count",
+        ]
+        components.append(
+            mo_ref.ui.table(
+                accuracy_df[display_cols].sort_values(["gameweek", "algorithm"]),
+                page_size=10,
+            )
+        )
+
+        return mo_ref.vstack(components)
+
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating accuracy visualization: {e}")
+
+
+def create_position_accuracy_visualization(
+    target_gameweek: int,
+    algorithm_version: str = "current",
+    mo_ref=None,
+) -> object:
+    """
+    Create position-specific accuracy analysis visualization.
+
+    Args:
+        target_gameweek: Gameweek to analyze (must be completed)
+        algorithm_version: Algorithm version to use
+        mo_ref: Marimo reference for UI components
+
+    Returns:
+        Marimo UI component with position-specific accuracy analysis
+    """
+    from fpl_team_picker.domain.services.performance_analytics_service import (
+        PerformanceAnalyticsService,
+    )
+    from client import FPLDataClient
+
+    try:
+        analytics_service = PerformanceAnalyticsService()
+        client = FPLDataClient()
+
+        # Recompute predictions for target gameweek
+        predictions = analytics_service.recompute_historical_xp(
+            target_gameweek=target_gameweek,
+            algorithm_version=algorithm_version,
+            include_snapshots=True,
+        )
+
+        # Get actual results
+        actual_results = client.get_gameweek_performance(target_gameweek)
+
+        # Calculate position-specific metrics
+        metrics = analytics_service.calculate_accuracy_metrics(
+            predictions, actual_results, by_position=True
+        )
+
+        if "error" in metrics:
+            return mo_ref.md(f"⚠️ **{metrics['error']}**")
+
+        # Create visualization components
+        components = []
+
+        components.append(
+            mo_ref.md(f"## 📊 Position-Specific Accuracy (GW{target_gameweek})")
+        )
+
+        # Overall metrics
+        components.append(mo_ref.md("### 📈 Overall Performance"))
+        overall_df = pd.DataFrame([metrics["overall"]]).T
+        overall_df.columns = ["Value"]
+        components.append(mo_ref.ui.table(overall_df))
+
+        # Position-specific breakdown
+        if "by_position" in metrics:
+            components.append(mo_ref.md("### 🎯 Position-Specific Breakdown"))
+
+            position_df = pd.DataFrame(metrics["by_position"]).T
+            position_df = position_df.sort_values("mae")
+
+            components.append(mo_ref.ui.table(position_df))
+
+            # Position accuracy comparison chart
+            import plotly.graph_objects as go
+
+            fig = go.Figure()
+
+            positions = list(metrics["by_position"].keys())
+            mae_values = [metrics["by_position"][pos]["mae"] for pos in positions]
+            correlations = [
+                metrics["by_position"][pos]["correlation"] for pos in positions
+            ]
+
+            # MAE by position
+            fig.add_trace(
+                go.Bar(
+                    x=positions,
+                    y=mae_values,
+                    name="MAE",
+                    marker_color="lightblue",
+                    hovertemplate="%{x}<br>MAE: %{y:.2f}<extra></extra>",
+                )
+            )
+
+            fig.update_layout(
+                title="Mean Absolute Error by Position",
+                xaxis_title="Position",
+                yaxis_title="MAE (points)",
+                height=400,
+            )
+
+            components.append(mo_ref.ui.plotly(fig))
+
+            # Correlation by position
+            fig_corr = go.Figure()
+
+            fig_corr.add_trace(
+                go.Bar(
+                    x=positions,
+                    y=correlations,
+                    name="Correlation",
+                    marker_color="lightgreen",
+                    hovertemplate="%{x}<br>Correlation: %{y:.3f}<extra></extra>",
+                )
+            )
+
+            fig_corr.update_layout(
+                title="Prediction Correlation by Position",
+                xaxis_title="Position",
+                yaxis_title="Correlation Coefficient",
+                height=400,
+            )
+
+            components.append(mo_ref.ui.plotly(fig_corr))
+
+        return mo_ref.vstack(components)
+
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating position accuracy visualization: {e}")
+
+
+def create_algorithm_comparison_visualization(
+    start_gw: int,
+    end_gw: int,
+    algorithm_versions: List[str],
+    mo_ref=None,
+) -> object:
+    """
+    Create algorithm comparison visualization to test different parameter sets.
+
+    Args:
+        start_gw: Starting gameweek for comparison
+        end_gw: Ending gameweek for comparison
+        algorithm_versions: List of algorithm versions to compare
+        mo_ref: Marimo reference for UI components
+
+    Returns:
+        Marimo UI component with algorithm comparison analysis
+    """
+    from fpl_team_picker.domain.services.performance_analytics_service import (
+        PerformanceAnalyticsService,
+        ALGORITHM_VERSIONS,
+    )
+    from client import FPLDataClient
+
+    try:
+        analytics_service = PerformanceAnalyticsService()
+        client = FPLDataClient()
+
+        # Validate algorithm versions
+        invalid_algos = [v for v in algorithm_versions if v not in ALGORITHM_VERSIONS]
+        if invalid_algos:
+            return mo_ref.md(
+                f"⚠️ **Invalid algorithm versions: {invalid_algos}**\n\nAvailable: {list(ALGORITHM_VERSIONS.keys())}"
+            )
+
+        # Batch recompute for all algorithms
+        predictions_df = analytics_service.batch_recompute_season(
+            start_gw=start_gw,
+            end_gw=end_gw,
+            algorithm_versions=algorithm_versions,
+            include_snapshots=True,
+        )
+
+        # Calculate accuracy for each algorithm across all gameweeks
+        algorithm_metrics = {}
+
+        for algo in algorithm_versions:
+            algo_accuracies = []
+
+            for gw in range(start_gw, end_gw + 1):
+                try:
+                    # Get predictions for this gameweek
+                    # Use .loc with slice(None) for player_id level since we want all players
+                    gw_predictions = predictions_df.loc[(gw, slice(None), algo)]
+
+                    # Get actual results
+                    actual_results = client.get_gameweek_performance(gw)
+
+                    # Calculate metrics
+                    metrics = analytics_service.calculate_accuracy_metrics(
+                        gw_predictions.reset_index(), actual_results, by_position=False
+                    )
+
+                    if "overall" in metrics:
+                        algo_accuracies.append(metrics["overall"])
+
+                except Exception as e:
+                    print(f"⚠️ Failed to calculate accuracy for GW{gw} {algo}: {e}")
+                    continue
+
+            if algo_accuracies:
+                # Average metrics across gameweeks
+                algorithm_metrics[algo] = {
+                    "mae": sum(m["mae"] for m in algo_accuracies)
+                    / len(algo_accuracies),
+                    "rmse": sum(m["rmse"] for m in algo_accuracies)
+                    / len(algo_accuracies),
+                    "correlation": sum(m["correlation"] for m in algo_accuracies)
+                    / len(algo_accuracies),
+                    "gameweeks": len(algo_accuracies),
+                }
+
+        if not algorithm_metrics:
+            return mo_ref.md("⚠️ **No algorithm metrics available**")
+
+        # Create visualization components
+        components = []
+
+        components.append(
+            mo_ref.md(f"## 🔬 Algorithm Comparison (GW{start_gw}-{end_gw})")
+        )
+
+        # Algorithm comparison table
+        comparison_df = pd.DataFrame(algorithm_metrics).T.round(3)
+        comparison_df = comparison_df.sort_values("mae")
+
+        components.append(mo_ref.md("### 📊 Performance Comparison"))
+        components.append(mo_ref.ui.table(comparison_df))
+
+        # Algorithm configuration details
+        components.append(mo_ref.md("### ⚙️ Algorithm Configurations"))
+
+        config_details = []
+        for algo in algorithm_versions:
+            if algo in ALGORITHM_VERSIONS:
+                config = ALGORITHM_VERSIONS[algo]
+                config_details.append(
+                    f"**{algo}**: form_weight={config.form_weight}, form_window={config.form_window}"
+                )
+
+        components.append(mo_ref.md("\n\n".join(config_details)))
+
+        # Comparison chart
+        import plotly.graph_objects as go
+
+        fig = go.Figure()
+
+        algorithms = list(algorithm_metrics.keys())
+        mae_values = [algorithm_metrics[a]["mae"] for a in algorithms]
+        correlation_values = [algorithm_metrics[a]["correlation"] for a in algorithms]
+
+        # MAE comparison
+        fig.add_trace(
+            go.Bar(
+                x=algorithms,
+                y=mae_values,
+                name="MAE",
+                marker_color="lightcoral",
+                hovertemplate="%{x}<br>MAE: %{y:.2f}<extra></extra>",
+            )
+        )
+
+        fig.update_layout(
+            title="Mean Absolute Error by Algorithm",
+            xaxis_title="Algorithm Version",
+            yaxis_title="MAE (points)",
+            height=400,
+        )
+
+        components.append(mo_ref.ui.plotly(fig))
+
+        # Correlation comparison
+        fig_corr = go.Figure()
+
+        fig_corr.add_trace(
+            go.Bar(
+                x=algorithms,
+                y=correlation_values,
+                name="Correlation",
+                marker_color="lightblue",
+                hovertemplate="%{x}<br>Correlation: %{y:.3f}<extra></extra>",
+            )
+        )
+
+        fig_corr.update_layout(
+            title="Prediction Correlation by Algorithm",
+            xaxis_title="Algorithm Version",
+            yaxis_title="Correlation Coefficient",
+            height=400,
+        )
+
+        components.append(mo_ref.ui.plotly(fig_corr))
+
+        # Winner summary
+        best_algo = comparison_df.index[0]
+        components.append(
+            mo_ref.md(f"""
+### 🏆 Best Performing Algorithm
+
+**{best_algo}** achieved the lowest MAE ({comparison_df.loc[best_algo, "mae"]:.2f}) across {comparison_df.loc[best_algo, "gameweeks"]:.0f} gameweeks.
+
+**Recommendation**: Consider using this algorithm configuration for future predictions.
+""")
+        )
+
+        return mo_ref.vstack(components)
+
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating algorithm comparison: {e}")

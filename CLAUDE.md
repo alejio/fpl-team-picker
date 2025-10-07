@@ -366,23 +366,59 @@ def _(gameweek_data, mo):
 - Form-weighted training data using historical gameweek performance
 - Model comparison and performance validation against actual FPL results
 
+#### xP Accuracy Tracking (`xp_accuracy_tracking.py`) - **Experimentation Notebook**
+**Marimo notebook for model accuracy analysis and algorithm optimization:**
+
+**Purpose:** Development and validation tool for algorithm experimentation (not for end-user predictions)
+
+**Key Features:**
+- **Historical Accuracy Tracking** - Monitor MAE/RMSE/correlation trends over completed gameweeks
+- **Algorithm A/B Testing** - Compare multiple algorithm versions side-by-side
+- **Position-Specific Analysis** - Identify which positions need model improvements
+- **Parameter Optimization** - Test form_weight (0.5, 0.7, 0.9) and form_window (3GW, 5GW, 8GW) variations
+
+**Interactive Controls:**
+- Gameweek range selection for analysis
+- Algorithm version selector (current, experimental_high_form, experimental_low_form, v1.0)
+- Position-specific accuracy breakdown
+- Real-time algorithm comparison with winner recommendations
+
+**Use Cases:**
+1. **Model Validation** - Measure prediction accuracy against actual FPL results
+2. **Algorithm Development** - Test new parameters on historical data before deployment
+3. **Performance Monitoring** - Track accuracy trends to detect model degradation
+4. **Evidence-Based Optimization** - Data-driven algorithm selection for gameweek manager
+
+**Workflow:**
+```bash
+# Run accuracy tracking notebook
+fpl-xp-accuracy
+
+# Analyze accuracy trends → Identify improvements → Test algorithm variants →
+# Validate on historical data → Select best performer → Update gameweek manager algorithm
+```
+
 ## Command Line Interface
 
-The project provides CLI entry points for both interfaces:
+The project provides CLI entry points for all interfaces:
 
 ```bash
 # Season-start team building
 fpl-season-planner
 
-# Weekly gameweek management
+# Weekly gameweek management (production)
 fpl-gameweek-manager
 
+# Model accuracy analysis & experimentation (development)
+fpl-xp-accuracy
+
 # ML model development
-marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
+fpl-ml-experiment
 
 # Or run directly with Marimo
 marimo run fpl_team_picker/interfaces/season_planner.py
 marimo run fpl_team_picker/interfaces/gameweek_manager.py
+marimo run fpl_team_picker/interfaces/xp_accuracy_tracking.py
 marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
 ```
 
@@ -610,6 +646,75 @@ accuracy_metrics = analytics_service.calculate_accuracy_metrics(
 # }
 ```
 
+#### 5. Accuracy Tracking Visualizations
+
+**Model Accuracy Tracking** - Visualize accuracy trends across historical gameweeks:
+
+```python
+from fpl_team_picker.visualization.charts import create_model_accuracy_visualization
+
+# Track model accuracy over last 5 completed gameweeks
+accuracy_viz = create_model_accuracy_visualization(
+    target_gameweek=8,  # Current gameweek
+    lookback_gameweeks=5,  # Analyze GW3-7
+    algorithm_versions=["current"],  # Can compare multiple algorithms
+    mo_ref=mo  # Marimo reference
+)
+# Returns: Interactive charts with MAE trends, correlation analysis, and gameweek breakdown
+```
+
+**Position-Specific Accuracy** - Analyze accuracy by position (GKP, DEF, MID, FWD):
+
+```python
+from fpl_team_picker.visualization.charts import create_position_accuracy_visualization
+
+# Analyze position-specific accuracy for a completed gameweek
+position_accuracy = create_position_accuracy_visualization(
+    target_gameweek=7,  # Must be completed
+    algorithm_version="current",
+    mo_ref=mo
+)
+# Returns: Position-wise MAE/correlation charts and breakdown tables
+```
+
+**Algorithm Comparison** - Compare multiple algorithm versions to find best performer:
+
+```python
+from fpl_team_picker.visualization.charts import create_algorithm_comparison_visualization
+
+# Compare algorithm performance across historical gameweeks
+comparison = create_algorithm_comparison_visualization(
+    start_gw=3,
+    end_gw=7,
+    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"],
+    mo_ref=mo
+)
+# Returns: Side-by-side comparison with winner recommendations
+```
+
+**Integration with Gameweek Manager:**
+
+The accuracy tracking visualizations can be added to the gameweek manager interface:
+
+```python
+# In gameweek_manager.py
+@app.cell
+def _(target_gameweek, mo):
+    from fpl_team_picker.visualization.charts import create_model_accuracy_visualization
+
+    # Show accuracy tracking for completed gameweeks
+    if target_gameweek > 1:
+        accuracy_display = create_model_accuracy_visualization(
+            target_gameweek=target_gameweek,
+            lookback_gameweeks=5,
+            mo_ref=mo
+        )
+    else:
+        accuracy_display = mo.md("*No completed gameweeks for accuracy tracking*")
+
+    return accuracy_display,
+```
+
 ### Use Cases
 
 **1. Algorithm Optimization:**
@@ -655,8 +760,8 @@ for gw in range(1, 11):
 ### Testing
 
 ```bash
-# Run historical recomputation tests
-pytest tests/domain/services/test_historical_recomputation.py -v
+# Run historical recomputation and accuracy tracking tests
+pytest tests/domain/services/test_performance_analytics_service.py::TestAccuracyTracking -v
 
 # Test coverage includes:
 # - Historical data loading with temporal consistency
@@ -664,7 +769,11 @@ pytest tests/domain/services/test_historical_recomputation.py -v
 # - Single gameweek recomputation
 # - Batch recomputation across gameweeks and algorithms
 # - Accuracy metrics calculation (overall + position-specific)
-# - Error handling for invalid inputs
+# - Algorithm version registry validation
+# - Error handling for invalid inputs and missing data
+
+# Run all performance analytics tests
+pytest tests/domain/services/test_performance_analytics_service.py -v
 ```
 
 ## Development Commands
