@@ -105,9 +105,7 @@ def _(client, mo, pd):
             for player in enriched_players:
                 team_name = team_map.get(player.team_id, "Unknown")
                 # Type-safe access to domain model properties
-                display_name = (
-                    f"{player.web_name} ({team_name}) - {player.position.value}"
-                )
+                display_name = f"{player.web_name} ({team_name}) - {player.position}"
 
                 # Add indicators for quick identification
                 indicators = []
@@ -213,10 +211,15 @@ def _(mo):
         "recoveries",
         "defensive_contribution",
         "value_form",
+        "value_season",
         "cost_change_event",
         "cost_change_start",
+        "transfers_in",
+        "transfers_out",
         "transfers_in_event",
         "transfers_out_event",
+        "chance_of_playing_this_round",
+        "chance_of_playing_next_round",
     ]
 
     # Derived metrics from get_derived_player_metrics() (advanced analytics)
@@ -224,15 +227,22 @@ def _(mo):
         "points_per_million",
         "form_per_million",
         "value_score",
+        "value_confidence",
+        "form_trend",
         "form_momentum",
         "recent_form_5gw",
         "season_consistency",
         "expected_points_per_game",
         "points_above_expected",
+        "overperformance_risk",
+        "ownership_trend",
         "ownership_trend_numeric",
+        "ownership_risk",
         "transfer_momentum",
         "injury_risk",
         "rotation_risk",
+        "set_piece_priority",
+        "data_quality_score",
     ]
 
     # Rankings (from get_players_enhanced())
@@ -250,6 +260,19 @@ def _(mo):
         "corners_and_indirect_freekicks_order",
         "direct_freekicks_order",
         "penalties_order",
+        "penalty_taker",
+        "corner_taker",
+        "freekick_taker",
+    ]
+
+    # Basic player attributes (from PlayerDomain)
+    basic_attributes = [
+        "price",
+        "availability_status",
+        "first_name",
+        "last_name",
+        "team_id",
+        "news",
     ]
 
     # All available stats
@@ -259,6 +282,7 @@ def _(mo):
         + derived_stats
         + ranking_stats
         + set_piece_stats
+        + basic_attributes
     )
 
     # Stat categories for better organization
@@ -294,10 +318,15 @@ def _(mo):
             "direct_freekicks_order",
             "penalties_saved",
             "penalties_missed",
+            "penalty_taker",
+            "corner_taker",
+            "freekick_taker",
+            "set_piece_priority",
         ],
         "📊 Advanced": ["bps", "influence", "creativity", "threat", "ict_index"],
         "📈 Form & Consistency": [
             "form",
+            "form_trend",
             "form_momentum",
             "recent_form_5gw",
             "season_consistency",
@@ -305,18 +334,25 @@ def _(mo):
         ],
         "💰 Value": [
             "value",
+            "value_season",
             "points_per_million",
             "form_per_million",
             "value_form",
+            "value_score",
+            "value_confidence",
             "cost_change_event",
             "cost_change_start",
         ],
         "👥 Ownership": [
             "selected_by_percent",
+            "transfers_in",
+            "transfers_out",
             "transfers_in_event",
             "transfers_out_event",
             "transfer_momentum",
+            "ownership_trend",
             "ownership_trend_numeric",
+            "ownership_risk",
         ],
         "🏆 Rankings": [
             "form_rank",
@@ -326,9 +362,22 @@ def _(mo):
             "creativity_rank",
             "threat_rank",
         ],
-        "⚠️ Risk Factors": ["injury_risk", "rotation_risk", "minutes"],
+        "⚠️ Risk Factors": [
+            "injury_risk",
+            "rotation_risk",
+            "overperformance_risk",
+            "ownership_risk",
+            "minutes",
+        ],
         "🃏 Rare Events": ["own_goals", "yellow_cards", "red_cards"],
         "📅 Playing Time": ["minutes", "starts"],
+        "🏥 Availability": [
+            "availability_status",
+            "chance_of_playing_this_round",
+            "chance_of_playing_next_round",
+        ],
+        "📰 News & Info": ["news", "first_name", "last_name", "team_id"],
+        "📊 Data Quality": ["data_quality_score"],
     }
 
     # Create stat selector with categories
@@ -684,11 +733,11 @@ def _(client, end_gw, mo, pd, player_selector, start_gw):
                     summary_viz = mo.md("❌ **No summary data available**")
 
         except Exception as e:
-            import traceback
+            import traceback as _traceback
 
-            error_details = traceback.format_exc()
+            _error_details = _traceback.format_exc()
             summary_viz = mo.md(
-                f"❌ **Error creating summary:** {str(e)}\n\n```\n{error_details}\n```"
+                f"❌ **Error creating summary:** {str(e)}\n\n```\n{_error_details}\n```"
             )
 
     summary_viz

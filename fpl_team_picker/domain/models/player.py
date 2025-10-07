@@ -141,7 +141,7 @@ class EnrichedPlayerDomain(PlayerDomain):
 
     # Season Performance Stats (beyond basic PlayerDomain)
     total_points_season: int = Field(ge=0, description="Total FPL points this season")
-    form_season: float = Field(ge=0.0, description="Recent form score")
+    form_season: float = Field(description="Recent form score (can be negative)")
     points_per_game_season: float = Field(ge=0.0, description="Average points per game")
     minutes: int = Field(ge=0, description="Total minutes played")
     starts: int = Field(ge=0, description="Number of starts")
@@ -157,7 +157,7 @@ class EnrichedPlayerDomain(PlayerDomain):
 
     # Bonus Points System
     bonus: int = Field(ge=0, description="Bonus points earned")
-    bps: int = Field(ge=0, description="Bonus points system score")
+    bps: int = Field(description="Bonus points system score (can be negative)")
 
     # ICT Index Components (0-200 scale typically)
     influence: float = Field(ge=0.0, description="Influence score")
@@ -176,7 +176,9 @@ class EnrichedPlayerDomain(PlayerDomain):
     )
 
     # Market Data
-    value_form: float = Field(ge=0.0, description="Value based on recent form")
+    value_form: float = Field(
+        description="Value based on recent form (can be negative)"
+    )
     value_season: float = Field(ge=0.0, description="Value based on season performance")
     transfers_in: int = Field(ge=0, description="Total transfers in")
     transfers_out: int = Field(ge=0, description="Total transfers out")
@@ -193,10 +195,10 @@ class EnrichedPlayerDomain(PlayerDomain):
 
     # Set Piece Responsibilities
     penalties_order: Optional[int] = Field(
-        None, ge=1, le=5, description="Penalty taking order (1=first choice)"
+        None, ge=1, description="Penalty taking order (1=first choice)"
     )
     corners_and_indirect_freekicks_order: Optional[int] = Field(
-        None, ge=1, le=5, description="Corner/free kick taking order"
+        None, ge=1, description="Corner/free kick taking order"
     )
 
     # News and Updates
@@ -236,7 +238,7 @@ class EnrichedPlayerDomain(PlayerDomain):
         ge=0.0, le=1.0, description="Risk from ownership dynamics (0-1)"
     )
     set_piece_priority: float = Field(
-        ge=0.0, le=1.0, description="Overall set piece priority score (0-1)"
+        ge=0.0, description="Overall set piece priority score"
     )
     penalty_taker: bool = Field(description="First choice penalty taker flag")
     corner_taker: bool = Field(description="Primary corner taker flag")
