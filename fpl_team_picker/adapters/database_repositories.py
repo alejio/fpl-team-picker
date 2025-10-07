@@ -627,22 +627,41 @@ class DatabasePlayerRepository(PlayerRepository):
     def get_enriched_players(self) -> Result[List[EnrichedPlayerDomain]]:
         """Get all current players with enriched season statistics as Pydantic domain objects.
 
-        This method provides the future-facing implementation that returns validated
-        Pydantic domain objects with comprehensive type safety and business logic.
+        This method merges data from:
+        - get_enriched_players_dataframe() (47 enhanced fields)
+        - get_derived_player_metrics() (29 derived analytics fields)
+
+        Returns fully enriched EnrichedPlayerDomain objects with 70+ validated attributes.
         """
         try:
-            # Get the DataFrame first (reuse existing logic)
+            from client import FPLDataClient
+
+            # Get the enriched DataFrame first (reuse existing logic)
             df_result = self.get_enriched_players_dataframe()
             if df_result.is_failure:
                 return Result.failure(df_result.error)
 
             enriched_df = df_result.value
 
+            # Get derived metrics from dataset-builder
+            client = FPLDataClient()
+            derived_metrics = client.get_derived_player_metrics()
+
+            if derived_metrics.empty:
+                return Result.failure(
+                    DomainError.data_not_found("No derived player metrics available")
+                )
+
+            # Merge enriched data with derived metrics on player_id
+            merged_df = enriched_df.merge(
+                derived_metrics, on="player_id", how="left", suffixes=("", "_derived")
+            )
+
             # Convert DataFrame rows to validated Pydantic domain objects
             enriched_players = []
             validation_errors = []
 
-            for _, row in enriched_df.iterrows():
+            for _, row in merged_df.iterrows():
                 try:
                     # Create Pydantic domain object with full validation
                     player = EnrichedPlayerDomain(
@@ -657,7 +676,7 @@ class DatabasePlayerRepository(PlayerRepository):
                         selected_by_percent=float(row["selected_by_percent"]),
                         availability_status=str(row.get("status", "a")),
                         as_of_utc=row["as_of_utc"],
-                        # EnrichedPlayerDomain specific fields
+                        # EnrichedPlayerDomain enhanced fields
                         total_points_season=int(row["total_points_season"]),
                         form_season=float(row["form_season"]),
                         points_per_game_season=float(row["points_per_game_season"]),
@@ -697,6 +716,34 @@ class DatabasePlayerRepository(PlayerRepository):
                             "corners_and_indirect_freekicks_order"
                         ),
                         news=str(row.get("news", "")),
+                        # Derived analytics metrics (29 fields from get_derived_player_metrics)
+                        points_per_million=float(row.get("points_per_million", 0.0)),
+                        form_per_million=float(row.get("form_per_million", 0.0)),
+                        value_score=float(row.get("value_score", 0.0)),
+                        value_confidence=float(row.get("value_confidence", 0.0)),
+                        form_trend=str(row.get("form_trend", "stable")),
+                        form_momentum=float(row.get("form_momentum", 0.0)),
+                        recent_form_5gw=float(row.get("recent_form_5gw", 0.0)),
+                        season_consistency=float(row.get("season_consistency", 0.0)),
+                        expected_points_per_game=float(
+                            row.get("expected_points_per_game", 0.0)
+                        ),
+                        points_above_expected=float(
+                            row.get("points_above_expected", 0.0)
+                        ),
+                        overperformance_risk=float(
+                            row.get("overperformance_risk", 0.0)
+                        ),
+                        ownership_trend=str(row.get("ownership_trend", "stable")),
+                        transfer_momentum=float(row.get("transfer_momentum", 0.0)),
+                        ownership_risk=float(row.get("ownership_risk", 0.0)),
+                        set_piece_priority=float(row.get("set_piece_priority", 0.0)),
+                        penalty_taker=bool(row.get("penalty_taker", False)),
+                        corner_taker=bool(row.get("corner_taker", False)),
+                        freekick_taker=bool(row.get("freekick_taker", False)),
+                        injury_risk=float(row.get("injury_risk", 0.0)),
+                        rotation_risk=float(row.get("rotation_risk", 0.0)),
+                        data_quality_score=float(row.get("data_quality_score", 1.0)),
                     )
                     enriched_players.append(player)
 
@@ -707,11 +754,11 @@ class DatabasePlayerRepository(PlayerRepository):
 
             # Check if we have too many validation errors
             if (
-                validation_errors and len(validation_errors) > len(enriched_df) * 0.1
+                validation_errors and len(validation_errors) > len(merged_df) * 0.1
             ):  # >10% failure rate
                 return Result.failure(
                     DomainError.validation_error(
-                        f"Too many validation errors ({len(validation_errors)}/{len(enriched_df)}). "
+                        f"Too many validation errors ({len(validation_errors)}/{len(merged_df)}). "
                         f"Sample errors: {validation_errors[:3]}"
                     )
                 )
@@ -722,10 +769,17 @@ class DatabasePlayerRepository(PlayerRepository):
                 )
 
             print(
-                f"✅ Successfully created {len(enriched_players)} validated EnrichedPlayerDomain objects"
+                f"✅ Successfully created {len(enriched_players)} validated EnrichedPlayerDomain objects with full derived metrics"
             )
             return Result.success(enriched_players)
 
+        except ImportError as e:
+            return Result.failure(
+                DomainError(
+                    error_type=ErrorType.CONFIGURATION_ERROR,
+                    message=f"Could not import FPL data client: {str(e)}",
+                )
+            )
         except Exception as e:
             return Result.failure(
                 DomainError(

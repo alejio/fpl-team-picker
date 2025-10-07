@@ -202,6 +202,55 @@ class EnrichedPlayerDomain(PlayerDomain):
     # News and Updates
     news: str = Field(default="", description="Latest injury/availability news")
 
+    # Derived Analytics Metrics (from dataset-builder get_derived_player_metrics)
+    points_per_million: float = Field(ge=0.0, description="Total points per £1m price")
+    form_per_million: float = Field(ge=0.0, description="Form score per £1m price")
+    value_score: float = Field(
+        ge=0.0, le=100.0, description="Overall value rating (0-100)"
+    )
+    value_confidence: float = Field(
+        ge=0.0, le=1.0, description="Confidence in value score (0-1)"
+    )
+    form_trend: str = Field(description="Form trend: improving/stable/declining")
+    form_momentum: float = Field(
+        ge=-1.0, le=1.0, description="Form momentum indicator (-1 to +1)"
+    )
+    recent_form_5gw: float = Field(ge=0.0, description="Average form over last 5 GWs")
+    season_consistency: float = Field(
+        ge=0.0, le=1.0, description="Performance consistency score (0-1)"
+    )
+    expected_points_per_game: float = Field(
+        ge=0.0, description="Expected points per game based on xG/xA"
+    )
+    points_above_expected: float = Field(
+        description="Actual points minus expected points (overperformance)"
+    )
+    overperformance_risk: float = Field(
+        ge=0.0, le=1.0, description="Risk of regression to mean (0-1)"
+    )
+    ownership_trend: str = Field(description="Ownership trend: rising/stable/falling")
+    transfer_momentum: float = Field(
+        description="Net transfer velocity (transfers_in - transfers_out)"
+    )
+    ownership_risk: float = Field(
+        ge=0.0, le=1.0, description="Risk from ownership dynamics (0-1)"
+    )
+    set_piece_priority: float = Field(
+        ge=0.0, le=1.0, description="Overall set piece priority score (0-1)"
+    )
+    penalty_taker: bool = Field(description="First choice penalty taker flag")
+    corner_taker: bool = Field(description="Primary corner taker flag")
+    freekick_taker: bool = Field(description="Primary free kick taker flag")
+    injury_risk: float = Field(
+        ge=0.0, le=1.0, description="Injury probability based on history (0-1)"
+    )
+    rotation_risk: float = Field(
+        ge=0.0, le=1.0, description="Risk of rotation/benching (0-1)"
+    )
+    data_quality_score: float = Field(
+        ge=0.0, le=1.0, description="Quality of underlying data for metrics (0-1)"
+    )
+
     @field_validator("total_points_season", "goals_scored", "assists")
     @classmethod
     def validate_non_negative_stats(cls, v: int) -> int:
@@ -244,6 +293,46 @@ class EnrichedPlayerDomain(PlayerDomain):
             self.corners_and_indirect_freekicks_order is not None
             and self.corners_and_indirect_freekicks_order <= 3
         )
+
+    @property
+    def is_high_value(self) -> bool:
+        """Check if player is high value (score >= 80)."""
+        return self.value_score >= 80.0
+
+    @property
+    def has_injury_concern(self) -> bool:
+        """Check if player has injury concern (risk > 50%)."""
+        return self.injury_risk > 0.5
+
+    @property
+    def has_rotation_concern(self) -> bool:
+        """Check if player has rotation concern (risk > 50%)."""
+        return self.rotation_risk > 0.5
+
+    @property
+    def is_form_improving(self) -> bool:
+        """Check if player's form is improving."""
+        return self.form_trend.lower() == "improving"
+
+    @property
+    def is_form_declining(self) -> bool:
+        """Check if player's form is declining."""
+        return self.form_trend.lower() == "declining"
+
+    @property
+    def is_ownership_rising(self) -> bool:
+        """Check if player's ownership is rising."""
+        return self.ownership_trend.lower() == "rising"
+
+    @property
+    def has_overperformance_risk(self) -> bool:
+        """Check if player has high overperformance risk (>= 0.7)."""
+        return self.overperformance_risk >= 0.7
+
+    @property
+    def is_reliable_data(self) -> bool:
+        """Check if player has reliable data quality (>= 0.7)."""
+        return self.data_quality_score >= 0.7
 
     class Config:
         """Pydantic configuration for enriched player data."""

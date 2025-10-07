@@ -7,6 +7,7 @@ try:
     from .squad_management_service import SquadManagementService
     from .chip_assessment_service import ChipAssessmentService
     from .performance_analytics_service import PerformanceAnalyticsService
+    from .player_analytics_service import PlayerAnalyticsService
 
     __all__ = [
         "DataOrchestrationService",
@@ -15,6 +16,7 @@ try:
         "SquadManagementService",
         "ChipAssessmentService",
         "PerformanceAnalyticsService",
+        "PlayerAnalyticsService",
     ]
 except ImportError:
     # Handle import errors gracefully during development

@@ -205,6 +205,29 @@ lineup_analysis = squad_service.analyze_squad_composition(
 # Returns: Squad balance, formation flexibility, value distribution
 ```
 
+**Player Analytics Service** (`player_analytics_service.py`)
+```python
+from fpl_team_picker.domain.services import PlayerAnalyticsService
+from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
+
+# Type-safe player operations using domain models
+player_repo = DatabasePlayerRepository()
+analytics_service = PlayerAnalyticsService(player_repo)
+
+# Get all players with 70+ validated attributes (enriched + derived metrics)
+players: List[EnrichedPlayerDomain] = analytics_service.get_all_players_enriched()
+
+# Type-safe filtering and analysis
+penalty_takers = analytics_service.get_penalty_takers()
+high_value = analytics_service.get_high_value_players(min_value_score=80)
+injury_risks = analytics_service.get_injury_risks(min_risk=0.5)
+form_improving = analytics_service.get_form_improving_players()
+top_value = analytics_service.get_top_players_by_value(limit=10)
+
+# Returns: List[EnrichedPlayerDomain] with full type safety and computed properties
+# player.is_high_value, player.has_injury_concern, player.is_penalty_taker, etc.
+```
+
 **Visualization** - *Handled by charts layer*
 ```python
 # Chart generation is handled directly in charts.py for Marimo
