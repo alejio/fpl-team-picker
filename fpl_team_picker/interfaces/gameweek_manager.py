@@ -9,9 +9,8 @@ app = marimo.App(width="medium")
 @app.cell
 def _():
     import marimo as mo
-    import pandas as pd
 
-    return mo, pd
+    return (mo,)
 
 
 @app.cell
@@ -321,13 +320,13 @@ def _(gameweek_data, gameweek_input, mo):
                         sa = analysis["squad_analysis"]
                         performance_review = mo.md(
                             f"""
-## 🎯 GW{previous_gw} Squad Performance
+    ## 🎯 GW{previous_gw} Squad Performance
 
-**Total:** {sa["total_predicted"]} xP → {sa["total_actual"]} pts ({sa["difference"]:+.1f})
-**Accuracy:** {sa["accuracy_percentage"]:.1f}% • **Players:** {sa["players_analyzed"]}
+    **Total:** {sa["total_predicted"]} xP → {sa["total_actual"]} pts ({sa["difference"]:+.1f})
+    **Accuracy:** {sa["accuracy_percentage"]:.1f}% • **Players:** {sa["players_analyzed"]}
 
-**Top 5 Performers:**
-"""
+    **Top 5 Performers:**
+    """
                             + "\n".join(
                                 [
                                     f"• {p['web_name']} ({p['position']}): {p['xP']:.1f} → {p['total_points']} ({p['xP_diff']:+.1f})"
@@ -357,10 +356,10 @@ def _(gameweek_data, gameweek_input, mo):
 def _(mo):
     mo.md(r"""## 🎯 Last Gameweek Performance Review
 
-**Compare actual player performance vs predicted xP from the previous gameweek**
+    **Compare actual player performance vs predicted xP from the previous gameweek**
 
-This section analyzes how well the expected points model predicted actual results, including your specific team's performance.
-""")
+    This section analyzes how well the expected points model predicted actual results, including your specific team's performance.
+    """)
     return
 
 
@@ -368,29 +367,29 @@ This section analyzes how well the expected points model predicted actual result
 def _(mo):
     # Simple test to ensure this cell always shows
     test_display = mo.md("""
-🔄 **Performance Review Section**
-""")
+    🔄 **Performance Review Section**
+    """)
     test_display
-    return (test_display,)
+    return
 
 
 @app.cell
 def _(mo):
     # Performance review cell with minimal dependencies
     performance_review_status = mo.md("""
-📊 **Ready for Performance Analysis**
+    📊 **Ready for Performance Analysis**
 
-To see performance review:
-1. Select a gameweek (GW2 or higher)
-2. Load gameweek data in the section above
-3. The analysis will appear here automatically
+    To see performance review:
+    1. Select a gameweek (GW2 or higher)
+    2. Load gameweek data in the section above
+    3. The analysis will appear here automatically
 
-*Features:*
-- Model accuracy metrics
-- Your team's specific performance
-- Best/worst predictions
-- Detailed player comparisons
-""")
+    *Features:*
+    - Model accuracy metrics
+    - Your team's specific performance
+    - Best/worst predictions
+    - Detailed player comparisons
+    """)
     performance_review_status
     return
 
@@ -561,7 +560,7 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, gameweek_input, mo):
+def _(gameweek_input, mo):
     # Fixture Difficulty Analysis using visualization function
     if gameweek_input.value:
         from fpl_team_picker.visualization.charts import (
@@ -630,65 +629,80 @@ def _(mo):
 
 
 @app.cell
-def _(gameweek_data, mo, optimization_horizon_toggle, players_with_xp):
-    # Transfer Constraints UI
+def _(mo, optimization_horizon_toggle, players_with_xp):
+    # Transfer Constraints UI - using PlayerAnalyticsService
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
     optimize_button = mo.ui.run_button(label="Loading...", disabled=True)
 
     if not players_with_xp.empty:
-        # Use Pydantic validation for transfer constraint players
-        from fpl_team_picker.interfaces.data_contracts import (
-            validate_teams_dataframe,
-            create_transfer_constraint_players,
-            DataContractError as _DataContractError,
+        # Use PlayerAnalyticsService for type-safe player operations
+        from fpl_team_picker.domain.services import PlayerAnalyticsService
+        from fpl_team_picker.adapters.database_repositories import (
+            DatabasePlayerRepository,
         )
 
         try:
-            # Determine horizon and sort column
+            # Initialize analytics service with repository
+            _player_repo = DatabasePlayerRepository()
+            _analytics_service = PlayerAnalyticsService(_player_repo)
+
+            # Get all enriched players with 70+ validated attributes
+            enriched_players = _analytics_service.get_all_players_enriched()
+
+            # Determine horizon for display
             horizon = (
                 optimization_horizon_toggle.value
                 if optimization_horizon_toggle.value
                 else "5gw"
             )
-            sort_column = (
-                "xP_5gw"
-                if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
-                else "xP"
-            )
             horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
 
-            # Get teams data for validation
-            _teams = gameweek_data.get("teams") if gameweek_data else None
-            if _teams is None or _teams.empty:
-                raise _DataContractError(
-                    "Teams data not available for transfer constraints"
-                )
-
-            # Create validated transfer constraint players using Pydantic
-            validated_players = create_transfer_constraint_players(
-                players_with_xp,
-                validate_teams_dataframe(_teams),
-                sort_column=sort_column,
-                context="transfer constraint generation",
+            # Get xP values from DataFrame for sorting (temporary bridge)
+            xp_lookup = (
+                players_with_xp.set_index("player_id")["xP_5gw"]
+                if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
+                else players_with_xp.set_index("player_id")["xP"]
             )
 
-            # Sort players by position and XP value
-            validated_players.sort(key=lambda p: (p.position.value, -p.xP))
-
-            # Generate UI options from validated Pydantic models
+            # Generate UI options from domain models with type safety
             player_options = []
-            for player in validated_players:
-                label = player.to_display_label(horizon_label)
+            for player in enriched_players:
+                # Get xP from lookup (bridge until xP is in domain model)
+                xp_value = xp_lookup.get(player.player_id, 0.0)
+
+                # Type-safe access to domain model properties
+                label = f"{player.web_name} ({player.position.value}) - £{player.price:.1f}m | {xp_value:.1f} {horizon_label}"
+
+                # Add risk indicators using computed properties
+                indicators = []
+                if player.is_penalty_taker:
+                    indicators.append("⚽")
+                if player.has_injury_concern:
+                    indicators.append("🤕")
+                if player.has_rotation_concern:
+                    indicators.append("🔄")
+                if player.is_high_value:
+                    indicators.append("💎")
+
+                if indicators:
+                    label += f" {' '.join(indicators)}"
+
                 player_options.append({"label": label, "value": player.player_id})
 
-        except _DataContractError as e:
-            # Fallback to basic player list if validation fails
-            print(f"⚠️ Transfer constraint validation failed: {e}")
+            # Sort by position and xP
+            player_options.sort(
+                key=lambda x: (
+                    x["label"].split("(")[1].split(")")[0],  # Position
+                    -float(x["label"].split("|")[1].split()[0]),  # xP descending
+                )
+            )
+
+        except Exception as e:
+            # Fallback to basic player list if domain service fails
+            print(f"⚠️ PlayerAnalyticsService failed: {e}")
             player_options = []
-            for _, player in players_with_xp.head(
-                10
-            ).iterrows():  # Limit to 10 for safety
+            for _, player in players_with_xp.head(10).iterrows():
                 label = f"{player['web_name']} ({player['position']}) - £{player['price']:.1f}m"
                 player_options.append({"label": label, "value": player["player_id"]})
 
@@ -754,8 +768,8 @@ def _(
     mo,
     must_exclude_dropdown,
     must_include_dropdown,
-    optimize_button,
     optimization_horizon_toggle,
+    optimize_button,
     players_with_xp,
 ):
     # Transfer optimization using interactive optimization engine
@@ -1006,26 +1020,26 @@ def _(mo, optimal_starting_11):
                 ),
                 mo.md("---"),
                 mo.md(f"""
-### 🏆 **Recommended Captain**
+    ### 🏆 **Recommended Captain**
 
-**{captain_recommendation["web_name"]}** ({captain_recommendation["position"]})
-- **Expected Points:** {captain_recommendation["xP"]:.2f}
-- **Reasoning:** {captain_recommendation["reason"]}
-"""),
+    **{captain_recommendation["web_name"]}** ({captain_recommendation["position"]})
+    - **Expected Points:** {captain_recommendation["xP"]:.2f}
+    - **Reasoning:** {captain_recommendation["reason"]}
+    """),
             ]
         )
     else:
         captain_display = mo.md("""
-**Please run transfer optimization first to enable captain selection.**
+    **Please run transfer optimization first to enable captain selection.**
 
-Once you have an optimal starting 11, captain recommendations will appear here based on:
-- Double points potential (XP × 2)
-- Fixture difficulty and opponent strength
-- Recent form and momentum indicators
-- Minutes certainty and injury risk
+    Once you have an optimal starting 11, captain recommendations will appear here based on:
+    - Double points potential (XP × 2)
+    - Fixture difficulty and opponent strength
+    - Recent form and momentum indicators
+    - Minutes certainty and injury risk
 
----
-""")
+    ---
+    """)
 
     captain_display
     return
@@ -1129,10 +1143,10 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
                     # Chip status overview
                     chip_displays.append(
                         mo.md(f"""
-### 🎯 Chip Status Overview
-- **Available:** {", ".join(available_chips) if available_chips else "None"}
-- **Used this season:** {", ".join(used_chips) if used_chips else "None"}
-""")
+    ### 🎯 Chip Status Overview
+    - **Available:** {", ".join(available_chips) if available_chips else "None"}
+    - **Used this season:** {", ".join(used_chips) if used_chips else "None"}
+    """)
                     )
 
                     # Individual chip recommendations
@@ -1146,12 +1160,12 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 
                         chip_displays.append(
                             mo.md(f"""
-### {_status} {chip_title}
-**{reasoning}**
+    ### {_status} {chip_title}
+    **{reasoning}**
 
-**Key Metrics:**
-{_format_chip_metrics(key_metrics)}
-""")
+    **Key Metrics:**
+    {_format_chip_metrics(key_metrics)}
+    """)
                         )
 
                     chip_assessment_display = mo.vstack(chip_displays)
