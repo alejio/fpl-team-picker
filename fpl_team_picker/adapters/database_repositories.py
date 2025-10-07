@@ -188,6 +188,20 @@ class DatabasePlayerRepository(PlayerRepository):
         if dataset_builder_path not in sys.path:
             sys.path.append(dataset_builder_path)
 
+    @staticmethod
+    def _safe_optional_int(value) -> Optional[int]:
+        """Convert value to int or None, handling pandas nan."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        return int(value)
+
+    @staticmethod
+    def _safe_optional_float(value) -> Optional[float]:
+        """Convert value to float or None, handling pandas nan."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        return float(value)
+
     def get_current_players(self) -> Result[List[PlayerDomain]]:
         """Get all current players with comprehensive Pydantic validation."""
         try:
@@ -705,15 +719,17 @@ class DatabasePlayerRepository(PlayerRepository):
                         transfers_out=int(row["transfers_out"]),
                         transfers_in_event=int(row["transfers_in_event"]),
                         transfers_out_event=int(row["transfers_out_event"]),
-                        chance_of_playing_this_round=row.get(
-                            "chance_of_playing_this_round"
+                        chance_of_playing_this_round=self._safe_optional_float(
+                            row.get("chance_of_playing_this_round")
                         ),
-                        chance_of_playing_next_round=row.get(
-                            "chance_of_playing_next_round"
+                        chance_of_playing_next_round=self._safe_optional_float(
+                            row.get("chance_of_playing_next_round")
                         ),
-                        penalties_order=row.get("penalties_order"),
-                        corners_and_indirect_freekicks_order=row.get(
-                            "corners_and_indirect_freekicks_order"
+                        penalties_order=self._safe_optional_int(
+                            row.get("penalties_order")
+                        ),
+                        corners_and_indirect_freekicks_order=self._safe_optional_int(
+                            row.get("corners_and_indirect_freekicks_order")
                         ),
                         news=str(row.get("news", "")),
                         # Derived analytics metrics (29 fields from get_derived_player_metrics)

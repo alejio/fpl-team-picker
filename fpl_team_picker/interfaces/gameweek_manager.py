@@ -701,6 +701,11 @@ def _(mo, optimization_horizon_toggle, players_with_xp):
         except Exception as e:
             # Fallback to basic player list if domain service fails
             print(f"⚠️ PlayerAnalyticsService failed: {e}")
+            horizon = (
+                optimization_horizon_toggle.value
+                if optimization_horizon_toggle.value
+                else "5gw"
+            )
             player_options = []
             for _, player in players_with_xp.head(10).iterrows():
                 label = f"{player['web_name']} ({player['position']}) - £{player['price']:.1f}m"
