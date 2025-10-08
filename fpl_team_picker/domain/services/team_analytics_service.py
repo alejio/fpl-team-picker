@@ -1,36 +1,30 @@
-"""
-Dynamic Team Strength Calculation Module
+"""Team analytics service for team strength calculations.
 
-Calculates team strength ratings that evolve throughout the season:
-- GW1-7: Weighted combination of previous season (2024-25) baseline + current season (2025-26)
-- GW8+: Pure current season (2025-26) performance (ignoring previous season baseline)
-
-This provides stable early season ratings while becoming fully responsive
-to current season performance once sufficient data is available.
+Provides dynamic team strength ratings that evolve throughout the season.
 """
 
 import pandas as pd
 import numpy as np
 import warnings
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fpl_team_picker.config import config
 
 warnings.filterwarnings("ignore")
 
 
-class DynamicTeamStrength:
-    """
-    Dynamic team strength calculator with previous season transition logic
+class TeamAnalyticsService:
+    """Service for team analytics including dynamic strength calculations.
 
-    Key Features:
-    - Uses previous season (2024-25) final positions as baseline for current season (2025-26)
-    - Transitions to current season (2025-26) focus at GW8
-    - Rolling 6-gameweek windows for current season metrics
-    - Home/away venue-specific adjustments
+    Calculates team strength ratings that evolve throughout the season:
+    - GW1-7: Weighted combination of previous season baseline + current season
+    - GW8+: Pure current season performance
+
+    This provides stable early season ratings while becoming fully responsive
+    to current season performance once sufficient data is available.
     """
 
-    # Previous season (2024-25) Premier League final standings - used as baseline for current season (2025-26)
+    # Previous season (2024-25) Premier League final standings - used as baseline
     HISTORICAL_POSITIONS = {
         "Liverpool": 1,
         "Arsenal": 2,
@@ -68,8 +62,7 @@ class DynamicTeamStrength:
     }
 
     def __init__(self, debug: bool = None):
-        """
-        Initialize dynamic team strength calculator
+        """Initialize team analytics service.
 
         Args:
             debug: Enable debug logging (defaults to config)
@@ -82,19 +75,18 @@ class DynamicTeamStrength:
         self.HISTORICAL_TRANSITION_GW = config.team_strength.historical_transition_gw
         self.ROLLING_WINDOW_SIZE = config.team_strength.rolling_window_size
 
-        if debug:
+        if self.debug:
             print(
-                f"🏟️ DynamicTeamStrength initialized - Transition at GW{self.HISTORICAL_TRANSITION_GW}"
+                f"🏟️ TeamAnalyticsService initialized - Transition at GW{self.HISTORICAL_TRANSITION_GW}"
             )
 
     def get_team_strength(
         self,
         target_gameweek: int,
         teams_data: pd.DataFrame,
-        current_season_data: List[pd.DataFrame] = None,
+        current_season_data: Optional[List[pd.DataFrame]] = None,
     ) -> Dict[str, float]:
-        """
-        Get team strength ratings for target gameweek
+        """Get team strength ratings for target gameweek.
 
         Args:
             target_gameweek: Target gameweek for strength calculation
@@ -113,24 +105,51 @@ class DynamicTeamStrength:
                 target_gameweek, teams_data, current_season_data
             )
 
+    def load_historical_gameweek_data(
+        self, start_gw: int = 1, end_gw: Optional[int] = None
+    ) -> List[pd.DataFrame]:
+        """Load current season gameweek data for team strength calculation.
+
+        Args:
+            start_gw: Starting gameweek to load
+            end_gw: Ending gameweek to load (None = latest available)
+
+        Returns:
+            List of gameweek DataFrames
+        """
+        from client import FPLDataClient
+
+        client = FPLDataClient()
+
+        gameweek_data = []
+        max_gw = end_gw if end_gw else 38
+
+        for gw in range(start_gw, max_gw + 1):
+            try:
+                gw_data = client.get_gameweek_live_data(gw)
+                if not gw_data.empty:
+                    gameweek_data.append(gw_data)
+            except Exception:
+                # No data available for this gameweek
+                continue
+
+        return gameweek_data
+
+    # ========== Private Internal Methods ==========
+
     def _get_current_season_strength(
         self,
         target_gameweek: int,
         teams_data: pd.DataFrame,
-        current_season_data: List[pd.DataFrame],
+        current_season_data: Optional[List[pd.DataFrame]],
     ) -> Dict[str, float]:
-        """
-        Calculate team strength using current season multi-factor approach (GW8+)
-
-        Uses the same multi-factor calculation but with current season weighting
-        """
+        """Calculate team strength using current season multi-factor approach (GW8+)."""
         if self.debug:
             print(
                 f"🔄 Calculating current season multi-factor strength for GW{target_gameweek}"
             )
 
         try:
-            # Use multi-factor calculation with current gameweek for proper seasonal weighting
             strength_ratings = self._calculate_multi_factor_strength(
                 teams_data, target_gameweek=target_gameweek
             )
@@ -153,21 +172,15 @@ class DynamicTeamStrength:
         self,
         target_gameweek: int,
         teams_data: pd.DataFrame,
-        current_season_data: List[pd.DataFrame],
+        current_season_data: Optional[List[pd.DataFrame]],
     ) -> Dict[str, float]:
-        """
-        Calculate early season team strength using multi-factor approach
-
-        For early season (GW1-7), the multi-factor calculation already handles
-        the weighting internally through seasonal weight adjustment
-        """
+        """Calculate early season team strength using multi-factor approach."""
         if self.debug:
             print(
                 f"🔄 Calculating early season multi-factor strength for GW{target_gameweek}"
             )
 
         try:
-            # Use multi-factor calculation which handles early season weighting internally
             strength_ratings = self._calculate_multi_factor_strength(
                 teams_data, target_gameweek=target_gameweek
             )
@@ -187,20 +200,15 @@ class DynamicTeamStrength:
             return self._get_historical_baseline(teams_data)
 
     def _get_historical_baseline(self, teams_data: pd.DataFrame) -> Dict[str, float]:
-        """
-        Calculate team strength using multi-factor approach:
-        1) League Position (25%), 2) Player Quality (35%), 3) Reputation (20%), 4) Recent Form (20%)
-        """
+        """Calculate team strength using multi-factor approach."""
         if "historical_baseline" in self._historical_cache:
             return self._historical_cache["historical_baseline"]
 
         try:
-            # Use multi-factor calculation (default to GW1 for historical baseline)
             strength_ratings = self._calculate_multi_factor_strength(
                 teams_data, target_gameweek=1
             )
 
-            # Cache for future use
             self._historical_cache["historical_baseline"] = strength_ratings
 
             if self.debug:
@@ -218,14 +226,12 @@ class DynamicTeamStrength:
             if self.debug:
                 print(f"⚠️ Error in multi-factor calculation: {e}")
 
-            # Fallback to static ratings
             return self._get_static_fallback_ratings()
 
     def _calculate_multi_factor_strength(
-        self, teams_data: pd.DataFrame, target_gameweek: int = None
+        self, teams_data: pd.DataFrame, target_gameweek: Optional[int] = None
     ) -> Dict[str, float]:
-        """
-        Calculate team strength using comprehensive multi-factor approach
+        """Calculate team strength using comprehensive multi-factor approach.
 
         Factors:
         1) League Position (25% weight) - Current/historical league standing
@@ -243,14 +249,11 @@ class DynamicTeamStrength:
 
             client = FPLDataClient()
 
-            # Get data sources
             players = client.get_current_players()
 
-            # Get current gameweek if not provided
             if target_gameweek is None:
-                target_gameweek = 1  # Default to GW1 for historical baseline
+                target_gameweek = 1
 
-            # Initialize strength components
             strength_components = {}
             all_teams = self._get_all_team_names(teams_data, players)
 
@@ -287,7 +290,6 @@ class DynamicTeamStrength:
                     + form_strengths.get(team_name, 1.0) * weights["form"]
                 )
 
-                # Ensure final strength is in [0.7, 1.3] range
                 final_strengths[team_name] = round(
                     np.clip(combined_strength, 0.7, 1.3), 3
                 )
@@ -296,7 +298,10 @@ class DynamicTeamStrength:
                 print(f"✅ Multi-factor calculation complete with weights: {weights}")
                 sample_team = next(iter(final_strengths.keys()))
                 print(
-                    f"📊 Example ({sample_team}): pos={position_strengths.get(sample_team, 1.0):.3f}, quality={quality_strengths.get(sample_team, 1.0):.3f}, rep={reputation_strengths.get(sample_team, 1.0):.3f}, form={form_strengths.get(sample_team, 1.0):.3f} → {final_strengths[sample_team]:.3f}"
+                    f"📊 Example ({sample_team}): pos={position_strengths.get(sample_team, 1.0):.3f}, "
+                    f"quality={quality_strengths.get(sample_team, 1.0):.3f}, "
+                    f"rep={reputation_strengths.get(sample_team, 1.0):.3f}, "
+                    f"form={form_strengths.get(sample_team, 1.0):.3f} → {final_strengths[sample_team]:.3f}"
                 )
 
             return final_strengths
@@ -309,18 +314,15 @@ class DynamicTeamStrength:
     def _get_all_team_names(
         self, teams_data: pd.DataFrame, players: pd.DataFrame
     ) -> List[str]:
-        """Get comprehensive list of all team names from available data sources"""
+        """Get comprehensive list of all team names from available data sources."""
         team_names = set()
 
-        # From teams data
         if "name" in teams_data.columns:
             team_names.update(teams_data["name"].dropna().tolist())
 
-        # From players data (team names)
         if "team_name" in players.columns:
             team_names.update(players["team_name"].dropna().unique().tolist())
 
-        # Fallback to static team list
         if not team_names:
             team_names = {
                 "Arsenal",
@@ -351,15 +353,11 @@ class DynamicTeamStrength:
     def _calculate_position_strength(
         self, target_gameweek: int, all_teams: List[str]
     ) -> Dict[str, float]:
-        """Factor 1: League Position (25% weight)"""
+        """Factor 1: League Position (25% weight)."""
         try:
             position_strengths = {}
             for team_name in all_teams:
-                position = self.HISTORICAL_POSITIONS.get(
-                    team_name, 15
-                )  # Default to mid-table
-
-                # Convert position to strength [0.7, 1.3] - higher position = lower number = higher strength
+                position = self.HISTORICAL_POSITIONS.get(team_name, 15)
                 strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
                 position_strengths[team_name] = round(np.clip(strength, 0.7, 1.3), 3)
 
@@ -378,26 +376,19 @@ class DynamicTeamStrength:
     def _calculate_player_quality_strength(
         self, players: pd.DataFrame, all_teams: List[str]
     ) -> Dict[str, float]:
-        """Factor 2: Player Quality (35% weight) - Squad value and total points"""
+        """Factor 2: Player Quality (35% weight) - Squad value and total points."""
         try:
             quality_strengths = {}
-
-            # Calculate squad metrics by team
             team_metrics = {}
 
             for team_name in all_teams:
-                # Get team players
                 if "team_name" in players.columns:
                     team_players = players[players["team_name"] == team_name]
                 else:
-                    # Fallback: try to match by team_id or other means
-                    team_players = pd.DataFrame()  # Empty if no match
+                    team_players = pd.DataFrame()
 
                 if len(team_players) > 0:
-                    # Squad value (now_cost is in £0.1m units)
-                    squad_value = team_players["now_cost"].sum() / 10.0  # Convert to £m
-
-                    # Squad performance
+                    squad_value = team_players["now_cost"].sum() / 10.0
                     squad_points = team_players["total_points"].sum()
 
                     team_metrics[team_name] = {
@@ -405,10 +396,8 @@ class DynamicTeamStrength:
                         "points": squad_points,
                     }
                 else:
-                    # No players found - use defaults
                     team_metrics[team_name] = {"value": 50.0, "points": 100}
 
-            # Calculate league averages
             if team_metrics:
                 league_avg_value = np.mean([m["value"] for m in team_metrics.values()])
                 league_avg_points = np.mean(
@@ -417,11 +406,9 @@ class DynamicTeamStrength:
             else:
                 league_avg_value, league_avg_points = 50.0, 100
 
-            # Calculate relative quality for each team
             for team_name in all_teams:
                 metrics = team_metrics[team_name]
 
-                # Normalize against league averages
                 value_ratio = (
                     metrics["value"] / league_avg_value if league_avg_value > 0 else 1.0
                 )
@@ -431,11 +418,8 @@ class DynamicTeamStrength:
                     else 1.0
                 )
 
-                # Combined quality (equal weighting of value and points)
                 combined_quality = (value_ratio + points_ratio) / 2
 
-                # Map to [0.7, 1.3] range with reasonable bounds
-                # Expect combined_quality to be roughly [0.5, 1.5]
                 strength = 0.7 + (combined_quality - 0.5) * (1.3 - 0.7) / (1.5 - 0.5)
                 quality_strengths[team_name] = round(np.clip(strength, 0.7, 1.3), 3)
 
@@ -455,16 +439,16 @@ class DynamicTeamStrength:
             return {team: 1.0 for team in all_teams}
 
     def _calculate_reputation_strength(self, all_teams: List[str]) -> Dict[str, float]:
-        """Factor 3: Reputation (20% weight) - Historical success over 3-5 seasons"""
+        """Factor 3: Reputation (20% weight) - Historical success over 3-5 seasons."""
         reputation_ratings = {
-            # Big 6 - traditional top teams (Liverpool won previous season 2024-25)
+            # Big 6
             "Liverpool": 1.3,
             "Manchester City": 1.25,
             "Arsenal": 1.25,
             "Chelsea": 1.2,
             "Manchester United": 1.15,
             "Tottenham": 1.15,
-            # Strong teams - recent success
+            # Strong teams
             "Newcastle": 1.1,
             "Aston Villa": 1.05,
             # Solid mid-table
@@ -479,7 +463,7 @@ class DynamicTeamStrength:
             "Wolves": 0.85,
             "Nottingham Forest": 0.8,
             # Historically weaker/promoted teams
-            "Leicester": 0.85,  # Recently relegated but historically strong
+            "Leicester": 0.85,
             "Southampton": 0.8,
             "Leeds": 0.8,
             "Burnley": 0.75,
@@ -490,7 +474,6 @@ class DynamicTeamStrength:
 
         reputation_strengths = {}
         for team_name in all_teams:
-            # Handle team name variations
             lookup_name = team_name
             if team_name == "Man City":
                 lookup_name = "Manchester City"
@@ -501,9 +484,7 @@ class DynamicTeamStrength:
             elif team_name == "Spurs":
                 lookup_name = "Tottenham"
 
-            reputation_strengths[team_name] = reputation_ratings.get(
-                lookup_name, 0.9
-            )  # Default mid-table
+            reputation_strengths[team_name] = reputation_ratings.get(lookup_name, 0.9)
 
         if self.debug:
             print(
@@ -515,7 +496,7 @@ class DynamicTeamStrength:
     def _calculate_recent_form_strength(
         self, target_gameweek: int, all_teams: List[str]
     ) -> Dict[str, float]:
-        """Factor 4: Recent Form (20% weight) - Last 6 gameweeks performance"""
+        """Factor 4: Recent Form (20% weight) - Last 6 gameweeks performance."""
         try:
             from client import FPLDataClient
 
@@ -523,7 +504,6 @@ class DynamicTeamStrength:
 
             form_strengths = {}
 
-            # For historical baseline or early season, use neutral form
             if target_gameweek <= 6:
                 if self.debug:
                     print(
@@ -531,7 +511,6 @@ class DynamicTeamStrength:
                     )
                 return {team: 1.0 for team in all_teams}
 
-            # Load recent gameweeks data
             recent_gws = []
             for gw in range(max(1, target_gameweek - 6), target_gameweek):
                 try:
@@ -546,10 +525,7 @@ class DynamicTeamStrength:
                     print("⚡ No recent form data available, using neutral form")
                 return {team: 1.0 for team in all_teams}
 
-            # Calculate team form from recent gameweeks
-            # This is simplified - in practice would need team-level aggregation
             for team_name in all_teams:
-                # For now, use neutral form - can enhance later with actual team performance data
                 form_strengths[team_name] = 1.0
 
             if self.debug:
@@ -565,31 +541,29 @@ class DynamicTeamStrength:
             return {team: 1.0 for team in all_teams}
 
     def _get_seasonal_weights(self, target_gameweek: int) -> Dict[str, float]:
-        """Get seasonal weighting factors based on gameweek"""
+        """Get seasonal weighting factors based on gameweek."""
         if target_gameweek <= 7:
             # Early season: Higher weight on reputation + historical position
             return {
-                "position": 0.20,  # Reduced - less reliable early
-                "quality": 0.35,  # Stable throughout
-                "reputation": 0.30,  # Increased early season
-                "form": 0.15,  # Reduced - insufficient data
+                "position": 0.20,
+                "quality": 0.35,
+                "reputation": 0.30,
+                "form": 0.15,
             }
         elif target_gameweek <= 25:
-            # Mid season: Balanced weights as specified
+            # Mid season: Balanced weights
             return {"position": 0.25, "quality": 0.35, "reputation": 0.20, "form": 0.20}
         else:
             # Late season: Higher weight on current position + recent form
             return {
-                "position": 0.30,  # Increased - more reliable
-                "quality": 0.30,  # Slightly reduced
-                "reputation": 0.15,  # Reduced - less relevant
-                "form": 0.25,  # Increased - crucial for late season
+                "position": 0.30,
+                "quality": 0.30,
+                "reputation": 0.15,
+                "form": 0.25,
             }
 
     def _get_static_fallback_ratings(self) -> Dict[str, float]:
-        """
-        Fallback to static previous season (2024-25) final table ratings if dynamic calculation fails
-        """
+        """Fallback to static previous season final table ratings if dynamic calculation fails."""
         strength_ratings = {}
         for team, position in self.HISTORICAL_POSITIONS.items():
             if position <= 20:
@@ -602,35 +576,3 @@ class DynamicTeamStrength:
             print("⚠️ Using static fallback ratings")
 
         return strength_ratings
-
-
-def load_historical_gameweek_data(
-    start_gw: int = 1, end_gw: int = None
-) -> List[pd.DataFrame]:
-    """
-    Load current season gameweek data for team strength calculation
-
-    Args:
-        start_gw: Starting gameweek to load
-        end_gw: Ending gameweek to load (None = latest available)
-
-    Returns:
-        List of gameweek DataFrames
-    """
-    from client import FPLDataClient
-
-    client = FPLDataClient()
-
-    gameweek_data = []
-    max_gw = end_gw if end_gw else 38
-
-    for gw in range(start_gw, max_gw + 1):
-        try:
-            gw_data = client.get_gameweek_live_data(gw)
-            if not gw_data.empty:
-                gameweek_data.append(gw_data)
-        except Exception:
-            # No data available for this gameweek
-            continue
-
-    return gameweek_data

@@ -110,9 +110,8 @@ class TestMarimoCompatibility:
         # Check for key functionality imports
         # Note: Checking for domain services now instead of core imports
         expected_imports = [
-            "from fpl_team_picker.domain.services.data_orchestration_service import",
-            "from fpl_team_picker.core.xp_model import",  # Still in core temporarily
-            "from fpl_team_picker.optimization.optimizer import",
+            "from fpl_team_picker.domain.services import",  # Domain services (uses __init__ imports)
+            "from fpl_team_picker.visualization.charts import",  # Visualization helpers
         ]
 
         for expected in expected_imports:

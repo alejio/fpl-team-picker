@@ -183,21 +183,18 @@ class XPModel:
         - GW8+: Pure current season (2025-26) performance (ignoring previous season baseline)
         """
         try:
-            from .team_strength import (
-                DynamicTeamStrength,
-                load_historical_gameweek_data,
-            )
+            from ..domain.services.team_analytics_service import TeamAnalyticsService
 
-            # Initialize dynamic team strength calculator
-            calculator = DynamicTeamStrength(debug=self.debug)
+            # Initialize team analytics service
+            analytics_service = TeamAnalyticsService(debug=self.debug)
 
             # Load current season data for dynamic calculation
-            current_season_data = load_historical_gameweek_data(
+            current_season_data = analytics_service.load_historical_gameweek_data(
                 start_gw=1, end_gw=target_gameweek - 1
             )
 
             # Get dynamic team strength ratings
-            strength_ratings = calculator.get_team_strength(
+            strength_ratings = analytics_service.get_team_strength(
                 target_gameweek=target_gameweek,
                 teams_data=teams_df,
                 current_season_data=current_season_data,
