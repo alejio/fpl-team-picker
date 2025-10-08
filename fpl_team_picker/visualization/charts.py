@@ -27,22 +27,19 @@ def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
     """
     try:
         from client import FPLDataClient
+        from ..domain.services.team_analytics_service import TeamAnalyticsService
 
         client = FPLDataClient()
-        from ..core.team_strength import (
-            DynamicTeamStrength,
-            load_historical_gameweek_data,
-        )
 
         # Load team data
         teams = client.get_current_teams()
 
         # Get dynamic team strength ratings for the target gameweek
-        calculator = DynamicTeamStrength()  # Uses config default
-        current_season_data = load_historical_gameweek_data(
+        analytics_service = TeamAnalyticsService()  # Uses config default
+        current_season_data = analytics_service.load_historical_gameweek_data(
             start_gw=1, end_gw=target_gameweek - 1
         )
-        team_strength = calculator.get_team_strength(
+        team_strength = analytics_service.get_team_strength(
             target_gameweek=target_gameweek,
             teams_data=teams,
             current_season_data=current_season_data,
@@ -618,23 +615,20 @@ def create_fixture_difficulty_visualization(
     """
     try:
         from client import FPLDataClient
+        from ..domain.services.team_analytics_service import TeamAnalyticsService
 
         client = FPLDataClient()
-        from ..core.team_strength import (
-            DynamicTeamStrength,
-            load_historical_gameweek_data,
-        )
 
         # Load required data
         fixtures = client.get_fixtures_normalized()
         teams = client.get_current_teams()
 
         # Get team strengths
-        calculator = DynamicTeamStrength(debug=False)
-        current_season_data = load_historical_gameweek_data(
+        analytics_service = TeamAnalyticsService(debug=False)
+        current_season_data = analytics_service.load_historical_gameweek_data(
             start_gw=1, end_gw=start_gw - 1
         )
-        team_strength = calculator.get_team_strength(
+        team_strength = analytics_service.get_team_strength(
             target_gameweek=start_gw,
             teams_data=teams,
             current_season_data=current_season_data,
