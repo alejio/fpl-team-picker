@@ -134,90 +134,61 @@ class ExpectedPointsService:
         Note: ML model migration is pending. Currently falls back to rule-based model.
         TODO: Migrate ml_xp_model.py into this service.
         """
-        try:
-            from fpl_team_picker.core.ml_xp_model import MLXPModel
+        from fpl_team_picker.core.ml_xp_model import MLXPModel
 
-            # Create ML model
-            ml_xp_model = MLXPModel(
-                min_training_gameweeks=xp_config.xp_model.ml_min_training_gameweeks,
-                training_gameweeks=xp_config.xp_model.ml_training_gameweeks,
-                position_min_samples=xp_config.xp_model.ml_position_min_samples,
-                ensemble_rule_weight=xp_config.xp_model.ml_ensemble_rule_weight,
-                debug=xp_config.xp_model.debug,
-            )
+        # Create ML model
+        ml_xp_model = MLXPModel(
+            min_training_gameweeks=xp_config.xp_model.ml_min_training_gameweeks,
+            training_gameweeks=xp_config.xp_model.ml_training_gameweeks,
+            position_min_samples=xp_config.xp_model.ml_position_min_samples,
+            ensemble_rule_weight=xp_config.xp_model.ml_ensemble_rule_weight,
+            debug=xp_config.xp_model.debug,
+        )
 
-            # Create a simple wrapper that provides XPModel-compatible interface
-            class RuleBasedWrapper:
-                """Temporary wrapper to provide XPModel-compatible interface."""
+        # Create a simple wrapper that provides XPModel-compatible interface
+        class RuleBasedWrapper:
+            """Temporary wrapper to provide XPModel-compatible interface."""
 
-                def __init__(self, service_instance):
-                    self.service = service_instance
+            def __init__(self, service_instance):
+                self.service = service_instance
 
-                def calculate_expected_points(
-                    self,
-                    players_data,
-                    teams_data,
-                    xg_rates_data,
-                    fixtures_data,
-                    target_gameweek,
-                    live_data,
-                    gameweeks_ahead=1,
-                ):
-                    gameweek_data = {
-                        "players": players_data,
-                        "teams": teams_data,
-                        "fixtures": fixtures_data,
-                        "xg_rates": xg_rates_data,
-                        "target_gameweek": target_gameweek,
-                        "live_data_historical": live_data,
-                    }
-                    return self.service.calculate_expected_points(
-                        gameweek_data,
-                        use_ml_model=False,
-                        gameweeks_ahead=gameweeks_ahead,
-                    )
-
-            rule_based_model_wrapper = RuleBasedWrapper(self)
-
-            # Calculate expected points with ML model using rule-based as ensemble
-            return ml_xp_model.calculate_expected_points(
-                players_data=players,
-                teams_data=teams,
-                xg_rates_data=xg_rates,
-                fixtures_data=fixtures,
-                target_gameweek=target_gameweek,
-                live_data=live_data_historical,
-                gameweeks_ahead=gameweeks_ahead,
-                rule_based_model=rule_based_model_wrapper,
-            )
-
-        except (ImportError, AttributeError):
-            # Fallback to rule-based model if ML not available
-            return self._calculate_rule_based_expected_points(
-                players,
-                teams,
-                xg_rates,
-                fixtures,
+            def calculate_expected_points(
+                self,
+                players_data,
+                teams_data,
+                xg_rates_data,
+                fixtures_data,
                 target_gameweek,
-                live_data_historical,
-                gameweeks_ahead,
-                xp_config,
-            )
-        except ValueError as e:
-            if "Need at least" in str(e):
-                # Fallback to rule-based model
-                return self._calculate_rule_based_expected_points(
-                    players,
-                    teams,
-                    xg_rates,
-                    fixtures,
-                    target_gameweek,
-                    live_data_historical,
-                    gameweeks_ahead,
-                    xp_config,
+                live_data,
+                gameweeks_ahead=1,
+            ):
+                gameweek_data = {
+                    "players": players_data,
+                    "teams": teams_data,
+                    "fixtures": fixtures_data,
+                    "xg_rates": xg_rates_data,
+                    "target_gameweek": target_gameweek,
+                    "live_data_historical": live_data,
+                }
+                return self.service.calculate_expected_points(
+                    gameweek_data,
+                    use_ml_model=False,
+                    gameweeks_ahead=gameweeks_ahead,
                 )
-            else:
-                raise
+
+        rule_based_model_wrapper = RuleBasedWrapper(self)
+
+        # Calculate expected points with ML model using rule-based as ensemble
+        return ml_xp_model.calculate_expected_points(
+            players_data=players,
+            teams_data=teams,
+            xg_rates_data=xg_rates,
+            fixtures_data=fixtures,
+            target_gameweek=target_gameweek,
+            live_data=live_data_historical,
+            gameweeks_ahead=gameweeks_ahead,
+            rule_based_model=rule_based_model_wrapper,
+        )
 
     def _calculate_rule_based_expected_points(
         self,
@@ -327,7 +298,18 @@ class ExpectedPointsService:
             )
 
         # Ensure numeric dtypes for key columns (can become object during merge)
-        numeric_cols = ["xP", "price", "price_gbp"]
+        numeric_cols = [
+            "xP",
+            "xP_5gw",
+            "price",
+            "price_gbp",
+            "xP_per_price",
+            "xP_per_price_5gw",
+            "fixture_difficulty",
+            "fixture_difficulty_5gw",
+            "expected_minutes",
+            "expected_minutes_5gw",
+        ]
         for col in numeric_cols:
             if col in players_merged.columns:
                 players_merged[col] = pd.to_numeric(
