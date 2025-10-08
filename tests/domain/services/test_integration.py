@@ -8,11 +8,7 @@ from fpl_team_picker.domain.services import (
     ExpectedPointsService,
     TransferOptimizationService,
 )
-from fpl_team_picker.adapters.database_repositories import (
-    DatabasePlayerRepository,
-    DatabaseTeamRepository,
-    DatabaseFixtureRepository,
-)
+from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
 
 
 class TestDomainServicesIntegration:
@@ -23,8 +19,7 @@ class TestDomainServicesIntegration:
         """Create repository instances."""
         return {
             "player_repo": DatabasePlayerRepository(),
-            "team_repo": DatabaseTeamRepository(),
-            "fixture_repo": DatabaseFixtureRepository(),
+            # team_repo and fixture_repo not needed - using FPL client
         }
 
     @pytest.fixture
@@ -32,8 +27,8 @@ class TestDomainServicesIntegration:
         """Create data orchestration service."""
         return DataOrchestrationService(
             repositories["player_repo"],
-            repositories["team_repo"],
-            repositories["fixture_repo"],
+            None,  # team_repo not needed
+            None,  # fixture_repo not needed
         )
 
     @pytest.fixture
