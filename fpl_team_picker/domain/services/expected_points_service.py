@@ -3,8 +3,12 @@
 from typing import Dict, Any, Optional
 import pandas as pd
 import warnings
+import logging
 
 warnings.filterwarnings("ignore")
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 
 class ExpectedPointsService:
@@ -134,10 +138,12 @@ class ExpectedPointsService:
         Note: ML model migration is pending. Currently falls back to rule-based model.
         TODO: Migrate ml_xp_model.py into this service.
         """
-        from fpl_team_picker.core.ml_xp_model import MLXPModel
+        from fpl_team_picker.domain.services.ml_expected_points_service import (
+            MLExpectedPointsService,
+        )
 
         # Create ML model
-        ml_xp_model = MLXPModel(
+        ml_xp_model = MLExpectedPointsService(
             min_training_gameweeks=xp_config.xp_model.ml_min_training_gameweeks,
             training_gameweeks=xp_config.xp_model.ml_training_gameweeks,
             position_min_samples=xp_config.xp_model.ml_position_min_samples,

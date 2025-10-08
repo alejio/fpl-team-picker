@@ -19,13 +19,14 @@ fpl-team-picker/
 │   ├── domain/               # Clean architecture domain layer
 │   │   ├── services/         # Domain services (business logic)
 │   │   │   ├── data_orchestration_service.py    # Data loading & validation
-│   │   │   ├── expected_points_service.py       # XP calculation engine
+│   │   │   ├── expected_points_service.py       # Rule-based XP calculation
+│   │   │   ├── ml_expected_points_service.py    # ML-based XP calculation
+│   │   │   ├── team_analytics_service.py        # Dynamic team strength
 │   │   │   ├── transfer_optimization_service.py # Transfer optimization
 │   │   │   ├── chip_assessment_service.py       # Chip timing analysis
-│   │   │   ├── performance_analytics_service.py # Form & performance analysis
-│   │   │   ├── fixture_analysis_service.py      # Fixture difficulty analysis
-│   │   │   ├── squad_management_service.py      # Squad analysis & management
-│   │   │   └── visualization_service.py         # Chart generation
+│   │   │   ├── performance_analytics_service.py # Historical recomputation & accuracy
+│   │   │   ├── player_analytics_service.py      # Type-safe player operations
+│   │   │   └── squad_management_service.py      # Squad analysis & management
 │   │   ├── models/           # Domain models
 │   │   │   ├── player.py     # Player domain models
 │   │   │   ├── team.py       # Team domain models
@@ -38,11 +39,6 @@ fpl-team-picker/
 │   │       └── result.py     # Result types for error handling
 │   ├── adapters/             # Infrastructure implementations
 │   │   └── database_repositories.py   # Database repository implementations
-│   ├── core/                 # Legacy core business logic (gradually migrating to domain/)
-│   │   ├── data_loader.py    # Data loading and preprocessing
-│   │   ├── team_strength.py  # Dynamic team strength calculations
-│   │   ├── xp_model.py       # Expected points calculation engine
-│   │   └── chip_assessment.py # Chip timing analysis and recommendations
 │   ├── optimization/         # Transfer and team optimization
 │   │   └── optimizer.py      # Smart transfer optimization logic
 │   ├── visualization/        # Charts and visual components
@@ -111,6 +107,8 @@ fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
 
 The project follows **Clean Architecture principles** with clear separation between domain logic, infrastructure, and presentation layers. This design enables frontend flexibility and comprehensive testing while maintaining code quality.
 
+**✅ Migration Complete** - All business logic has been successfully migrated from `core/` to `domain/services/` following clean architecture patterns. The legacy `core/` directory has been removed.
+
 ### 1. Domain Layer (`fpl_team_picker/domain/`) - **Frontend-Agnostic Business Logic**
 
 The domain layer contains all business logic and is completely independent of any framework or UI technology.
@@ -131,12 +129,47 @@ gameweek_data = orchestration_service.load_gameweek_data(target_gameweek=10, for
 ```python
 from fpl_team_picker.domain.services import ExpectedPointsService
 
-# Pure XP calculation - works with any frontend
+# Pure rule-based XP calculation - works with any frontend
 xp_service = ExpectedPointsService()
 players_with_xp = xp_service.calculate_combined_results(
     gameweek_data, use_ml_model=False
 )
 # Returns: 1GW + 5GW expected points with model metadata
+```
+
+**ML Expected Points Service** (`ml_expected_points_service.py`)
+```python
+from fpl_team_picker.domain.services import MLExpectedPointsService
+
+# ML-based XP calculation using Ridge regression
+ml_service = MLExpectedPointsService(
+    min_training_gameweeks=3,
+    training_gameweeks=5,
+    position_min_samples=30,
+    ensemble_rule_weight=0.3  # 70% ML + 30% rule-based
+)
+
+# Can be used via ExpectedPointsService with use_ml_model=True
+players_with_xp = xp_service.calculate_combined_results(
+    gameweek_data, use_ml_model=True
+)
+# Returns: ML predictions with optional rule-based ensemble
+```
+
+**Team Analytics Service** (`team_analytics_service.py`)
+```python
+from fpl_team_picker.domain.services import TeamAnalyticsService
+
+# Dynamic team strength calculations
+analytics_service = TeamAnalyticsService(debug=False)
+
+# Get evolving team strength ratings
+strength_ratings = analytics_service.get_team_strength(
+    target_gameweek=10,
+    teams_data=teams,
+    current_season_data=current_season_data
+)
+# Returns: Dict[team_name, strength_rating] with GW8+ current season focus
 ```
 
 **Transfer Optimization Service** (`transfer_optimization_service.py`)
@@ -291,45 +324,6 @@ Key configuration sections:
 - `OptimizationConfig` - Transfer optimization settings
 - `VisualizationConfig` - Chart and display settings
 - `ChipAssessmentConfig` - Chip recommendation thresholds and parameters
-
-### 4. Legacy Core Business Logic (`fpl_team_picker/core/`) - **Migration in Progress**
-
-#### Data Loader (`data_loader.py`)
-**Centralized data orchestration and preprocessing:**
-- `fetch_fpl_data(target_gameweek, form_window)` - Main data loading with historical form
-- `fetch_manager_team(previous_gameweek)` - Manager team data retrieval
-- `process_current_squad(team_data, players, teams)` - Squad processing with captain info
-- `load_gameweek_datasets(target_gameweek)` - Comprehensive gameweek data orchestration
-
-#### Expected Points Engine (`xp_model.py`)
-**Dedicated XP calculation engine with form weighting:**
-```python
-from fpl_team_picker.core.xp_model import XPModel
-
-xp_model = XPModel(form_weight=0.7, form_window=5)
-xp_results = xp_model.calculate_expected_points(players, fixtures, ...)
-```
-
-Key features:
-- **Form-weighted predictions** - 70% recent form + 30% season baseline
-- **Statistical xG/xA estimation** - Multi-factor estimation for missing data
-- **Enhanced minutes prediction** - SBP + availability + form-based modeling
-- **Multi-gameweek capability** - 5-gameweek temporal weighting
-
-#### Dynamic Team Strength (`team_strength.py`)
-**Evolving team strength ratings throughout the season:**
-- **Previous season transition logic** - Weighted previous season (2024-25) baseline → current season (2025-26) focus
-- **GW8+ pure current season** - Responsive to current form once sufficient data
-- **Rolling window analysis** - 6-gameweek performance windows
-- **Venue-specific adjustments** - Home/away advantage incorporation
-
-#### Chip Assessment Engine (`chip_assessment.py`)
-**Heuristic-based analysis for optimal chip usage timing:**
-- **Wildcard Assessment** - Transfer opportunity analysis and fixture run quality evaluation
-- **Free Hit Analysis** - Double gameweek detection and temporary squad improvement potential
-- **Bench Boost Evaluation** - Bench strength calculation and rotation risk assessment
-- **Triple Captain Identification** - Premium captain candidate analysis and fixture quality review
-- **Traffic Light Recommendations** - 🟢 RECOMMENDED, 🟡 CONSIDER, 🔴 HOLD status system
 
 ### 3. Optimization Engine (`fpl_team_picker/optimization/`)
 
@@ -520,35 +514,45 @@ for gw in range(2, 6):  # GW2-5 for training
 
 ## Expected Points Models
 
-### Multi-Gameweek Model (Season Planning)
-**Fast implementation for season-start team building:**
-
-1. **League Baselines** - μ_home = 1.43, μ_away = 1.15 (Premier League averages)
-2. **Team Strength Ratings** - Dynamic calculations with historical baselines
-3. **Enhanced Minutes Model** - SBP + availability + position-specific durability
-4. **Multi-Gameweek xP** - 5-week horizon with temporal weighting (1.0, 0.9, 0.8, 0.7, 0.6)
-
-### Single Gameweek Model (Weekly Management)
+### Rule-Based Model (`ExpectedPointsService`)
 **Form-weighted predictions with live data integration:**
 
 1. **Live Data Integration** - Real-time performance and market intelligence
-2. **Form-Weighted Calculations** - 70% recent form + 30% season average
+2. **Form-Weighted Calculations** - 70% recent form + 30% season average (configurable)
 3. **Dynamic Performance Adjustments** - Form multipliers and momentum tracking
+4. **Statistical xG/xA Estimation** - Multi-factor estimation for missing data
+5. **Dynamic Team Strength** - Evolving ratings throughout the season via `TeamAnalyticsService`
+6. **Enhanced Minutes Prediction** - SBP + availability + position-specific durability
+7. **Multi-Gameweek Capability** - 1GW and 5GW projections with horizon analysis
 
-### ML-Based Expected Points Model (Experimental)
-**XGBoost machine learning approach with leak-free temporal validation:**
+**Key Features:**
+- Fast, interpretable predictions suitable for all gameweeks
+- Works with minimal historical data (GW1+)
+- Configurable form weighting and windows
+- ~1,049 lines in `expected_points_service.py`
 
-1. **Enhanced Feature Engineering** - Historical per-90 metrics with cumulative calculations
-2. **Position-Specific Models** - Separate XGBoost models for GKP, DEF, MID, FWD positions
-3. **Ensemble Predictions** - Combines general + position-specific model outputs
-4. **Temporal Validation** - Proper train/test splits preventing data leakage
-5. **Hyperparameter Optimization** - Tuned XGBoost parameters for FPL prediction accuracy
+### ML-Based Model (`MLExpectedPointsService`)
+**Ridge regression with position-specific models and ensemble capability:**
+
+1. **Ridge Regression** - Cross-validated regularization (RidgeCV) with MAE scoring
+2. **Enhanced Feature Engineering** - Historical per-90 metrics, lagged features, set piece roles
+3. **Position-Specific Models** - Separate Ridge models for GKP, DEF, MID, FWD positions
+4. **Ensemble Predictions** - Combines general + position-specific model outputs
+5. **Temporal Validation** - Leak-free training with proper time-series validation
+6. **Rule-Based Ensemble** - Optional ensemble with rule-based model (configurable weight)
+
+**Architecture Decision:**
+- **Separate Service** - `MLExpectedPointsService` (935 lines) kept separate from rule-based service
+- **Single Responsibility** - Each service ~1,000 lines, focused on one prediction approach
+- **Clean Integration** - `ExpectedPointsService.calculate_expected_points(use_ml_model=True)` delegates to ML service
+- **Maintainability** - Easier to test, modify, and understand each approach independently
 
 **Key Features:**
 - Uses only historical data available at prediction time (no future information)
+- Requires minimum 3 gameweeks of training data
 - Incorporates gameweek-by-gameweek performance history from fpl-dataset-builder
 - Validates against actual FPL results with performance metrics
-- Experimental interface for model development and accuracy testing
+- Production-ready with fail-fast error handling (no silent fallbacks)
 
 ## Historical xP Recomputation Framework
 
@@ -1264,3 +1268,6 @@ for player in players:
 - Don't do fallbacks in application code when the issue lies in upstream data quality problems
 - Prefer domain models (`PlayerAnalyticsService`) for UI/display logic where type safety matters
 - Use DataFrames directly for performance-critical operations (optimization, ML training) where domain model overhead provides no benefit
+- **All business logic belongs in `domain/services/`** - The `core/` directory has been fully migrated and removed
+- **Separate services for separate concerns** - Keep services focused (~1,000 lines each) rather than creating monolithic files
+- **ML and rule-based models are separate services** - `ExpectedPointsService` (rule-based) and `MLExpectedPointsService` (ML) for maintainability

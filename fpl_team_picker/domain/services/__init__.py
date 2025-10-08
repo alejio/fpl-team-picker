@@ -3,6 +3,7 @@
 try:
     from .data_orchestration_service import DataOrchestrationService
     from .expected_points_service import ExpectedPointsService
+    from .ml_expected_points_service import MLExpectedPointsService
     from .transfer_optimization_service import TransferOptimizationService
     from .squad_management_service import SquadManagementService
     from .chip_assessment_service import ChipAssessmentService
@@ -12,6 +13,7 @@ try:
     __all__ = [
         "DataOrchestrationService",
         "ExpectedPointsService",
+        "MLExpectedPointsService",
         "TransferOptimizationService",
         "SquadManagementService",
         "ChipAssessmentService",
