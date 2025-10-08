@@ -1,5 +1,5 @@
 """
-FPL Machine Learning Expected Points (ML-XP) Model
+FPL Machine Learning Expected Points (ML-XP) Service
 
 Advanced ML-based XP predictions using Ridge regression with rich database features.
 Designed to replace or complement the rule-based XP model with improved accuracy
@@ -33,9 +33,9 @@ warnings.filterwarnings("ignore")
 logger = logging.getLogger(__name__)
 
 
-class MLXPModel:
+class MLExpectedPointsService:
     """
-    Machine Learning Expected Points Model using Ridge Regression
+    Machine Learning Expected Points Service using Ridge Regression
 
     Predicts expected points using advanced ML techniques with rich database features:
     - Historical performance metrics (xG90, xA90, points per 90)
@@ -53,7 +53,7 @@ class MLXPModel:
         debug: bool = False,
     ):
         """
-        Initialize ML XP Model
+        Initialize ML XP Service
 
         Args:
             min_training_gameweeks: Minimum gameweeks needed for training
@@ -753,7 +753,7 @@ class MLXPModel:
 
         except Exception as e:
             logger.error(f"ML XP calculation failed: {str(e)}")
-            # Re-raise to let ExpectedPointsService handle the fallback to rule-based model
+            # Re-raise to let ExpectedPointsService handle fallback
             raise
 
     def get_feature_importance(self) -> pd.DataFrame:
@@ -809,127 +809,3 @@ class MLXPModel:
             self.training_gameweeks = config_data.get("training_gameweeks", 5)
             self.position_min_samples = config_data.get("position_min_samples", 30)
             self.ensemble_rule_weight = config_data.get("ensemble_rule_weight", 0.3)
-
-
-def merge_1gw_5gw_results(
-    players_1gw: pd.DataFrame, players_5gw: pd.DataFrame
-) -> pd.DataFrame:
-    """
-    Merge 1GW and 5GW ML predictions results with derived metrics
-    Compatible with existing gameweek manager interface
-    """
-    try:
-        # Ensure we have the required columns
-        if "xP" not in players_1gw.columns or "xP" not in players_5gw.columns:
-            raise ValueError("Missing xP column in input data")
-
-        # Get columns to merge from 5GW data
-        merge_columns = ["player_id", "xP"]
-
-        # Add expected_minutes if it exists
-        if "expected_minutes" in players_5gw.columns:
-            merge_columns.append("expected_minutes")
-
-        # Add fixture difficulty columns if they exist
-        if "fixture_difficulty" in players_5gw.columns:
-            merge_columns.append("fixture_difficulty")
-        if "fixture_difficulty_5gw" in players_5gw.columns:
-            merge_columns.append("fixture_difficulty_5gw")
-        elif "fixture_difficulty" in players_5gw.columns:
-            # Use fixture_difficulty as 5GW if 5GW version doesn't exist
-            players_5gw["fixture_difficulty_5gw"] = players_5gw["fixture_difficulty"]
-            merge_columns.append("fixture_difficulty_5gw")
-
-        # Merge on player_id
-        merged = players_1gw.merge(
-            players_5gw[merge_columns],
-            on="player_id",
-            how="left",
-            suffixes=("", "_5gw"),
-        )
-
-        # Rename for clarity
-        merged = merged.rename(columns={"xP_5gw": "xP_5gw"})
-
-        # Add derived metrics
-        merged["xP_per_£"] = merged["xP"] / merged["price"]
-        merged["xP_5gw_per_£"] = merged["xP_5gw"] / merged["price"]
-
-        # Add price-based columns for compatibility
-        merged["xP_per_price"] = merged["xP_per_£"]  # Alternative column name
-        merged["xP_per_price_5gw"] = merged["xP_5gw_per_£"]  # Alternative column name
-
-        # Add form metrics for compatibility with form analytics
-        # These are needed for the form analytics dashboard
-        if "form_multiplier" not in merged.columns:
-            # Calculate form multiplier based on recent performance
-            # Use a simple heuristic: players with high xP likely have good form
-            merged["form_multiplier"] = 1.0  # Default neutral form
-            if "xP" in merged.columns:
-                # Scale form multiplier based on xP percentiles
-                xp_percentiles = merged["xP"].quantile([0.2, 0.8])
-                merged.loc[merged["xP"] >= xp_percentiles[0.8], "form_multiplier"] = (
-                    1.3  # Hot
-                )
-                merged.loc[merged["xP"] <= xp_percentiles[0.2], "form_multiplier"] = (
-                    0.7  # Cold
-                )
-
-        if "recent_points_per_game" not in merged.columns:
-            # Estimate recent PPG from xP (simplified)
-            merged["recent_points_per_game"] = (
-                merged.get("xP", 0) * 0.8
-            )  # Conservative estimate
-
-        if "momentum" not in merged.columns:
-            # Add momentum indicators based on form_multiplier
-            def get_momentum_indicator(multiplier):
-                if multiplier >= 1.25:
-                    return "🔥"  # Hot
-                elif multiplier >= 1.1:
-                    return "📈"  # Rising
-                elif multiplier <= 0.8:
-                    return "❄️"  # Cold
-                elif multiplier <= 0.95:
-                    return "📉"  # Declining
-                else:
-                    return "➡️"  # Stable
-
-            merged["momentum"] = merged["form_multiplier"].apply(get_momentum_indicator)
-
-        if "form_trend" not in merged.columns:
-            # Add form trend (difference from baseline)
-            merged["form_trend"] = (
-                merged["recent_points_per_game"] - 4.0
-            )  # 4.0 as baseline
-
-        # expected_minutes should now be calculated by ML model, no fallback needed
-
-        # Add fixture difficulty columns if missing
-        if "fixture_difficulty" not in merged.columns:
-            merged["fixture_difficulty"] = 1.0
-        if "fixture_difficulty_5gw" not in merged.columns:
-            merged["fixture_difficulty_5gw"] = 1.0
-
-        # Calculate horizon advantage (key missing column)
-        merged["xP_horizon_advantage"] = merged["xP_5gw"] - (merged["xP"] * 5)
-
-        # Add fixture outlook based on 5GW difficulty
-        if "fixture_difficulty_5gw" in merged.columns:
-            from fpl_team_picker.config import config
-
-            merged["fixture_outlook"] = merged["fixture_difficulty_5gw"].apply(
-                lambda x: "Easy"
-                if x >= config.fixture_difficulty.easy_fixture_threshold
-                else "Hard"
-                if x < config.fixture_difficulty.average_fixture_min
-                else "Average"
-            )
-        else:
-            merged["fixture_outlook"] = "Average"
-
-        return merged
-
-    except Exception as e:
-        logger.error(f"Error merging 1GW and 5GW results: {str(e)}")
-        return players_1gw

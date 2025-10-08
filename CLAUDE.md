@@ -19,13 +19,14 @@ fpl-team-picker/
 │   ├── domain/               # Clean architecture domain layer
 │   │   ├── services/         # Domain services (business logic)
 │   │   │   ├── data_orchestration_service.py    # Data loading & validation
-│   │   │   ├── expected_points_service.py       # XP calculation engine
+│   │   │   ├── expected_points_service.py       # Rule-based XP calculation
+│   │   │   ├── ml_expected_points_service.py    # ML-based XP calculation
+│   │   │   ├── team_analytics_service.py        # Dynamic team strength
 │   │   │   ├── transfer_optimization_service.py # Transfer optimization
 │   │   │   ├── chip_assessment_service.py       # Chip timing analysis
-│   │   │   ├── performance_analytics_service.py # Form & performance analysis
-│   │   │   ├── fixture_analysis_service.py      # Fixture difficulty analysis
-│   │   │   ├── squad_management_service.py      # Squad analysis & management
-│   │   │   └── visualization_service.py         # Chart generation
+│   │   │   ├── performance_analytics_service.py # Historical recomputation & accuracy
+│   │   │   ├── player_analytics_service.py      # Type-safe player operations
+│   │   │   └── squad_management_service.py      # Squad analysis & management
 │   │   ├── models/           # Domain models
 │   │   │   ├── player.py     # Player domain models
 │   │   │   ├── team.py       # Team domain models
@@ -38,11 +39,6 @@ fpl-team-picker/
 │   │       └── result.py     # Result types for error handling
 │   ├── adapters/             # Infrastructure implementations
 │   │   └── database_repositories.py   # Database repository implementations
-│   ├── core/                 # Legacy core business logic (gradually migrating to domain/)
-│   │   ├── data_loader.py    # Data loading and preprocessing
-│   │   ├── team_strength.py  # Dynamic team strength calculations
-│   │   ├── xp_model.py       # Expected points calculation engine
-│   │   └── chip_assessment.py # Chip timing analysis and recommendations
 │   ├── optimization/         # Transfer and team optimization
 │   │   └── optimizer.py      # Smart transfer optimization logic
 │   ├── visualization/        # Charts and visual components
