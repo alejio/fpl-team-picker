@@ -672,7 +672,8 @@ def _(mo, optimization_horizon_toggle, players_with_xp):
                 xp_value = xp_lookup.get(player.player_id, 0.0)
 
                 # Type-safe access to domain model properties
-                label = f"{player.web_name} ({player.position.value}) - £{player.price:.1f}m | {xp_value:.1f} {horizon_label}"
+                # Note: position is already a string due to use_enum_values=True
+                label = f"{player.web_name} ({player.position}) - £{player.price:.1f}m | {xp_value:.1f} {horizon_label}"
 
                 # Add risk indicators using computed properties
                 indicators = []

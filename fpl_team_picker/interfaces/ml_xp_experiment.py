@@ -30,7 +30,9 @@ def _():
     from fpl_team_picker.domain.services.data_orchestration_service import (
         DataOrchestrationService,
     )
-    from fpl_team_picker.core.xp_model import XPModel
+    from fpl_team_picker.domain.services.expected_points_service import (
+        ExpectedPointsService,
+    )
     from client import FPLDataClient
     from fpl_team_picker.config import config
 
@@ -44,7 +46,7 @@ def _():
         RidgeCV,
         StandardScaler,
         TimeSeriesSplit,
-        XPModel,
+        ExpectedPointsService,
         config,
         data_service,
         go,
@@ -212,7 +214,7 @@ def _(mo):
 
 @app.cell
 def _(
-    XPModel,
+    ExpectedPointsService,
     config,
     fixtures_df,
     live_data_df,
@@ -229,21 +231,23 @@ def _(
 
     if ml_data_loaded:
         try:
-            # Create XP model instance
-            xp_model = XPModel(
-                form_weight=config.xp_model.form_weight,
-                form_window=config.xp_model.form_window,
-                debug=False,  # Disable debug for cleaner output
-            )
+            # Create ExpectedPointsService instance
+            xp_service = ExpectedPointsService(config=None)
+
+            # Prepare gameweek data dictionary for service
+            gameweek_data = {
+                "players": players_df,
+                "teams": teams_df,
+                "fixtures": fixtures_df,
+                "xg_rates": xg_rates_df,
+                "target_gameweek": target_gw_input.value,
+                "live_data_historical": live_data_df,
+            }
 
             # Generate 1GW predictions (our main comparison point)
-            players_1gw = xp_model.calculate_expected_points(
-                players_data=players_df,
-                teams_data=teams_df,
-                xg_rates_data=xg_rates_df,
-                fixtures_data=fixtures_df,
-                target_gameweek=target_gw_input.value,
-                live_data=live_data_df,
+            players_1gw = xp_service.calculate_expected_points(
+                gameweek_data=gameweek_data,
+                use_ml_model=False,
                 gameweeks_ahead=1,
             )
 

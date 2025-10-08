@@ -28,7 +28,9 @@ class TestMarimoCompatibility:
 
     def test_gameweek_detection_works(self):
         """Test gameweek detection functionality."""
-        from fpl_team_picker.domain.services.data_orchestration_service import DataOrchestrationService
+        from fpl_team_picker.domain.services.data_orchestration_service import (
+            DataOrchestrationService,
+        )
 
         service = DataOrchestrationService()
         gw_info = service.get_current_gameweek_info()
@@ -39,7 +41,9 @@ class TestMarimoCompatibility:
 
     def test_data_loading_functionality(self):
         """Test that data loading still works."""
-        from fpl_team_picker.domain.services.data_orchestration_service import DataOrchestrationService
+        from fpl_team_picker.domain.services.data_orchestration_service import (
+            DataOrchestrationService,
+        )
 
         service = DataOrchestrationService()
 
@@ -49,7 +53,9 @@ class TestMarimoCompatibility:
 
         # Test data loading
         try:
-            gameweek_data = service.load_gameweek_data(target_gameweek=target_gw, form_window=3)
+            gameweek_data = service.load_gameweek_data(
+                target_gameweek=target_gw, form_window=3
+            )
 
             required_keys = ["players", "teams", "fixtures", "xg_rates"]
             for key in required_keys:
@@ -123,7 +129,10 @@ class TestMarimoCompatibility:
             ("marimo", "mo"),
             ("pandas", "pd"),
             ("client", "FPLDataClient"),
-            ("fpl_team_picker.core.xp_model", "XPModel"),
+            (
+                "fpl_team_picker.domain.services.expected_points_service",
+                "ExpectedPointsService",
+            ),
             ("fpl_team_picker.optimization.optimizer", "optimize_team_with_transfers"),
             ("fpl_team_picker.visualization.charts", "create_xp_results_display"),
         ]

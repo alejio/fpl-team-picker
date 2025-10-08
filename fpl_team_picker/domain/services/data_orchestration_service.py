@@ -358,6 +358,66 @@ class DataOrchestrationService:
         # 8. Load xG/xA rates (cumulative up to target_gameweek)
         xg_rates = client.get_player_xg_xa_rates()
 
+        # ========== Standardize ALL DataFrames for guaranteed clean data contracts ==========
+
+        # Standardize xg_rates columns
+        if "id" in xg_rates.columns and "player_id" not in xg_rates.columns:
+            xg_rates = xg_rates.rename(columns={"id": "player_id"})
+
+        # Standardize fixtures columns
+        fixture_rename = {}
+        if "event" in fixtures.columns and "gameweek" not in fixtures.columns:
+            fixture_rename["event"] = "gameweek"
+        # Ensure team_h and team_a exist
+        if "team_h" not in fixtures.columns:
+            if "home_team_id" in fixtures.columns:  # Client's actual column name
+                fixture_rename["home_team_id"] = "team_h"
+            elif "home_team" in fixtures.columns:
+                fixture_rename["home_team"] = "team_h"
+            elif "home" in fixtures.columns:
+                fixture_rename["home"] = "team_h"
+        if "team_a" not in fixtures.columns:
+            if "away_team_id" in fixtures.columns:  # Client's actual column name
+                fixture_rename["away_team_id"] = "team_a"
+            elif "away_team" in fixtures.columns:
+                fixture_rename["away_team"] = "team_a"
+            elif "away" in fixtures.columns:
+                fixture_rename["away"] = "team_a"
+        if fixture_rename:
+            fixtures = fixtures.rename(columns=fixture_rename)
+
+        # GUARANTEE: fixtures must have team_h and team_a for XP calculations
+        if not fixtures.empty:
+            if "team_h" not in fixtures.columns or "team_a" not in fixtures.columns:
+                raise ValueError(
+                    f"Fixtures missing required columns. Has: {list(fixtures.columns)}. "
+                    f"Needs: team_h, team_a, gameweek"
+                )
+
+        # Standardize teams columns
+        if "id" in teams.columns and "team_id" not in teams.columns:
+            teams = teams.rename(columns={"id": "team_id"})
+
+        # Standardize players columns
+        if "id" in players.columns and "player_id" not in players.columns:
+            players = players.rename(columns={"id": "player_id"})
+
+        # Standardize live_data_historical columns
+        if not live_data_historical.empty:
+            live_rename = {}
+            if (
+                "event" in live_data_historical.columns
+                and "gameweek" not in live_data_historical.columns
+            ):
+                live_rename["event"] = "gameweek"
+            if (
+                "points" in live_data_historical.columns
+                and "total_points" not in live_data_historical.columns
+            ):
+                live_rename["points"] = "total_points"
+            if live_rename:
+                live_data_historical = live_data_historical.rename(columns=live_rename)
+
         # 9. Create synthetic gameweek info
         gameweek_info = {
             "current_gameweek": target_gameweek,
@@ -638,6 +698,22 @@ class DataOrchestrationService:
         else:
             live_data_combined = live_data_historical  # Fallback to historical only
 
+        # Standardize live_data columns for data contracts
+        if not live_data_combined.empty:
+            live_rename = {}
+            if (
+                "event" in live_data_combined.columns
+                and "gameweek" not in live_data_combined.columns
+            ):
+                live_rename["event"] = "gameweek"
+            if (
+                "points" in live_data_combined.columns
+                and "total_points" not in live_data_combined.columns
+            ):
+                live_rename["points"] = "total_points"
+            if live_rename:
+                live_data_combined = live_data_combined.rename(columns=live_rename)
+
         # Merge players with current gameweek stats if available
         if not current_live_data.empty:
             # Standardize column names for compatibility
@@ -662,18 +738,78 @@ class DataOrchestrationService:
         xg_rates = client.get_player_xg_xa_rates()
         fixtures = client.get_fixtures_normalized()
 
-        # Standardize column names for compatibility
-        rename_dict = {
+        # ========== Standardize ALL DataFrames for guaranteed clean data contracts ==========
+
+        # Standardize players columns
+        player_rename_dict = {
             "price_gbp": "price",
             "selected_by_percentage": "selected_by_percent",
             "availability_status": "status",
         }
+        # Handle id -> player_id only if player_id doesn't exist
+        if "id" in players.columns and "player_id" not in players.columns:
+            player_rename_dict["id"] = "player_id"
+        players = players.rename(columns=player_rename_dict)
 
-        # Handle team column naming - keep original name to avoid conflicts
-        if "team_id" in players.columns and "team" not in players.columns:
-            rename_dict["team_id"] = "team"
+        # GUARANTEE: players must have a 'team' column for Expected Points Service
+        if "team" not in players.columns:
+            if "team_id" in players.columns:
+                players["team"] = players["team_id"]
+            elif "team_x" in players.columns:
+                # Handle merge suffix conflicts
+                players["team"] = players["team_x"]
+                if "team_y" in players.columns:
+                    players = players.drop("team_y", axis=1)
+            elif "team_id_x" in players.columns:
+                players["team"] = players["team_id_x"]
+                if "team_id_y" in players.columns:
+                    players = players.drop("team_id_y", axis=1)
+            else:
+                # Provide helpful error with available columns
+                raise ValueError(
+                    f"Players data missing team identification column. "
+                    f"Available columns: {list(players.columns)}"
+                )
 
-        players = players.rename(columns=rename_dict)
+        # Standardize xg_rates columns
+        if "id" in xg_rates.columns and "player_id" not in xg_rates.columns:
+            xg_rates = xg_rates.rename(columns={"id": "player_id"})
+
+        # Standardize fixtures columns
+        fixture_rename = {}
+        if "event" in fixtures.columns and "gameweek" not in fixtures.columns:
+            fixture_rename["event"] = "gameweek"
+        # Ensure team_h and team_a exist
+        if "team_h" not in fixtures.columns:
+            if "home_team_id" in fixtures.columns:  # Client's actual column name
+                fixture_rename["home_team_id"] = "team_h"
+            elif "home_team" in fixtures.columns:
+                fixture_rename["home_team"] = "team_h"
+            elif "home" in fixtures.columns:
+                fixture_rename["home"] = "team_h"
+        if "team_a" not in fixtures.columns:
+            if "away_team_id" in fixtures.columns:  # Client's actual column name
+                fixture_rename["away_team_id"] = "team_a"
+            elif "away_team" in fixtures.columns:
+                fixture_rename["away_team"] = "team_a"
+            elif "away" in fixtures.columns:
+                fixture_rename["away"] = "team_a"
+        if fixture_rename:
+            fixtures = fixtures.rename(columns=fixture_rename)
+
+        # GUARANTEE: fixtures must have team_h and team_a for XP calculations
+        if not fixtures.empty:
+            if "team_h" not in fixtures.columns or "team_a" not in fixtures.columns:
+                raise ValueError(
+                    f"Fixtures missing required columns. Has: {list(fixtures.columns)}. "
+                    f"Needs: team_h, team_a, gameweek"
+                )
+
+        # Standardize teams columns
+        if "id" in teams_df.columns and "team_id" not in teams_df.columns:
+            teams = teams_df.rename(columns={"id": "team_id"})
+        else:
+            teams = teams_df
 
         # Add calculated fields with robust handling
         # Ensure event column exists and has valid values
@@ -684,8 +820,6 @@ class DataOrchestrationService:
             "event"
         ].fillna(target_gameweek).replace(0, 1)
         players["form"] = players["total_points"].fillna(0).astype(float)
-
-        teams = teams_df.rename(columns={"team_id": "id"})
 
         print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
         print(f"📅 Target GW: {target_gameweek}")
@@ -875,7 +1009,10 @@ class DataOrchestrationService:
         # Merge with team data using standardized column name
         if "team_id" in current_squad.columns:
             current_squad = current_squad.merge(
-                teams[["id", "name"]], left_on="team_id", right_on="id", how="left"
+                teams[["team_id", "name"]],
+                left_on="team_id",
+                right_on="team_id",
+                how="left",
             )
             # Fill any missing team names (defensive programming)
             if "name" in current_squad.columns:

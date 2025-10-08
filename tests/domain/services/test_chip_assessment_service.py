@@ -10,11 +10,7 @@ from fpl_team_picker.domain.services import (
 from fpl_team_picker.domain.services.chip_assessment_service import (
     ChipAssessmentService,
 )
-from fpl_team_picker.adapters.database_repositories import (
-    DatabasePlayerRepository,
-    DatabaseTeamRepository,
-    DatabaseFixtureRepository,
-)
+from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
 
 
 class TestChipAssessmentServiceIntegration:
@@ -28,13 +24,11 @@ class TestChipAssessmentServiceIntegration:
     @pytest.fixture
     def sample_gameweek_data(self):
         """Load sample gameweek data with XP calculations."""
-        # Initialize repositories
+        # Initialize repositories (team and fixture repos not needed, using FPL client)
         player_repo = DatabasePlayerRepository()
-        team_repo = DatabaseTeamRepository()
-        fixture_repo = DatabaseFixtureRepository()
 
         # Create services
-        data_service = DataOrchestrationService(player_repo, team_repo, fixture_repo)
+        data_service = DataOrchestrationService(player_repo, None, None)
         xp_service = ExpectedPointsService()
 
         # Load gameweek data

@@ -9,7 +9,7 @@ Provides heuristic-based analysis for optimal chip usage timing:
 Uses simple heuristics rather than complex optimization for fast analysis.
 """
 
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 import pandas as pd
 
@@ -22,8 +22,9 @@ class ChipRecommendation(BaseModel):
         ..., description="Recommendation status: 🟢 RECOMMENDED, 🟡 CONSIDER, 🔴 HOLD"
     )
     reasoning: str = Field(..., description="Explanation for the recommendation")
-    key_metrics: Dict[str, float] = Field(
-        default_factory=dict, description="Metrics supporting the recommendation"
+    key_metrics: Dict[str, Union[str, float, int]] = Field(
+        default_factory=dict,
+        description="Metrics supporting the recommendation (can be numeric or text)",
     )
     optimal_gameweek: Optional[int] = Field(
         None, description="Optimal gameweek to use this chip"

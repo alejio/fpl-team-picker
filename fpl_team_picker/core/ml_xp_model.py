@@ -711,10 +711,10 @@ class MLXPModel:
             predictions_df = self.predict(current_data)
 
             # Calculate expected_minutes using rule-based logic
-            from fpl_team_picker.core.xp_model import XPModel
+            from fpl_team_picker.domain.services import ExpectedPointsService
 
-            temp_xp_model = XPModel()
-            predictions_df = temp_xp_model._calculate_expected_minutes(predictions_df)
+            temp_xp_service = ExpectedPointsService()
+            predictions_df = temp_xp_service._calculate_expected_minutes(predictions_df)
 
             # Use ensemble prediction as main xP
             predictions_df["xP"] = predictions_df["ml_ensemble_xP"]
@@ -753,13 +753,8 @@ class MLXPModel:
 
         except Exception as e:
             logger.error(f"ML XP calculation failed: {str(e)}")
-            # Return basic structure if ML fails
-            result = players_data.copy()
-            result["xP"] = 2.0  # Safe default
-            result["ml_general_xP"] = 2.0
-            result["ml_position_xP"] = 0.0
-            result["ml_ensemble_xP"] = 2.0
-            return result
+            # Re-raise to let ExpectedPointsService handle the fallback to rule-based model
+            raise
 
     def get_feature_importance(self) -> pd.DataFrame:
         """
