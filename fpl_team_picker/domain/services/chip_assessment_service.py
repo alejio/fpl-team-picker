@@ -637,7 +637,9 @@ class ChipAssessmentService:
             return [], 0.0
 
         # Count fixtures per team for target gameweek
-        gw_fixtures = fixtures[fixtures["event"] == target_gw]
+        # Note: DataOrchestrationService renames "event" to "gameweek"
+        gameweek_col = "gameweek" if "gameweek" in fixtures.columns else "event"
+        gw_fixtures = fixtures[fixtures[gameweek_col] == target_gw]
 
         if gw_fixtures.empty:
             return [], 0.0
@@ -645,12 +647,22 @@ class ChipAssessmentService:
         # Count home and away appearances
         team_fixture_counts = {}
 
-        for _, fixture in gw_fixtures.iterrows():
-            home_team = fixture.get("home_team_id", "")
-            away_team = fixture.get("away_team_id", "")
+        # Note: DataOrchestrationService renames "home_team_id" to "team_h" and "away_team_id" to "team_a"
+        home_col = "team_h" if "team_h" in gw_fixtures.columns else "home_team_id"
+        away_col = "team_a" if "team_a" in gw_fixtures.columns else "away_team_id"
 
-            team_fixture_counts[home_team] = team_fixture_counts.get(home_team, 0) + 1
-            team_fixture_counts[away_team] = team_fixture_counts.get(away_team, 0) + 1
+        for _, fixture in gw_fixtures.iterrows():
+            home_team = fixture.get(home_col, "")
+            away_team = fixture.get(away_col, "")
+
+            if home_team:  # Only count if team ID exists
+                team_fixture_counts[home_team] = (
+                    team_fixture_counts.get(home_team, 0) + 1
+                )
+            if away_team:  # Only count if team ID exists
+                team_fixture_counts[away_team] = (
+                    team_fixture_counts.get(away_team, 0) + 1
+                )
 
         # Find teams with 2+ fixtures
         double_gw_teams = [
