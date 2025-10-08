@@ -27,13 +27,15 @@ def _():
     # import shap  # Commented out due to Python 3.13 compatibility issues
 
     # FPL data pipeline
-    from fpl_team_picker.core.data_loader import (
-        fetch_fpl_data,
-        get_current_gameweek_info,
+    from fpl_team_picker.domain.services.data_orchestration_service import (
+        DataOrchestrationService,
     )
     from fpl_team_picker.core.xp_model import XPModel
     from client import FPLDataClient
     from fpl_team_picker.config import config
+
+    # Create service instance for data operations
+    data_service = DataOrchestrationService()
 
     return (
         FPLDataClient,
@@ -44,8 +46,7 @@ def _():
         TimeSeriesSplit,
         XPModel,
         config,
-        fetch_fpl_data,
-        get_current_gameweek_info,
+        data_service,
         go,
         mean_absolute_error,
         np,
@@ -79,9 +80,9 @@ def _(mo):
 
 
 @app.cell
-def _(get_current_gameweek_info, mo):
+def _(data_service, mo):
     # Get current gameweek info
-    gw_info = get_current_gameweek_info()
+    gw_info = data_service.get_current_gameweek_info()
     current_gw = gw_info["current_gameweek"]
 
     # Target gameweek selector (default to 4 for ML experiment)
@@ -154,7 +155,7 @@ def _(mo):
 
 
 @app.cell
-def _(fetch_fpl_data, mo, pd, target_gw_input):
+def _(data_service, mo, pd, target_gw_input):
     # Initialize variables
     ml_data_loaded = False
     players_df = pd.DataFrame()
@@ -167,7 +168,7 @@ def _(fetch_fpl_data, mo, pd, target_gw_input):
         try:
             # Load FPL data for target gameweek
             players_df, teams_df, xg_rates_df, fixtures_df, _, live_data_df = (
-                fetch_fpl_data(target_gw_input.value)
+                data_service._fetch_fpl_data_internal(target_gw_input.value)
             )
             ml_data_loaded = True
 
