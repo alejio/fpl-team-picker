@@ -28,9 +28,10 @@ class TestMarimoCompatibility:
 
     def test_gameweek_detection_works(self):
         """Test gameweek detection functionality."""
-        from fpl_team_picker.core.data_loader import get_current_gameweek_info
+        from fpl_team_picker.domain.services.data_orchestration_service import DataOrchestrationService
 
-        gw_info = get_current_gameweek_info()
+        service = DataOrchestrationService()
+        gw_info = service.get_current_gameweek_info()
         # Should either return valid info or None (both acceptable)
         if gw_info:
             assert "current_gameweek" in gw_info
@@ -38,28 +39,27 @@ class TestMarimoCompatibility:
 
     def test_data_loading_functionality(self):
         """Test that data loading still works."""
-        from fpl_team_picker.core.data_loader import (
-            fetch_fpl_data,
-            get_current_gameweek_info,
-        )
+        from fpl_team_picker.domain.services.data_orchestration_service import DataOrchestrationService
+
+        service = DataOrchestrationService()
 
         # Get current gameweek
-        gw_info = get_current_gameweek_info()
+        gw_info = service.get_current_gameweek_info()
         target_gw = gw_info.get("current_gameweek", 1) if gw_info else 1
 
         # Test data loading
         try:
-            data = fetch_fpl_data(target_gameweek=target_gw, form_window=3)
+            gameweek_data = service.load_gameweek_data(target_gameweek=target_gw, form_window=3)
 
             required_keys = ["players", "teams", "fixtures", "xg_rates"]
             for key in required_keys:
-                assert key in data, f"Missing key: {key}"
+                assert key in gameweek_data, f"Missing key: {key}"
 
                 # Check data is present (allow empty for some cases)
-                if hasattr(data[key], "empty"):
+                if hasattr(gameweek_data[key], "empty"):
                     # DataFrame - check structure
-                    assert hasattr(data[key], "columns")
-                elif hasattr(data[key], "__len__"):
+                    assert hasattr(gameweek_data[key], "columns")
+                elif hasattr(gameweek_data[key], "__len__"):
                     # Other iterable - just verify it exists
                     pass
 
@@ -108,9 +108,10 @@ class TestMarimoCompatibility:
         assert "import marimo as mo" in content, "Missing marimo import"
 
         # Check for key functionality imports
+        # Note: Checking for domain services now instead of core imports
         expected_imports = [
-            "from fpl_team_picker.core.data_loader import",
-            "from fpl_team_picker.core.xp_model import",
+            "from fpl_team_picker.domain.services.data_orchestration_service import",
+            "from fpl_team_picker.core.xp_model import",  # Still in core temporarily
             "from fpl_team_picker.optimization.optimizer import",
         ]
 

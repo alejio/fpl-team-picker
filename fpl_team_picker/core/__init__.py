@@ -1,28 +1,17 @@
 """
-Core FPL Analysis Components
+Core FPL Analysis Components (Legacy - being migrated to domain/services)
 
-This package contains the core business logic for FPL analysis including:
-- Data loading and processing
-- Expected Points (xP) models
-- Dynamic team strength calculations
+This package contains legacy business logic being migrated:
+- Expected Points (xP) models (will move to domain/services)
+- Dynamic team strength calculations (will move to domain/services)
+
+Note: data_loader has been migrated to domain/services/data_orchestration_service
 """
 
-from .data_loader import (
-    fetch_fpl_data,
-    fetch_manager_team,
-    process_current_squad,
-    load_gameweek_datasets,
-)
-
 from .xp_model import XPModel
-
 from .team_strength import DynamicTeamStrength
 
 __all__ = [
-    "fetch_fpl_data",
-    "fetch_manager_team",
-    "process_current_squad",
-    "load_gameweek_datasets",
     "XPModel",
     "DynamicTeamStrength",
 ]
