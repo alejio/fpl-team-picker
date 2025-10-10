@@ -22,11 +22,12 @@ fpl-team-picker/
 │   │   │   ├── expected_points_service.py       # Rule-based XP calculation
 │   │   │   ├── ml_expected_points_service.py    # ML-based XP calculation
 │   │   │   ├── team_analytics_service.py        # Dynamic team strength
-│   │   │   ├── transfer_optimization_service.py # Transfer optimization
+│   │   │   ├── optimization_service.py          # FPL optimization algorithms
+│   │   │   ├── transfer_optimization_service.py # Transfer orchestration
+│   │   │   ├── squad_management_service.py      # Squad analysis & management
 │   │   │   ├── chip_assessment_service.py       # Chip timing analysis
 │   │   │   ├── performance_analytics_service.py # Historical recomputation & accuracy
-│   │   │   ├── player_analytics_service.py      # Type-safe player operations
-│   │   │   └── squad_management_service.py      # Squad analysis & management
+│   │   │   └── player_analytics_service.py      # Type-safe player operations
 │   │   ├── models/           # Domain models
 │   │   │   ├── player.py     # Player domain models
 │   │   │   ├── team.py       # Team domain models
@@ -39,8 +40,6 @@ fpl-team-picker/
 │   │       └── result.py     # Result types for error handling
 │   ├── adapters/             # Infrastructure implementations
 │   │   └── database_repositories.py   # Database repository implementations
-│   ├── optimization/         # Transfer and team optimization
-│   │   └── optimizer.py      # Smart transfer optimization logic
 │   ├── visualization/        # Charts and visual components
 │   │   └── charts.py         # Plotly-based interactive visualizations
 │   ├── interfaces/           # User interfaces (Frontend adapters)
@@ -325,15 +324,23 @@ Key configuration sections:
 - `VisualizationConfig` - Chart and display settings
 - `ChipAssessmentConfig` - Chip recommendation thresholds and parameters
 
-### 3. Optimization Engine (`fpl_team_picker/optimization/`)
+### 3. Optimization Service (`fpl_team_picker/domain/services/optimization_service.py`)
 
-#### Transfer Optimizer (`optimizer.py`)
-**Smart transfer optimization and budget analysis:**
-- `optimize_team_with_transfers()` - Smart 0-3 transfer optimization with scenario analysis
-- `calculate_total_budget_pool()` - Advanced budget analysis including sellable player values
-- `premium_acquisition_planner()` - Multi-transfer scenarios for expensive targets
-- `get_best_starting_11()` - Formation-flexible lineup selection
-- `select_captain()` - Risk-adjusted captaincy recommendations
+**Core FPL optimization algorithms** - 1,074 lines of pure algorithmic logic:
+
+**OptimizationService - FPL constraint satisfaction and algorithmic optimization:**
+- `optimize_transfers()` - Comprehensive 0-3 transfer scenario analysis (core algorithm)
+- `find_optimal_starting_11()` - Formation enumeration and XP maximization
+- `find_bench_players()` - Bench ordering by expected points
+- `calculate_budget_pool()` - Advanced budget analysis including sellable player values
+- `plan_premium_acquisition()` - Multi-transfer scenarios for expensive targets
+- `select_captain_candidate()` - Risk-adjusted captaincy recommendations
+
+**Architecture:** OptimizationService is a **leaf domain service** used by:
+- `TransferOptimizationService` - Orchestrates transfer workflows
+- `SquadManagementService` - Orchestrates squad analysis workflows
+
+**Key Design:** All FPL business rules (formations, constraints, budget calculations) are centralized in OptimizationService, eliminating duplication and ensuring single source of truth.
 
 ### 4. Visualization Suite (`fpl_team_picker/visualization/`)
 

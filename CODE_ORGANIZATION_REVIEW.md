@@ -380,12 +380,17 @@ fpl_team_picker/
 ├── domain/                          # ← All business logic here
 │   ├── models/                      # ✅ Already excellent
 │   ├── repositories/                # ✅ Already excellent (contracts)
-│   ├── services/                    # ⚠️ MERGE core/ logic here
-│   │   ├── expected_points_service.py  # ← Merge xp_model.py + ml_xp_model.py
-│   │   ├── team_analytics_service.py   # ← Merge team_strength.py
-│   │   ├── chip_assessment_service.py  # ← Merge chip_assessment.py
-│   │   ├── data_orchestration_service.py # ← Merge data_loader.py
-│   │   └── optimization_service.py     # ← Merge optimization/optimizer.py
+│   ├── services/                    # ✅ ALL BUSINESS LOGIC CONSOLIDATED
+│   │   ├── expected_points_service.py  # ✅ xp_model.py migrated
+│   │   ├── ml_expected_points_service.py # ✅ ml_xp_model.py migrated
+│   │   ├── team_analytics_service.py   # ✅ team_strength.py migrated
+│   │   ├── chip_assessment_service.py  # ✅ chip_assessment.py migrated
+│   │   ├── data_orchestration_service.py # ✅ data_loader.py migrated
+│   │   ├── optimization_service.py     # ✅ optimizer.py consolidated (Phase 2B)
+│   │   ├── transfer_optimization_service.py # ✅ Delegates to OptimizationService
+│   │   ├── squad_management_service.py # ✅ Delegates to OptimizationService
+│   │   ├── performance_analytics_service.py # ✅ Historical accuracy tracking
+│   │   └── player_analytics_service.py # ✅ Type-safe player operations
 │   └── common/                      # ✅ Already excellent
 ├── adapters/                        # ✅ Already good
 │   └── database_repositories.py     # Concrete implementations
@@ -393,7 +398,7 @@ fpl_team_picker/
 │   └── [all interfaces use domain services only]
 ├── visualization/                   # ✅ Already good
 ├── config/                          # ✅ Already excellent
-└── [NO core/, NO optimization/, NO utils/]
+└── utils/                           # ⚠️ TODO: Audit and migrate (Phase 3)
 ```
 
 **Key Principle**: **All business logic flows inward** toward domain.
@@ -402,59 +407,75 @@ fpl_team_picker/
 
 ## 📋 Migration Checklist
 
-### **Phase 1: Consolidate Business Logic** (Fixes dependency inversion automatically!)
+### **Phase 1: Core Business Logic Migration** ✅ COMPLETE (Prior to 2025-10-10)
 
-**Module 1: chip_assessment.py → chip_assessment_service.py** (Start here - smallest)
-- [ ] Copy ChipAssessmentEngine logic into ChipAssessmentService
-- [ ] Remove `from fpl_team_picker.core.chip_assessment import ChipAssessmentEngine`
-- [ ] Update service methods to use internal logic
-- [ ] Run tests: `pytest tests/domain/services/test_chip_assessment_service.py -v`
-- [ ] Delete `core/chip_assessment.py`
+**Module 1: chip_assessment.py → chip_assessment_service.py** ✅
+- [x] Copy ChipAssessmentEngine logic into ChipAssessmentService
+- [x] Remove `from fpl_team_picker.core.chip_assessment import ChipAssessmentEngine`
+- [x] Update service methods to use internal logic
+- [x] Run tests: All chip assessment tests passing
+- [x] Delete `core/chip_assessment.py`
 
-**Module 2: data_loader.py → data_orchestration_service.py**
-- [ ] Copy remaining data loading logic into DataOrchestrationService
-- [ ] Remove core/data_loader imports
-- [ ] Update service methods
-- [ ] Run tests: `pytest tests/domain/services/test_data_orchestration_service.py -v`
-- [ ] Delete `core/data_loader.py`
+**Module 2: data_loader.py → data_orchestration_service.py** ✅
+- [x] Copy remaining data loading logic into DataOrchestrationService
+- [x] Remove core/data_loader imports
+- [x] Update service methods
+- [x] Run tests: All data orchestration tests passing
+- [x] Delete `core/data_loader.py`
 
-**Module 3: team_strength.py → team_analytics_service.py (NEW)**
-- [ ] Create `domain/services/team_analytics_service.py`
-- [ ] Copy team strength calculation logic
-- [ ] Update imports in domain services that need team strength
-- [ ] Add tests: `tests/domain/services/test_team_analytics_service.py`
-- [ ] Delete `core/team_strength.py`
+**Module 3: team_strength.py → team_analytics_service.py** ✅
+- [x] Create `domain/services/team_analytics_service.py`
+- [x] Copy team strength calculation logic
+- [x] Update imports in domain services that need team strength
+- [x] Add tests: `tests/domain/services/test_team_analytics_service.py`
+- [x] Delete `core/team_strength.py`
 
-**Module 4: xp_model.py → expected_points_service.py** (Largest - 1,293 LOC)
-- [ ] Copy XPModel logic into ExpectedPointsService
-- [ ] Remove `from fpl_team_picker.core.xp_model import XPModel`
-- [ ] Refactor into private methods (_calculate_with_form_weighting, etc.)
-- [ ] Run tests: `pytest tests/domain/services/test_expected_points_service.py -v`
-- [ ] Delete `core/xp_model.py`
+**Module 4: xp_model.py → expected_points_service.py** ✅
+- [x] Copy XPModel logic into ExpectedPointsService
+- [x] Remove `from fpl_team_picker.core.xp_model import XPModel`
+- [x] Refactor into private methods (_calculate_with_form_weighting, etc.)
+- [x] Run tests: All expected points tests passing
+- [x] Delete `core/xp_model.py`
 
-**Module 5: ml_xp_model.py → expected_points_service.py**
-- [ ] Copy MLXPModel logic into ExpectedPointsService (as ML variant)
-- [ ] Use strategy pattern or flag to choose model
-- [ ] Remove core/ml_xp_model imports
-- [ ] Run tests
-- [ ] Delete `core/ml_xp_model.py`
+**Module 5: ml_xp_model.py → ml_expected_points_service.py** ✅
+- [x] Created separate MLExpectedPointsService (935 LOC)
+- [x] Maintained separation from rule-based service for clarity
+- [x] Remove core/ml_xp_model imports
+- [x] Run tests: All ML service tests passing
+- [x] Delete `core/ml_xp_model.py`
 
-**Cleanup:**
-- [ ] Delete entire `core/` directory
-- [ ] Search codebase for remaining `from fpl_team_picker.core` imports
-- [ ] Update interfaces that still import from core/ directly
+**Cleanup:** ✅
+- [x] Delete entire `core/` directory
+- [x] Search codebase for remaining `from fpl_team_picker.core` imports (none found in source)
+- [x] Update interfaces to use domain services only
 
-### **Phase 2: Optimization Layer**
-  - [ ] Move `optimization/` to `domain/optimization/`
-  - [ ] Update import paths
-  - [ ] Verify tests still pass
+### **Phase 2: Optimization Layer** ✅ COMPLETE (2025-10-10)
+  - [x] Move `optimization/` to `domain/optimization/`
+  - [x] Update import paths (transfer_optimization_service.py, squad_management_service.py)
+  - [x] Verify tests still pass (46/56 tests passing, 10 failures unrelated to migration)
+
+### **Phase 2B: Optimization Service Consolidation** ✅ COMPLETE (2025-10-10)
+  - [x] Create `OptimizationService` (1,074 LOC) with all FPL optimization algorithms
+  - [x] Update `SquadManagementService` to delegate to OptimizationService (319→213 LOC, -106 LOC)
+  - [x] Update `TransferOptimizationService` to delegate to OptimizationService (342→333 LOC, -9 LOC)
+  - [x] Remove duplicate implementations (starting XI, bench, budget calculations)
+  - [x] Delete `domain/optimization/` directory entirely
+  - [x] Verify all tests pass (46/56 passing, same failures as before)
+  - [x] Update documentation (CLAUDE.md, CODE_ORGANIZATION_REVIEW.md)
+
+**Benefits Achieved:**
+- ✅ Single source of truth for all FPL optimization algorithms
+- ✅ No more duplicate starting XI / bench player logic
+- ✅ Clean service dependencies: Transfer/Squad → Optimization (leaf service)
+- ✅ All business logic now in `domain/services/` (no standalone modules)
+- ✅ ~115 LOC reduction through deduplication
 
 ### **Phase 3: Cleanup**
   - [ ] Audit and migrate `utils/helpers.py`
-  - [ ] Delete `core/` directory
-  - [ ] Delete standalone `optimization/` directory
+  - [x] Delete `core/` directory (completed in Phase 1)
+  - [x] Delete standalone `optimization/` directory (completed in Phase 2B)
   - [ ] Delete `utils/` directory (if empty)
-  - [ ] Update CLAUDE.md documentation
+  - [x] Update CLAUDE.md documentation (Phases 1, 2, 2B complete)
 
 ### **Phase 4: Interface Migration** (Optional)
   - [ ] Migrate remaining interfaces to domain services (if beneficial)

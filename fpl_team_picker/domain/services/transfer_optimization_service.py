@@ -2,6 +2,7 @@
 
 from typing import Dict, Any, List, Set, Optional
 import pandas as pd
+from fpl_team_picker.domain.services.optimization_service import OptimizationService
 
 
 class TransferOptimizationService:
@@ -14,6 +15,7 @@ class TransferOptimizationService:
             config: Configuration dictionary for optimization
         """
         self.config = config or {}
+        self.optimization_service = OptimizationService(config)
 
     def optimize_transfers(
         self,
@@ -43,23 +45,16 @@ class TransferOptimizationService:
         must_include_ids = must_include_ids or set()
         must_exclude_ids = must_exclude_ids or set()
 
-        # Load optimization function
-        from fpl_team_picker.optimization.optimizer import (
-            optimize_team_with_transfers,
+        # Delegate to optimization service
+        display_component, optimal_squad, best_scenario = (
+            self.optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=players_with_xp,
+                must_include_ids=must_include_ids,
+                must_exclude_ids=must_exclude_ids,
+            )
         )
-
-        # Perform optimization with correct parameter names
-        optimization_result = optimize_team_with_transfers(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=players_with_xp,
-            must_include_ids=must_include_ids,
-            must_exclude_ids=must_exclude_ids,
-        )
-
-        # Unpack the tuple returned by optimize_team_with_transfers
-        # Returns: (marimo_component, optimal_squad_df, optimization_results)
-        display_component, optimal_squad, best_scenario = optimization_result
 
         return {
             "display_component": display_component,
@@ -84,10 +79,10 @@ class TransferOptimizationService:
         Returns:
             Starting eleven player list
         """
-        from fpl_team_picker.optimization.optimizer import get_best_starting_11
-
-        starting_11_data = get_best_starting_11(current_squad)
-        return starting_11_data[0]  # Extract just the player list from tuple
+        starting_11, _, _ = self.optimization_service.find_optimal_starting_11(
+            current_squad
+        )
+        return starting_11
 
     def get_optimal_team_from_database(
         self,
@@ -185,11 +180,10 @@ class TransferOptimizationService:
         Returns:
             Budget analysis
         """
-        from fpl_team_picker.optimization.optimizer import (
-            calculate_total_budget_pool,
+        bank_balance = team_data.get("bank", 0.0)
+        return self.optimization_service.calculate_budget_pool(
+            current_squad, bank_balance
         )
-
-        return calculate_total_budget_pool(current_squad, team_data)
 
     def get_premium_acquisition_plan(
         self,
@@ -209,15 +203,12 @@ class TransferOptimizationService:
         Returns:
             Acquisition plan
         """
-        from fpl_team_picker.optimization.optimizer import (
-            premium_acquisition_planner,
+        bank_balance = team_data.get("bank", 0.0)
+        budget_pool_info = self.optimization_service.calculate_budget_pool(
+            current_squad, bank_balance
         )
-
-        return premium_acquisition_planner(
-            target_price=target_player_price,
-            current_squad_df=current_squad,
-            team_data=team_data,
-            available_players_df=players_with_xp,
+        return self.optimization_service.plan_premium_acquisition(
+            current_squad, players_with_xp, budget_pool_info, top_n=3
         )
 
     def _select_optimal_team_from_all_players(
