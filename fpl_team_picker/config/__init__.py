@@ -26,7 +26,6 @@ from .settings import (
     FixtureDifficultyConfig,
     OptimizationConfig,
     VisualizationConfig,
-    DataLoadingConfig,
     config,
     load_config,
 )
@@ -40,7 +39,6 @@ __all__ = [
     "FixtureDifficultyConfig",
     "OptimizationConfig",
     "VisualizationConfig",
-    "DataLoadingConfig",
     "config",
     "load_config",
 ]

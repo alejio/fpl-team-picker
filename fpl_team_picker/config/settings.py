@@ -432,124 +432,6 @@ class VisualizationConfig(BaseModel):
     )
 
 
-class ChipAssessmentConfig(BaseModel):
-    """Chip Assessment Configuration"""
-
-    # Wildcard assessment thresholds
-    wildcard_min_transfers: int = Field(
-        default=4, description="Minimum transfers to recommend wildcard", ge=1, le=10
-    )
-    wildcard_fixture_threshold: float = Field(
-        default=0.9,
-        description="Poor fixture run threshold for wildcard",
-        ge=0.5,
-        le=1.5,
-    )
-
-    # Bench Boost assessment thresholds
-    bench_boost_min_points: float = Field(
-        default=8.0,
-        description="Minimum bench xP to recommend bench boost",
-        ge=0.0,
-        le=50.0,
-    )
-    bench_boost_fixture_quality_threshold: float = Field(
-        default=1.0,
-        description="Minimum fixture quality for bench boost",
-        ge=0.5,
-        le=2.0,
-    )
-
-    # Triple Captain assessment thresholds
-    triple_captain_min_xp: float = Field(
-        default=8.0,
-        description="Minimum xP to recommend triple captain",
-        ge=0.0,
-        le=50.0,
-    )
-    triple_captain_fixture_threshold: float = Field(
-        default=1.1,
-        description="Minimum fixture quality for triple captain",
-        ge=0.5,
-        le=2.0,
-    )
-    triple_captain_rotation_risk_threshold: float = Field(
-        default=0.3,
-        description="Maximum rotation risk for triple captain",
-        ge=0.0,
-        le=1.0,
-    )
-
-    # Free Hit assessment thresholds
-    free_hit_min_improvement: float = Field(
-        default=15.0,
-        description="Minimum xP improvement to recommend free hit",
-        ge=0.0,
-        le=100.0,
-    )
-    free_hit_missing_players_threshold: int = Field(
-        default=3, description="Missing players threshold for free hit", ge=1, le=11
-    )
-    free_hit_double_gw_bonus: float = Field(
-        default=10.0, description="Bonus xP value for double gameweek", ge=0.0, le=50.0
-    )
-    free_hit_outlook_threshold: float = Field(
-        default=0.7, description="Poor current outlook threshold", ge=0.0, le=1.0
-    )
-
-    # General chip assessment settings
-    max_premium_alternatives: int = Field(
-        default=5, description="Max premium alternatives to consider", ge=1, le=15
-    )
-    transfer_opportunity_xp_threshold: float = Field(
-        default=2.0,
-        description="Min xP improvement for transfer opportunity",
-        ge=0.0,
-        le=20.0,
-    )
-    transfer_opportunity_price_buffer: float = Field(
-        default=2.0,
-        description="Price buffer for transfer opportunities (£m)",
-        ge=0.0,
-        le=10.0,
-    )
-
-
-class DataLoadingConfig(BaseModel):
-    """Data Loading and Processing Configuration"""
-
-    # Default form window for historical data
-    default_form_window: int = Field(
-        default=5, description="Default form window for historical data", ge=1, le=15
-    )
-
-    # Column standardization
-    required_player_columns: List[str] = Field(
-        default_factory=lambda: [
-            "web_name",
-            "position",
-            "name",
-            "price",
-            "player_id",
-            "selected_by_percent",
-            "total_points",
-        ],
-        description="Required player columns for data validation",
-    )
-    required_team_columns: List[str] = Field(
-        default_factory=lambda: ["id", "name"],
-        description="Required team columns for data validation",
-    )
-
-    # Fallback values
-    default_total_points: int = Field(
-        default=0, description="Default total points for new players", ge=0, le=1000
-    )
-    fallback_team_name: str = Field(
-        default="Unknown Team", description="Fallback team name for missing data"
-    )
-
-
 class FPLConfig(BaseModel):
     """Master FPL Configuration Container"""
 
@@ -576,13 +458,6 @@ class FPLConfig(BaseModel):
     )
     visualization: VisualizationConfig = Field(
         default_factory=VisualizationConfig, description="Visualization Configuration"
-    )
-    data_loading: DataLoadingConfig = Field(
-        default_factory=DataLoadingConfig, description="Data Loading Configuration"
-    )
-    chip_assessment: ChipAssessmentConfig = Field(
-        default_factory=ChipAssessmentConfig,
-        description="Chip Assessment Configuration",
     )
 
     @model_validator(mode="after")
