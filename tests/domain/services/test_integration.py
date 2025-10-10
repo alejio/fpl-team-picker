@@ -6,7 +6,7 @@ import pandas as pd
 from fpl_team_picker.domain.services import (
     DataOrchestrationService,
     ExpectedPointsService,
-    TransferOptimizationService,
+    OptimizationService,
 )
 from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
 
@@ -37,9 +37,9 @@ class TestDomainServicesIntegration:
         return ExpectedPointsService()
 
     @pytest.fixture
-    def transfer_service(self):
-        """Create transfer optimization service."""
-        return TransferOptimizationService()
+    def optimization_service(self):
+        """Create optimization service."""
+        return OptimizationService()
 
     def test_data_orchestration_service_integration(self, data_service):
         """Test data orchestration service loads real data."""
@@ -90,10 +90,10 @@ class TestDomainServicesIntegration:
         assert players_with_xp["xP"].min() >= 0
         assert players_with_xp["xP"].max() <= 20  # Sanity check
 
-    def test_transfer_optimization_service_basic(
-        self, data_service, xp_service, transfer_service
+    def test_optimization_service_basic(
+        self, data_service, xp_service, optimization_service
     ):
-        """Test transfer optimization service basic functionality."""
+        """Test optimization service basic functionality."""
         # Load data and calculate xP
         gameweek_data = data_service.load_gameweek_data(
             target_gameweek=1, form_window=3
@@ -106,19 +106,19 @@ class TestDomainServicesIntegration:
         assert not players_with_xp.empty
 
         # Test optimal team selection from full database (for testing/analysis)
-        starting_11 = transfer_service.get_optimal_team_from_database(players_with_xp)
+        starting_11 = optimization_service.get_optimal_team_from_database(players_with_xp)
         assert isinstance(starting_11, list)
         assert len(starting_11) == 11
 
         # Test captain recommendation from full database (for testing/analysis)
-        captain_recommendation = (
-            transfer_service.get_captain_recommendation_from_database(players_with_xp)
+        captain_data = optimization_service.get_captain_recommendation(
+            players_with_xp, top_n=5
         )
-        assert isinstance(captain_recommendation, dict)
-        assert (
-            "player_id" in captain_recommendation
-            or "web_name" in captain_recommendation
-        )
+        assert isinstance(captain_data, dict)
+        assert "captain" in captain_data
+        assert "vice_captain" in captain_data
+        assert "top_candidates" in captain_data
+        assert captain_data["captain"]["web_name"]  # Has a name
 
     def test_service_error_handling(self, data_service, xp_service):
         """Test that services handle errors gracefully."""
@@ -168,17 +168,17 @@ class TestDomainServicesIntegration:
         assert ml_info["type"] == "ML"
         assert "description" in ml_info
 
-    def test_constraint_validation_service(self, transfer_service):
+    def test_constraint_validation_service(self, optimization_service):
         """Test constraint validation functionality."""
         # Test valid constraints
-        result = transfer_service.validate_optimization_constraints(
+        result = optimization_service.validate_optimization_constraints(
             must_include_ids={1, 2, 3}, must_exclude_ids={4, 5, 6}, budget_limit=100.0
         )
         assert isinstance(result, dict)
         assert result["valid"] is True
 
         # Test conflicting constraints
-        result = transfer_service.validate_optimization_constraints(
+        result = optimization_service.validate_optimization_constraints(
             must_include_ids={1, 2, 3},
             must_exclude_ids={2, 3, 4},  # Overlaps with must_include
             budget_limit=100.0,
