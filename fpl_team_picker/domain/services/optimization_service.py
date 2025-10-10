@@ -7,10 +7,14 @@ This service contains core FPL optimization algorithms including:
 - Transfer scenario analysis (0-3 transfers)
 - Premium player acquisition planning
 - Captain selection
+- Initial squad generation using simulated annealing
 """
 
 from typing import Dict, List, Tuple, Optional, Set, Any
 import pandas as pd
+import random
+import math
+from pydantic import BaseModel, Field, field_validator
 from fpl_team_picker.config import config
 
 
@@ -1080,3 +1084,528 @@ class OptimizationService:
                 mo_ref.md("### 🏆 Optimal Starting 11 (Strategic):"),
             ]
         )
+
+    def optimize_initial_squad(
+        self,
+        players_with_xp: pd.DataFrame,
+        budget: float = 100.0,
+        formation: Tuple[int, int, int, int] = (2, 5, 5, 3),
+        iterations: int = 5000,
+        must_include_ids: Optional[Set[int]] = None,
+        must_exclude_ids: Optional[Set[int]] = None,
+        xp_column: str = "xP",
+    ) -> Dict[str, Any]:
+        """
+        Generate optimal 15-player squad from scratch using simulated annealing.
+
+        This is fundamentally different from transfer optimization - it starts with
+        no existing squad and builds a complete team from all available players.
+
+        Args:
+            players_with_xp: DataFrame with player data and expected points (must have xP, price, position, player_id, team columns)
+            budget: Total budget in millions (default 100.0)
+            formation: Tuple of (GKP, DEF, MID, FWD) counts (default (2,5,5,3) = 15 players)
+            iterations: Number of simulated annealing iterations (default 5000)
+            must_include_ids: Set of player IDs that must be in final squad
+            must_exclude_ids: Set of player IDs to exclude from consideration
+            xp_column: Column name for expected points (default "xP")
+
+        Returns:
+            Dictionary with:
+                - optimal_squad: List of 15 player dicts
+                - remaining_budget: Unused budget
+                - total_xp: Total expected points
+                - iterations_improved: Number of improvements found
+                - constraint_violations: Any violations detected
+
+        Raises:
+            ValueError: If data validation fails or constraints are impossible
+        """
+        # Validate inputs using data contract
+        validation = InitialSquadOptimizationInput(
+            budget=budget,
+            formation=formation,
+            iterations=iterations,
+            must_include_ids=list(must_include_ids or []),
+            must_exclude_ids=list(must_exclude_ids or []),
+            xp_column=xp_column,
+        )
+
+        must_include_ids = set(validation.must_include_ids)
+        must_exclude_ids = set(validation.must_exclude_ids)
+
+        # Validate DataFrame has required columns
+        required_cols = [xp_column, "price", "position", "player_id", "team"]
+        missing_cols = [
+            col for col in required_cols if col not in players_with_xp.columns
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"players_with_xp DataFrame missing required columns: {missing_cols}"
+            )
+
+        # Validate no NaN values in critical columns - fail fast
+        for col in required_cols:
+            nan_count = players_with_xp[col].isna().sum()
+            if nan_count > 0:
+                raise ValueError(
+                    f"Data quality issue: {nan_count} players have missing {col}. "
+                    f"Fix upstream data processing - all players must have complete data."
+                )
+
+        # Filter valid players (apply exclusions)
+        valid_players = players_with_xp[
+            ~players_with_xp["player_id"].isin(must_exclude_ids)
+        ].copy()
+
+        if len(valid_players) < 15:
+            raise ValueError(
+                f"Only {len(valid_players)} players available after exclusions. "
+                f"Cannot form 15-player squad."
+            )
+
+        # Validate must-include players exist and have complete data
+        if must_include_ids:
+            must_include_players = players_with_xp[
+                players_with_xp["player_id"].isin(must_include_ids)
+            ]
+
+            if len(must_include_players) != len(must_include_ids):
+                missing_ids = must_include_ids - set(must_include_players["player_id"])
+                raise ValueError(
+                    f"Must-include player IDs not found in dataset: {missing_ids}"
+                )
+
+            # Validate position constraints
+            gkp_count, def_count, mid_count, fwd_count = formation
+            position_requirements = {
+                "GKP": gkp_count,
+                "DEF": def_count,
+                "MID": mid_count,
+                "FWD": fwd_count,
+            }
+
+            must_include_positions = (
+                must_include_players.groupby("position").size().to_dict()
+            )
+            for pos, required in position_requirements.items():
+                included_count = must_include_positions.get(pos, 0)
+                if included_count > required:
+                    raise ValueError(
+                        f"Must-include constraint violation: {included_count} {pos} players "
+                        f"required but formation only allows {required}"
+                    )
+
+            # Validate budget constraint
+            must_include_cost = must_include_players["price"].sum()
+            if must_include_cost > budget:
+                raise ValueError(
+                    f"Must-include players cost £{must_include_cost:.1f}m, "
+                    f"exceeding budget of £{budget:.1f}m"
+                )
+
+            # Validate 3-per-team constraint
+            team_counts = must_include_players["team"].value_counts()
+            violations = team_counts[team_counts > 3]
+            if not violations.empty:
+                raise ValueError(
+                    f"Must-include players violate 3-per-team rule: "
+                    f"{violations.to_dict()}"
+                )
+
+        # Run simulated annealing optimization
+        result = self._simulated_annealing_squad_generation(
+            valid_players=valid_players,
+            budget=budget,
+            formation=formation,
+            iterations=iterations,
+            must_include_ids=must_include_ids,
+            must_exclude_ids=must_exclude_ids,
+            xp_column=xp_column,
+        )
+
+        return result
+
+    def _simulated_annealing_squad_generation(
+        self,
+        valid_players: pd.DataFrame,
+        budget: float,
+        formation: Tuple[int, int, int, int],
+        iterations: int,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+    ) -> Dict[str, Any]:
+        """
+        Internal method: Simulated annealing algorithm for squad generation.
+
+        This implements the proven algorithm from season_planner.py with
+        improvements: removed debug code, proper error handling, clean structure.
+        """
+        gkp_count, def_count, mid_count, fwd_count = formation
+        position_requirements = {
+            "GKP": gkp_count,
+            "DEF": def_count,
+            "MID": mid_count,
+            "FWD": fwd_count,
+        }
+
+        def generate_random_team() -> Optional[List[Dict]]:
+            """Generate a random valid 15-player squad."""
+            team = []
+            remaining_budget = budget
+            team_counts = {}
+
+            # Start with must-include players
+            for player_id in must_include_ids:
+                player = valid_players[valid_players["player_id"] == player_id].iloc[0]
+                team_name = player["team"]
+
+                # Verify 3-per-team constraint
+                if team_counts.get(team_name, 0) >= 3:
+                    return None
+
+                team.append(player.to_dict())
+                remaining_budget -= player["price"]
+                team_counts[team_name] = team_counts.get(team_name, 0) + 1
+
+            # Get minimum costs per position for budget feasibility
+            min_costs = {}
+            for position in ["GKP", "DEF", "MID", "FWD"]:
+                pos_players = valid_players[valid_players["position"] == position]
+                if len(pos_players) == 0:
+                    return None
+                min_costs[position] = pos_players["price"].min()
+
+            # Fill each position
+            for position in ["GKP", "DEF", "MID", "FWD"]:
+                count = position_requirements[position]
+                already_have = sum(1 for p in team if p["position"] == position)
+                remaining_needed = count - already_have
+
+                for _ in range(remaining_needed):
+                    team_player_ids = {p["player_id"] for p in team}
+
+                    # Calculate budget reserve for other positions
+                    remaining_slots_cost = 0.0
+                    for other_pos in ["GKP", "DEF", "MID", "FWD"]:
+                        if other_pos == position:
+                            continue
+                        slots_needed = position_requirements[other_pos] - sum(
+                            1 for p in team if p["position"] == other_pos
+                        )
+                        remaining_slots_cost += (
+                            max(0, slots_needed) * min_costs[other_pos]
+                        )
+
+                    # Get affordable candidates respecting all constraints
+                    max_affordable_price = remaining_budget - remaining_slots_cost
+                    candidates = valid_players[
+                        (valid_players["position"] == position)
+                        & (~valid_players["player_id"].isin(team_player_ids))
+                        & (valid_players["price"] <= max_affordable_price)
+                    ].copy()
+
+                    # Apply 3-per-team constraint
+                    team_ok_mask = candidates["team"].map(
+                        lambda t: team_counts.get(t, 0) < 3
+                    )
+                    candidates = candidates[team_ok_mask]
+
+                    if len(candidates) == 0:
+                        return None
+
+                    # Prefer higher xP with randomness
+                    topk = min(8, len(candidates))
+                    candidates = candidates.nlargest(topk, xp_column)
+                    player = candidates.sample(n=1).iloc[0]
+
+                    team.append(player.to_dict())
+                    remaining_budget -= player["price"]
+                    team_counts[player["team"]] = team_counts.get(player["team"], 0) + 1
+
+            return team if len(team) == 15 else None
+
+        def calculate_team_xp(team: List[Dict]) -> float:
+            """Calculate total xP for team's best starting 11."""
+            if len(team) != 15:
+                return sum(p[xp_column] for p in team)
+
+            starting_11 = self._get_best_starting_11_from_squad(team, xp_column)
+            base_xp = sum(p[xp_column] for p in starting_11)
+
+            # Penalty for constraint violations
+            team_counts = {}
+            for player in team:
+                team_name = player["team"]
+                team_counts[team_name] = team_counts.get(team_name, 0) + 1
+
+            constraint_penalty = sum(
+                (count - 3) * -10.0 for count in team_counts.values() if count > 3
+            )
+
+            return base_xp + constraint_penalty
+
+        def calculate_team_cost(team: List[Dict]) -> float:
+            """Calculate total cost of team."""
+            return sum(p["price"] for p in team)
+
+        def is_valid_team(team: List[Dict]) -> bool:
+            """Validate team satisfies all constraints."""
+            if len(team) != 15:
+                return False
+
+            if calculate_team_cost(team) > budget:
+                return False
+
+            # Check formation
+            position_counts = {}
+            for player in team:
+                pos = player["position"]
+                position_counts[pos] = position_counts.get(pos, 0) + 1
+
+            for pos, required in position_requirements.items():
+                if position_counts.get(pos, 0) != required:
+                    return False
+
+            # Check 3-per-team
+            team_counts = {}
+            for player in team:
+                team_name = player["team"]
+                team_counts[team_name] = team_counts.get(team_name, 0) + 1
+                if team_counts[team_name] > 3:
+                    return False
+
+            return True
+
+        def swap_player(team: List[Dict]) -> Optional[List[Dict]]:
+            """Generate neighbor solution by swapping one player."""
+            new_team = [p.copy() for p in team]
+            current_cost = calculate_team_cost(new_team)
+            remaining_budget = budget - current_cost
+
+            # Get swappable players (not must-include)
+            swappable_indices = [
+                i
+                for i, p in enumerate(new_team)
+                if p["player_id"] not in must_include_ids
+            ]
+
+            if not swappable_indices:
+                return None
+
+            # Pick random player to replace
+            replace_idx = random.choice(swappable_indices)
+            old_player = new_team[replace_idx]
+            position = old_player["position"]
+
+            # Get available replacements
+            team_player_ids = {p["player_id"] for p in new_team}
+            available = valid_players[
+                (valid_players["position"] == position)
+                & (~valid_players["player_id"].isin(team_player_ids))
+                & (~valid_players["player_id"].isin(must_exclude_ids))
+            ]
+
+            if len(available) == 0:
+                return None
+
+            # Budget constraint with flexibility
+            max_new_cost = old_player["price"] + remaining_budget + 5.0
+            affordable = available[available["price"] <= max_new_cost]
+
+            if len(affordable) == 0:
+                affordable = available  # Try without budget constraint
+                if len(affordable) == 0:
+                    return None
+
+            # Prefer higher xP with weighting
+            if remaining_budget > 1.0 and len(affordable) > 1:
+                weights = affordable[xp_column] * (1 + affordable["price"] / 20)
+                min_weight = weights.min()
+                if min_weight < 0:
+                    weights = weights - min_weight + 0.1
+
+                weights_array = weights.values
+                if weights_array.sum() > 0:
+                    weights_array = weights_array / weights_array.sum()
+                    new_player = (
+                        affordable.sample(n=1, weights=weights_array).iloc[0].to_dict()
+                    )
+                else:
+                    new_player = affordable.sample(n=1).iloc[0].to_dict()
+            else:
+                new_player = affordable.sample(n=1).iloc[0].to_dict()
+
+            new_team[replace_idx] = new_player
+
+            # Validate budget
+            if calculate_team_cost(new_team) > budget:
+                return None
+
+            return new_team if is_valid_team(new_team) else None
+
+        # Generate initial team
+        current_team = None
+        for _ in range(1000):
+            current_team = generate_random_team()
+            if current_team and is_valid_team(current_team):
+                break
+
+        if not current_team:
+            raise ValueError(
+                "Could not generate valid initial team. Check data quality and constraints."
+            )
+
+        best_team = [p.copy() for p in current_team]
+        current_xp = calculate_team_xp(current_team)
+        best_xp = current_xp
+
+        # Simulated annealing loop
+        improvements = 0
+
+        for iteration in range(iterations):
+            # Linear temperature decrease
+            temperature = max(0.01, 1.0 * (1 - iteration / iterations))
+
+            # Generate neighbor
+            new_team = swap_player(current_team)
+            if new_team is None:
+                continue
+
+            new_xp = calculate_team_xp(new_team)
+            new_cost = calculate_team_cost(new_team)
+            current_cost = calculate_team_cost(current_team)
+
+            # Budget utilization bonus
+            budget_util_bonus = 0
+            if new_cost > current_cost:
+                budget_util_bonus = (new_cost - current_cost) * 0.1
+
+            delta = new_xp - current_xp + budget_util_bonus
+
+            # Accept if better or with probability
+            if delta > 0 or (
+                temperature > 0 and random.random() < math.exp(delta / temperature)
+            ):
+                current_team = new_team
+                current_xp = new_xp
+
+                if current_xp > best_xp:
+                    best_team = [p.copy() for p in current_team]
+                    best_xp = current_xp
+                    improvements += 1
+
+        # Final validation
+        if must_exclude_ids:
+            final_team_ids = {p["player_id"] for p in best_team}
+            violations = final_team_ids.intersection(must_exclude_ids)
+            if violations:
+                raise ValueError(
+                    f"Algorithm error: Excluded players found in final team: {violations}"
+                )
+
+        remaining_budget = budget - calculate_team_cost(best_team)
+
+        return {
+            "optimal_squad": best_team,
+            "remaining_budget": remaining_budget,
+            "total_xp": best_xp,
+            "iterations_improved": improvements,
+            "total_iterations": iterations,
+            "final_cost": calculate_team_cost(best_team),
+        }
+
+    def _get_best_starting_11_from_squad(
+        self, squad: List[Dict], xp_column: str = "xP"
+    ) -> List[Dict]:
+        """Get best starting 11 from 15-player squad."""
+        if len(squad) != 15:
+            return []
+
+        # Group by position
+        by_position = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
+        for player in squad:
+            by_position[player["position"]].append(player)
+
+        # Sort by xP
+        for pos in by_position:
+            by_position[pos].sort(key=lambda p: p[xp_column], reverse=True)
+
+        # Try valid formations
+        valid_formations = [
+            (1, 3, 5, 2),
+            (1, 3, 4, 3),
+            (1, 4, 5, 1),
+            (1, 4, 4, 2),
+            (1, 4, 3, 3),
+            (1, 5, 4, 1),
+            (1, 5, 3, 2),
+            (1, 5, 2, 3),
+        ]
+
+        best_11 = []
+        best_xp = 0
+
+        for gkp, def_count, mid, fwd in valid_formations:
+            if (
+                gkp <= len(by_position["GKP"])
+                and def_count <= len(by_position["DEF"])
+                and mid <= len(by_position["MID"])
+                and fwd <= len(by_position["FWD"])
+            ):
+                formation_11 = (
+                    by_position["GKP"][:gkp]
+                    + by_position["DEF"][:def_count]
+                    + by_position["MID"][:mid]
+                    + by_position["FWD"][:fwd]
+                )
+
+                formation_xp = sum(p[xp_column] for p in formation_11)
+
+                if formation_xp > best_xp:
+                    best_xp = formation_xp
+                    best_11 = formation_11
+
+        return best_11
+
+
+class InitialSquadOptimizationInput(BaseModel):
+    """Data contract for initial squad optimization inputs."""
+
+    budget: float = Field(ge=0, le=200, description="Budget in millions")
+    formation: Tuple[int, int, int, int] = Field(
+        description="Formation as (GKP, DEF, MID, FWD)"
+    )
+    iterations: int = Field(ge=100, le=50000, description="SA iterations")
+    must_include_ids: List[int] = Field(default_factory=list)
+    must_exclude_ids: List[int] = Field(default_factory=list)
+    xp_column: str = Field(default="xP")
+
+    @field_validator("formation")
+    @classmethod
+    def validate_formation(
+        cls, v: Tuple[int, int, int, int]
+    ) -> Tuple[int, int, int, int]:
+        """Validate formation sums to 15 players."""
+        if len(v) != 4:
+            raise ValueError("Formation must have 4 elements (GKP, DEF, MID, FWD)")
+        if sum(v) != 15:
+            raise ValueError(f"Formation must sum to 15 players, got {sum(v)}")
+        if v[0] < 1:  # GKP
+            raise ValueError("Formation must include at least 1 GKP")
+        if v[1] < 3:  # DEF
+            raise ValueError("Formation must include at least 3 DEF")
+        if v[2] < 2:  # MID
+            raise ValueError("Formation must include at least 2 MID")
+        if v[3] < 1:  # FWD
+            raise ValueError("Formation must include at least 1 FWD")
+        return v
+
+    @field_validator("must_include_ids", "must_exclude_ids")
+    @classmethod
+    def validate_no_overlap(cls, v: List[int], info) -> List[int]:
+        """Ensure no duplicate IDs."""
+        if len(v) != len(set(v)):
+            raise ValueError("Duplicate player IDs found in constraints")
+        return v
