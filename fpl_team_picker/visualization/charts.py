@@ -10,8 +10,129 @@ Handles all visualization functions for FPL gameweek management including:
 
 import pandas as pd
 from typing import Tuple, List, Dict, Optional
-from ..utils.helpers import get_safe_columns, create_display_dataframe
 from fpl_team_picker.config import config
+
+
+# ==================== Private Helper Functions ====================
+
+
+def _get_safe_columns(df: pd.DataFrame, preferred_columns: List[str]) -> List[str]:
+    """
+    Get columns that exist in the DataFrame - FAIL FAST if data contract is violated.
+
+    Args:
+        df: DataFrame to check columns for
+        preferred_columns: List of preferred column names
+
+    Returns:
+        List of column names that exist in the DataFrame
+
+    Raises:
+        ValueError: If critical data contract violations are detected
+    """
+    if df.empty:
+        raise ValueError("Cannot process empty DataFrame - fix data loading upstream")
+
+    available_columns = list(df.columns)
+    safe_columns = []
+    missing_columns = []
+
+    for col in preferred_columns:
+        if col in available_columns:
+            safe_columns.append(col)
+        else:
+            missing_columns.append(col)
+
+    # Report missing columns for debugging (but don't fail for optional columns)
+    if missing_columns:
+        print(f"ℹ️ Missing optional columns: {missing_columns}")
+        print(f"ℹ️ Available columns: {len(available_columns)} total")
+
+    # Only fail if we have NO matching columns (indicates major data contract violation)
+    if not safe_columns:
+        raise ValueError(
+            f"Data contract violation: No preferred columns found in DataFrame.\n"
+            f"Expected: {preferred_columns[:5]}...\n"
+            f"Available: {available_columns[:10]}...\n"
+            f"Fix data processing upstream."
+        )
+
+    return safe_columns
+
+
+def _create_display_dataframe(
+    df: pd.DataFrame,
+    core_columns: List[str],
+    optional_columns: List[str] = None,
+    sort_by: str = None,
+    ascending: bool = False,
+    round_decimals: int = 2,
+) -> pd.DataFrame:
+    """
+    Create a cleaned DataFrame for display with explicit column contracts.
+
+    FAIL FAST principle: If data contract is violated, error clearly rather than
+    silently falling back to subset of data.
+
+    Args:
+        df: Source DataFrame
+        core_columns: Essential columns that must be included
+        optional_columns: Optional columns to include if available
+        sort_by: Column to sort by (if available)
+        ascending: Sort direction
+        round_decimals: Number of decimal places for rounding
+
+    Returns:
+        Cleaned DataFrame ready for display
+
+    Raises:
+        ValueError: If critical data contract violations detected
+    """
+    if df.empty:
+        raise ValueError(
+            "Cannot create display from empty DataFrame - fix data upstream"
+        )
+
+    print(
+        f"📊 Creating display from DataFrame with {len(df.columns)} columns, {len(df)} rows"
+    )
+
+    # Get core columns (will fail fast if major contract violation)
+    display_columns = _get_safe_columns(df, core_columns)
+    print(f"📋 Core columns found: {len(display_columns)}/{len(core_columns)}")
+
+    # Add optional columns that exist
+    if optional_columns:
+        optional_found = 0
+        for col in optional_columns:
+            if col in df.columns and col not in display_columns:
+                display_columns.append(col)
+                optional_found += 1
+        print(f"📋 Optional columns found: {optional_found}/{len(optional_columns)}")
+
+    print(f"📋 Total display columns: {len(display_columns)}")
+
+    # Create display DataFrame
+    display_df = df[display_columns].copy()
+
+    # Round numeric columns
+    numeric_columns = display_df.select_dtypes(include=["number"]).columns
+    if len(numeric_columns) > 0:
+        display_df[numeric_columns] = display_df[numeric_columns].round(round_decimals)
+
+    # Sort if column is available
+    if sort_by and sort_by in display_df.columns:
+        display_df = display_df.sort_values(sort_by, ascending=ascending)
+    elif sort_by:
+        print(f"⚠️ Warning: Sort column '{sort_by}' not found in display columns")
+
+    print(
+        f"✅ Display DataFrame created: {len(display_df)} rows × {len(display_df.columns)} columns"
+    )
+    return display_df
+
+
+# ==================== Public Visualization Functions ====================
 
 
 def create_team_strength_visualization(target_gameweek: int, mo_ref) -> object:
@@ -1010,7 +1131,7 @@ def create_xp_results_display(
             display_columns.append("status")
 
         # Create safe display DataFrame
-        display_df = create_display_dataframe(
+        display_df = _create_display_dataframe(
             players_xp,
             core_columns=display_columns,
             sort_by="xP_5gw",
@@ -1162,7 +1283,7 @@ def create_form_analytics_display(players_with_xp: pd.DataFrame, mo_ref) -> obje
         insights = []
 
         if len(hot_players) > 0:
-            hot_columns = get_safe_columns(
+            hot_columns = _get_safe_columns(
                 hot_players,
                 [
                     "web_name",
@@ -1184,7 +1305,7 @@ def create_form_analytics_display(players_with_xp: pd.DataFrame, mo_ref) -> obje
             )
 
         if len(value_players) > 0:
-            value_columns = get_safe_columns(
+            value_columns = _get_safe_columns(
                 value_players,
                 ["web_name", "position", "price", "xP", "xP_per_price", "momentum"],
             )
@@ -1201,7 +1322,7 @@ def create_form_analytics_display(players_with_xp: pd.DataFrame, mo_ref) -> obje
             )
 
         if len(cold_players) > 0:
-            cold_columns = get_safe_columns(
+            cold_columns = _get_safe_columns(
                 cold_players,
                 [
                     "web_name",
@@ -1223,7 +1344,7 @@ def create_form_analytics_display(players_with_xp: pd.DataFrame, mo_ref) -> obje
             )
 
         if len(expensive_poor) > 0:
-            expensive_columns = get_safe_columns(
+            expensive_columns = _get_safe_columns(
                 expensive_poor,
                 [
                     "web_name",
@@ -1372,7 +1493,7 @@ def create_squad_form_analysis(
 
                 # Show top performers if any
                 if not top_performers.empty:
-                    top_columns = get_safe_columns(
+                    top_columns = _get_safe_columns(
                         top_performers,
                         [
                             "web_name",
@@ -1391,7 +1512,7 @@ def create_squad_form_analysis(
 
                 # Show problem players if any
                 if not problem_players.empty:
-                    problem_columns = get_safe_columns(
+                    problem_columns = _get_safe_columns(
                         problem_players,
                         [
                             "web_name",

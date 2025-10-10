@@ -470,12 +470,19 @@ fpl_team_picker/
 - ✅ All business logic now in `domain/services/` (no standalone modules)
 - ✅ ~115 LOC reduction through deduplication
 
-### **Phase 3: Cleanup**
-  - [ ] Audit and migrate `utils/helpers.py`
+### **Phase 3: Cleanup** ✅ COMPLETE (2025-10-10)
+  - [x] Audit and migrate `utils/helpers.py` to visualization layer
+  - [x] Move `_get_safe_columns()` and `_create_display_dataframe()` as private helpers in charts.py
   - [x] Delete `core/` directory (completed in Phase 1)
   - [x] Delete standalone `optimization/` directory (completed in Phase 2B)
-  - [ ] Delete `utils/` directory (if empty)
-  - [x] Update CLAUDE.md documentation (Phases 1, 2, 2B complete)
+  - [x] Delete `utils/` directory entirely
+  - [x] Update CLAUDE.md documentation (Phases 1, 2, 2B, 3 complete)
+
+**Benefits Achieved:**
+- ✅ Eliminated catch-all utils module anti-pattern
+- ✅ Display formatting helpers co-located with visualization code
+- ✅ All code now in appropriate architectural layers
+- ✅ Clean package structure (domain/ → adapters/ → visualization/ → interfaces/)
 
 ### **Phase 4: Interface Migration** (Optional)
   - [ ] Migrate remaining interfaces to domain services (if beneficial)

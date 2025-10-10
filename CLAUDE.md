@@ -41,13 +41,11 @@ fpl-team-picker/
 │   ├── adapters/             # Infrastructure implementations
 │   │   └── database_repositories.py   # Database repository implementations
 │   ├── visualization/        # Charts and visual components
-│   │   └── charts.py         # Plotly-based interactive visualizations
-│   ├── interfaces/           # User interfaces (Frontend adapters)
-│   │   ├── season_planner.py # Season-start team building interface (2257 lines)
-│   │   ├── gameweek_manager.py # Weekly gameweek management interface (969 lines - clean)
-│   │   └── ml_xp_experiment.py # ML expected points model development (2947 lines)
-│   └── utils/                # Utility functions
-│       └── helpers.py        # Common helper functions
+│   │   └── charts.py         # Plotly-based interactive visualizations (with display helpers)
+│   └── interfaces/           # User interfaces (Frontend adapters)
+│       ├── season_planner.py # Season-start team building interface (2257 lines)
+│       ├── gameweek_manager.py # Weekly gameweek management interface (969 lines - clean)
+│       └── ml_xp_experiment.py # ML expected points model development (2947 lines)
 ├── tests/                    # Comprehensive testing suite
 │   ├── domain/               # Domain layer tests
 │   │   ├── models/           # Domain model tests
