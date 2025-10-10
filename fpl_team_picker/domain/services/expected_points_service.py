@@ -34,9 +34,14 @@ class ExpectedPointsService:
         from fpl_team_picker.config import config as xp_config
 
         # XP Model parameters (for rule-based model)
-        self.form_weight = xp_config.xp_model.form_weight
-        self.form_window = xp_config.xp_model.form_window
-        self.debug = xp_config.xp_model.debug
+        # Override with custom config if provided (for algorithm experiments)
+        self.form_weight = self.config.get(
+            "form_weight", xp_config.xp_model.form_weight
+        )
+        self.form_window = self.config.get(
+            "form_window", xp_config.xp_model.form_window
+        )
+        self.debug = self.config.get("debug", xp_config.xp_model.debug)
 
         # Model component caches
         self._team_strength_cache = {}

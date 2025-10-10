@@ -68,6 +68,50 @@ ALGORITHM_VERSIONS: Dict[str, AlgorithmVersion] = {
         form_window=5,
         use_team_strength=True,
     ),
+    # Form weight experiment: isolate form_weight effect (keeping window=5)
+    "form_weight_0.3": AlgorithmVersion(
+        name="form_weight_0.3",
+        form_weight=0.3,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.4": AlgorithmVersion(
+        name="form_weight_0.4",
+        form_weight=0.4,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.5": AlgorithmVersion(
+        name="form_weight_0.5",
+        form_weight=0.5,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.6": AlgorithmVersion(
+        name="form_weight_0.6",
+        form_weight=0.6,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.7": AlgorithmVersion(
+        name="form_weight_0.7",
+        form_weight=0.7,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.8": AlgorithmVersion(
+        name="form_weight_0.8",
+        form_weight=0.8,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    "form_weight_0.9": AlgorithmVersion(
+        name="form_weight_0.9",
+        form_weight=0.9,
+        form_window=5,
+        use_team_strength=True,
+    ),
+    # Legacy experimental versions
     "experimental_high_form": AlgorithmVersion(
         name="experimental_high_form",
         form_weight=0.9,
@@ -537,6 +581,7 @@ class PerformanceAnalyticsService:
             "team_strength_params": algo_config.team_strength_params,
             "minutes_model_params": algo_config.minutes_model_params,
             "statistical_estimation_params": algo_config.statistical_estimation_params,
+            "debug": False,  # Disable debug output for batch recomputation
         }
 
         xp_service = ExpectedPointsService(config=algo_params)
