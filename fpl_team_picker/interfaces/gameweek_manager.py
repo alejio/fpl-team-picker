@@ -783,9 +783,7 @@ def _(
         resolve_team_names_pydantic,
         DataContractError as _DataContractError2,
     )
-    from fpl_team_picker.domain.services.transfer_optimization_service import (
-        TransferOptimizationService as _TransferOptimizationService,
-    )
+    from fpl_team_picker.domain.services import OptimizationService
     import pandas as _pd
 
     optimal_starting_11 = []
@@ -797,11 +795,6 @@ def _(
             _teams2 = gameweek_data.get("teams")
 
             if current_squad is not None and not current_squad.empty:
-                from fpl_team_picker.domain.services import (
-                    TransferOptimizationService as _TransferOptimizationService,
-                )
-                import pandas as _pd
-
                 must_include_ids = (
                     set(must_include_dropdown.value)
                     if must_include_dropdown.value
@@ -813,44 +806,29 @@ def _(
                     else set()
                 )
 
-                # Determine optimization horizon without mutating global config
-                selected_horizon = (
-                    optimization_horizon_toggle.value
-                    if optimization_horizon_toggle.value
-                    else "5gw"
-                )
-
                 # Use domain service for optimization
-                _transfer_service = _TransferOptimizationService()
+                # Note: Optimization horizon is controlled via config.optimization.optimization_horizon
+                _optimization_service = OptimizationService()
 
                 try:
-                    optimization_result = _transfer_service.optimize_transfers(
-                        players_with_xp=players_with_xp,
-                        current_squad=current_squad,
-                        team_data=team_data,
-                        teams=_teams2,
-                        optimization_horizon=selected_horizon,
-                        must_include_ids=must_include_ids,
-                        must_exclude_ids=must_exclude_ids,
+                    optimization_display, optimal_squad_df, best_scenario = (
+                        _optimization_service.optimize_transfers(
+                            players_with_xp=players_with_xp,
+                            current_squad=current_squad,
+                            team_data=team_data,
+                            must_include_ids=must_include_ids,
+                            must_exclude_ids=must_exclude_ids,
+                        )
                     )
-
-                    # Extract results from domain service
-                    optimization_display = optimization_result.get("display_component")
-                    optimal_squad_df = optimization_result.get("optimal_squad")
 
                     # Generate starting 11 using domain service
                     if optimal_squad_df is not None and not optimal_squad_df.empty:
-                        optimal_starting_11 = (
-                            _transfer_service.get_starting_eleven_from_squad(
+                        starting_11_list, _formation, xp_total = (
+                            _optimization_service.find_optimal_starting_11(
                                 optimal_squad_df
                             )
                         )
-                        _formation = "4-4-2"  # Default formation from domain service
-                        xp_total = (
-                            sum(p.get("xP", 0) for p in optimal_starting_11)
-                            if optimal_starting_11
-                            else 0
-                        )
+                        optimal_starting_11 = starting_11_list
 
                         if optimal_starting_11:
                             _starting_11_df = _pd.DataFrame(optimal_starting_11)

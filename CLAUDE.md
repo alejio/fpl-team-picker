@@ -169,20 +169,42 @@ strength_ratings = analytics_service.get_team_strength(
 # Returns: Dict[team_name, strength_rating] with GW8+ current season focus
 ```
 
-**Transfer Optimization Service** (`transfer_optimization_service.py`)
+**Optimization Service** (`optimization_service.py`)
 ```python
-from fpl_team_picker.domain.services import TransferOptimizationService
+from fpl_team_picker.domain.services import OptimizationService
 
-# Smart transfer scenarios - 0-3 transfers with constraint support
-transfer_service = TransferOptimizationService()
-optimization_results = transfer_service.optimize_transfers(
-    players_with_xp=players_with_xp,
+# Comprehensive optimization service - all FPL optimization algorithms
+optimization_service = OptimizationService()
+
+# Transfer optimization: 0-3 transfer scenarios with constraint support
+display, optimal_squad, best_scenario = optimization_service.optimize_transfers(
     current_squad=current_squad,
     team_data=team_data,
+    players_with_xp=players_with_xp,
     must_include_ids={player_id_1, player_id_2},
     must_exclude_ids={player_id_3}
 )
-# Returns: Multiple transfer scenarios with net XP analysis
+
+# Starting XI selection
+starting_11, formation, total_xp = optimization_service.find_optimal_starting_11(squad_df)
+
+# Captain recommendation
+captain_data = optimization_service.get_captain_recommendation(players_df, top_n=5)
+
+# Initial squad generation (simulated annealing)
+result = optimization_service.optimize_initial_squad(
+    players_with_xp=players_df,
+    budget=100.0,
+    formation=(2, 5, 5, 3),
+    iterations=5000
+)
+
+# Constraint validation
+validation = optimization_service.validate_optimization_constraints(
+    must_include_ids={1, 2, 3},
+    must_exclude_ids={4, 5, 6}
+)
+# Returns: All FPL optimization operations with clean data contracts
 ```
 
 **Chip Assessment Service** (`chip_assessment_service.py`)
@@ -221,18 +243,6 @@ fixture_analysis = create_fixture_difficulty_visualization(
     target_gameweek=10, gameweeks_ahead=5, mo
 )
 # Returns: Interactive Marimo fixture difficulty display
-```
-
-**Squad Management Service** (`squad_management_service.py`)
-```python
-from fpl_team_picker.domain.services import SquadManagementService
-
-# Squad analysis and lineup optimization
-squad_service = SquadManagementService()
-lineup_analysis = squad_service.analyze_squad_composition(
-    current_squad, players_with_xp
-)
-# Returns: Squad balance, formation flexibility, value distribution
 ```
 
 **Player Analytics Service** (`player_analytics_service.py`)
@@ -324,21 +334,25 @@ Key configuration sections:
 
 ### 3. Optimization Service (`fpl_team_picker/domain/services/optimization_service.py`)
 
-**Core FPL optimization algorithms** - 1,074 lines of pure algorithmic logic:
+**Consolidated FPL optimization service** - All optimization algorithms in one place:
 
-**OptimizationService - FPL constraint satisfaction and algorithmic optimization:**
-- `optimize_transfers()` - Comprehensive 0-3 transfer scenario analysis (core algorithm)
+**OptimizationService - Complete FPL optimization solution:**
+- `optimize_transfers()` - Comprehensive 0-3 transfer scenario analysis with constraints
 - `find_optimal_starting_11()` - Formation enumeration and XP maximization
 - `find_bench_players()` - Bench ordering by expected points
 - `calculate_budget_pool()` - Advanced budget analysis including sellable player values
 - `plan_premium_acquisition()` - Multi-transfer scenarios for expensive targets
-- `get_captain_recommendation()` - Risk-adjusted captaincy recommendations (returns structured data)
+- `get_captain_recommendation()` - Risk-adjusted captaincy recommendations
+- `optimize_initial_squad()` - Simulated annealing for initial 15-player squad generation
+- `get_optimal_team_from_database()` - Build theoretically best XI from all players
+- `validate_optimization_constraints()` - Constraint conflict detection
 
-**Architecture:** OptimizationService is a **leaf domain service** used by:
-- `TransferOptimizationService` - Orchestrates transfer workflows
-- `SquadManagementService` - Orchestrates squad analysis workflows
+**Architecture:** OptimizationService is the **single source of truth** for all FPL optimization operations.
+- Used directly by interfaces (gameweek_manager.py) and other domain services
+- All FPL business rules (formations, constraints, budget calculations) centralized
+- Clean data contracts with Pydantic validation
 
-**Key Design:** All FPL business rules (formations, constraints, budget calculations) are centralized in OptimizationService, eliminating duplication and ensuring single source of truth.
+**Key Design:** Eliminates duplication by consolidating all optimization logic in one service, ensuring consistency and maintainability.
 
 ### 4. Visualization Suite (`fpl_team_picker/visualization/`)
 
@@ -397,10 +411,10 @@ def _(gameweek_data, mo):
 **Key Features:**
 - **Data Loading**: Uses `DataOrchestrationService` for boundary validation
 - **Expected Points**: Orchestrates `ExpectedPointsService` (ML + rule-based models)
-- **Transfer Optimization**: Uses `TransferOptimizationService` with 0-3 transfer scenarios
+- **Transfer Optimization**: Uses `OptimizationService` with 0-3 transfer scenarios and constraint support
 - **Form Analytics**: Leverages `PerformanceAnalyticsService` for hot/cold analysis
 - **Chip Assessment**: Integrates `ChipAssessmentService` with traffic light recommendations
-- **Captain Selection**: Risk-adjusted recommendations via optimization results
+- **Captain Selection**: Risk-adjusted recommendations via `OptimizationService`
 - **Fixture Analysis**: Uses `create_fixture_difficulty_visualization()` for difficulty heatmaps
 - **Player Analytics**: Uses `PlayerAnalyticsService` for type-safe player operations with 70+ validated attributes
 

@@ -133,7 +133,7 @@ class TestMarimoCompatibility:
                 "fpl_team_picker.domain.services.expected_points_service",
                 "ExpectedPointsService",
             ),
-            ("fpl_team_picker.optimization.optimizer", "optimize_team_with_transfers"),
+            ("fpl_team_picker.domain.services", "OptimizationService"),
             ("fpl_team_picker.visualization.charts", "create_xp_results_display"),
         ]
 

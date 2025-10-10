@@ -1563,6 +1563,83 @@ class OptimizationService:
 
         return best_11
 
+    def get_optimal_team_from_database(
+        self, players_with_xp: pd.DataFrame
+    ) -> List[Dict[str, Any]]:
+        """Build optimal 11-player team from full player database.
+
+        For analysis and testing purposes - builds theoretically best team
+        without squad constraints.
+
+        Args:
+            players_with_xp: DataFrame with all available players
+
+        Returns:
+            Optimal starting eleven
+        """
+        available_players = players_with_xp[
+            ~players_with_xp["status"].isin(["i", "s", "u"])
+        ].copy()
+        return self._select_optimal_team_from_all_players(available_players)
+
+    def validate_optimization_constraints(
+        self,
+        must_include_ids: Optional[Set[int]] = None,
+        must_exclude_ids: Optional[Set[int]] = None,
+        budget_limit: float = 100.0,
+    ) -> Dict[str, Any]:
+        """Validate optimization constraints for conflicts.
+
+        Args:
+            must_include_ids: Player IDs that must be included
+            must_exclude_ids: Player IDs that must be excluded
+            budget_limit: Budget limit in millions
+
+        Returns:
+            Validation result with conflicts detected
+        """
+        must_include_ids = must_include_ids or set()
+        must_exclude_ids = must_exclude_ids or set()
+
+        conflicts = must_include_ids.intersection(must_exclude_ids)
+
+        return {
+            "valid": len(conflicts) == 0,
+            "conflicts": list(conflicts),
+            "must_include_count": len(must_include_ids),
+            "must_exclude_count": len(must_exclude_ids),
+            "budget_limit": budget_limit,
+        }
+
+    def _select_optimal_team_from_all_players(
+        self, players: pd.DataFrame
+    ) -> List[Dict[str, Any]]:
+        """Select optimal starting 11 from full player database.
+
+        Args:
+            players: DataFrame of available players
+
+        Returns:
+            List of 11 player dicts forming optimal starting team
+        """
+        players_sorted = players.sort_values("xP", ascending=False)
+
+        by_position = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
+        for _, player in players_sorted.iterrows():
+            position = player["position"]
+            if position in by_position:
+                by_position[position].append(player.to_dict())
+
+        # Formation: 1 GKP, 4 DEF, 4 MID, 2 FWD
+        formation = {"GKP": 1, "DEF": 4, "MID": 4, "FWD": 2}
+
+        starting_11 = []
+        for position, needed in formation.items():
+            available = by_position[position][:needed]
+            starting_11.extend(available)
+
+        return starting_11
+
 
 class InitialSquadOptimizationInput(BaseModel):
     """Data contract for initial squad optimization inputs."""
