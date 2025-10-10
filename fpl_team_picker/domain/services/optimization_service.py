@@ -230,37 +230,55 @@ class OptimizationService:
 
         return bench_players[:4]  # Maximum 4 bench players
 
-    def select_captain_candidate(self, starting_11: List[Dict], mo_ref=None) -> object:
-        """Select captain from starting 11 based on current gameweek XP and risk factors.
+    def get_captain_recommendation(
+        self, players: pd.DataFrame, top_n: int = 5, xp_column: str = "xP"
+    ) -> Dict[str, Any]:
+        """Get captain recommendation with risk-adjusted analysis.
+
+        Returns structured data only - no UI generation.
 
         Args:
-            starting_11: List of starting 11 player dictionaries
-            mo_ref: Marimo reference for UI components
+            players: DataFrame of players to consider (squad or all players)
+            top_n: Number of top candidates to analyze (default 5)
+            xp_column: Column to use for xP (default "xP")
 
         Returns:
-            Marimo UI component with captain recommendations
+            {
+                "captain": {dict with recommended captain},
+                "vice_captain": {dict with vice captain},
+                "top_candidates": [list of top 5 candidates with analysis],
+                "captain_upside": float (xP * 2),
+                "differential": float (captain vs vice diff)
+            }
         """
-        import pandas as pd
+        if players.empty:
+            raise ValueError("No players provided for captain selection")
 
-        if not starting_11:
-            return (
-                mo_ref.md("⚠️ **No starting 11 available for captain selection**")
-                if mo_ref
-                else None
-            )
+        # Ensure required columns exist
+        required_cols = ["web_name", "position", xp_column]
+        missing_cols = [col for col in required_cols if col not in players.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
 
-        # Sort by 1-GW XP (immediate gameweek captain choice)
+        # Convert to list of dicts for easier processing
+        players_list = players.to_dict("records")
+
+        # Sort by XP (immediate gameweek captain choice)
         captain_candidates = sorted(
-            starting_11, key=lambda p: p.get("xP", 0), reverse=True
+            players_list, key=lambda p: p.get(xp_column, 0), reverse=True
         )
 
-        captain_analysis = []
+        if not captain_candidates:
+            raise ValueError("No valid captain candidates found")
 
-        for i, player in enumerate(captain_candidates[:5]):  # Top 5 candidates
-            xp_1gw = player.get("xP", 0)
+        # Analyze top N candidates
+        top_candidates = []
+
+        for i, player in enumerate(captain_candidates[:top_n]):
+            xp_value = player.get(xp_column, 0)
             fixture_outlook = player.get("fixture_outlook", "🟡 Average")
 
-            # Enhanced risk assessment for immediate gameweek
+            # Enhanced risk assessment
             risk_factors = []
             risk_level = "🟢 Low"
 
@@ -291,67 +309,43 @@ class OptimizationService:
                 risk_desc = risk_level
 
             # Calculate captaincy potential (XP * 2 for double points)
-            captain_potential = xp_1gw * 2
+            captain_potential = xp_value * 2
 
-            captain_analysis.append(
+            top_candidates.append(
                 {
-                    "Rank": i + 1,
-                    "Player": player["web_name"],
-                    "Position": player["position"],
-                    "Price": f"£{player['price']:.1f}m",
-                    "GW XP": f"{xp_1gw:.2f}",
-                    "Captain Pts": f"{captain_potential:.1f}",
-                    "Minutes": f"{expected_mins:.0f}",
-                    "Fixture": fixture_outlook.replace("🟢 Easy", "🟢")
-                    .replace("🟡 Average", "🟡")
-                    .replace("🔴 Hard", "🔴"),
-                    "Risk": risk_desc,
-                    "Recommendation": "👑 Captain"
-                    if i == 0
-                    else "(VC)"
-                    if i == 1
-                    else "",
+                    "rank": i + 1,
+                    "player_id": player.get("player_id"),
+                    "web_name": player["web_name"],
+                    "position": player["position"],
+                    "price": player.get("price", 0),
+                    "xP": xp_value,
+                    "captain_points": captain_potential,
+                    "expected_minutes": expected_mins,
+                    "fixture_outlook": fixture_outlook,
+                    "risk_level": risk_level,
+                    "risk_factors": risk_factors,
+                    "risk_description": risk_desc,
+                    "status": player.get("status", "a"),
                 }
             )
 
-        captain_df = pd.DataFrame(captain_analysis)
+        # Select captain and vice captain
+        captain = top_candidates[0]
+        vice_captain = top_candidates[1] if len(top_candidates) > 1 else captain
 
-        captain_pick = captain_candidates[0]
-        vice_pick = (
-            captain_candidates[1]
-            if len(captain_candidates) > 1
-            else captain_candidates[0]
-        )
-
-        # Calculate captaincy upside
-        captain_upside = captain_pick.get("xP", 0) * 2
-        vice_upside = vice_pick.get("xP", 0) * 2
+        # Calculate captaincy metrics
+        captain_upside = captain["captain_points"]
+        vice_upside = vice_captain["captain_points"]
         differential = captain_upside - vice_upside
 
-        summary = f"""
-### 👑 Captain Selection (Current Gameweek Focus)
-
-**Recommended Captain:** {captain_pick["web_name"]} ({captain_pick["position"]})
-- **Expected Points:** {captain_pick.get("xP", 0):.2f} → **{captain_upside:.1f} as captain**
-- **Minutes:** {captain_pick.get("expected_minutes", 0):.0f}' expected
-- **Fixture:** {captain_pick.get("fixture_outlook", "Unknown")}
-
-**Vice Captain:** {vice_pick["web_name"]} ({vice_pick["position"]})
-- **Expected Points:** {vice_pick.get("xP", 0):.2f} → **{vice_upside:.1f} as captain**
-
-**Captain Advantage:** +{differential:.1f} points over vice captain
-
-**Current Gameweek Analysis:**
-*Captain selection optimized for immediate fixture only - can be changed weekly*
-"""
-
-        return (
-            mo_ref.vstack(
-                [mo_ref.md(summary), mo_ref.ui.table(captain_df, page_size=5)]
-            )
-            if mo_ref
-            else captain_df
-        )
+        return {
+            "captain": captain,
+            "vice_captain": vice_captain,
+            "top_candidates": top_candidates,
+            "captain_upside": captain_upside,
+            "vice_upside": vice_upside,
+            "differential": differential,
+        }
 
     def plan_premium_acquisition(
         self,

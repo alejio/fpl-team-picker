@@ -107,66 +107,21 @@ class TransferOptimizationService:
         # Get the best players by position for a balanced team
         return self._select_optimal_team_from_all_players(available_players)
 
-    def get_captain_recommendation_from_squad(
-        self,
-        current_squad: pd.DataFrame,
+    def get_captain_recommendation(
+        self, players: pd.DataFrame, top_n: int = 5
     ) -> Dict[str, Any]:
-        """Get captain recommendation from a 15-player squad.
+        """Get captain recommendation with risk-adjusted analysis.
+
+        Delegates to OptimizationService for captain recommendation logic.
 
         Args:
-            current_squad: DataFrame containing exactly 15 players - guaranteed clean
+            players: DataFrame of players to consider (squad or all players)
+            top_n: Number of top candidates to analyze (default 5)
 
         Returns:
-            Captain recommendation
+            Captain recommendation data structure
         """
-        # Convert DataFrame to list for captain selection
-        candidate_list = current_squad.to_dict("records")
-
-        # Get the best captain based on xP
-        best_captain = max(candidate_list, key=lambda p: p.get("xP", 0))
-        return {
-            "player_id": best_captain["player_id"],
-            "web_name": best_captain["web_name"],
-            "position": best_captain["position"],
-            "xP": best_captain.get("xP", 0),
-            "reason": "Highest expected points in squad",
-        }
-
-    def get_captain_recommendation_from_database(
-        self,
-        players_with_xp: pd.DataFrame,
-        top_n: int = 20,
-    ) -> Dict[str, Any]:
-        """Get captain recommendation from the full player database.
-
-        This method is designed for analysis purposes where you want to find
-        the best captain from all available players.
-
-        Args:
-            players_with_xp: DataFrame containing all available players - guaranteed clean
-            top_n: Number of top players to consider for captain selection
-
-        Returns:
-            Captain recommendation
-        """
-        # Filter out unavailable players and get top candidates
-        available_players = players_with_xp[
-            ~players_with_xp["status"].isin(["i", "s", "u"])
-        ].copy()
-
-        # Get top players by xP
-        top_candidates = available_players.nlargest(top_n, "xP")
-        candidate_list = top_candidates.to_dict("records")
-
-        # Get the best captain based on xP
-        best_captain = candidate_list[0]  # Already sorted by xP descending
-        return {
-            "player_id": best_captain["player_id"],
-            "web_name": best_captain["web_name"],
-            "position": best_captain["position"],
-            "xP": best_captain.get("xP", 0),
-            "reason": f"Highest expected points among all {len(available_players)} available players",
-        }
+        return self.optimization_service.get_captain_recommendation(players, top_n)
 
     def analyze_budget_situation(
         self, current_squad: pd.DataFrame, team_data: Dict[str, Any]

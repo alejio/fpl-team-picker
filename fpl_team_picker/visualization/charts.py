@@ -2043,3 +2043,75 @@ def create_algorithm_comparison_visualization(
 
     except Exception as e:
         return mo_ref.md(f"❌ Error creating algorithm comparison: {e}")
+
+
+def create_captain_selection_display(captain_data: Dict, mo_ref) -> object:
+    """Create marimo UI component for captain selection display.
+
+    Args:
+        captain_data: Captain recommendation dict from OptimizationService.get_captain_recommendation()
+        mo_ref: Marimo reference
+
+    Returns:
+        Marimo UI component with captain selection analysis
+    """
+    try:
+        # Extract data from captain_data
+        captain = captain_data["captain"]
+        vice = captain_data["vice_captain"]
+        candidates = captain_data["top_candidates"]
+        captain_upside = captain_data["captain_upside"]
+        vice_upside = captain_data.get("vice_upside", vice["captain_points"])
+        differential = captain_data["differential"]
+
+        # Build summary markdown
+        summary = f"""
+### 👑 Captain Selection (Current Gameweek Focus)
+
+**Recommended Captain:** {captain["web_name"]} ({captain["position"]})
+- **Expected Points:** {captain["xP"]:.2f} → **{captain_upside:.1f} as captain**
+- **Minutes:** {captain["expected_minutes"]:.0f}' expected
+- **Fixture:** {captain["fixture_outlook"]}
+
+**Vice Captain:** {vice["web_name"]} ({vice["position"]})
+- **Expected Points:** {vice["xP"]:.2f} → **{vice_upside:.1f} as captain**
+
+**Captain Advantage:** +{differential:.1f} points over vice captain
+
+**Current Gameweek Analysis:**
+*Captain selection optimized for immediate fixture only - can be changed weekly*
+"""
+
+        # Build candidates table
+        candidates_display = []
+        for candidate in candidates:
+            candidates_display.append(
+                {
+                    "Rank": candidate["rank"],
+                    "Player": candidate["web_name"],
+                    "Position": candidate["position"],
+                    "Price": f"£{candidate['price']:.1f}m",
+                    "GW XP": f"{candidate['xP']:.2f}",
+                    "Captain Pts": f"{candidate['captain_points']:.1f}",
+                    "Minutes": f"{candidate['expected_minutes']:.0f}",
+                    "Fixture": candidate["fixture_outlook"]
+                    .replace("🟢 Easy", "🟢")
+                    .replace("🟡 Average", "🟡")
+                    .replace("🔴 Hard", "🔴"),
+                    "Risk": candidate["risk_description"],
+                    "Recommendation": "👑 Captain"
+                    if candidate["rank"] == 1
+                    else "(VC)"
+                    if candidate["rank"] == 2
+                    else "",
+                }
+            )
+
+        candidates_df = pd.DataFrame(candidates_display)
+
+        return mo_ref.vstack(
+            [mo_ref.md(summary), mo_ref.ui.table(candidates_df, page_size=5)]
+        )
+
+    except Exception as e:
+        return mo_ref.md(f"❌ Error creating captain selection display: {e}")

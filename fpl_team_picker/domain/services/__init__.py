@@ -4,21 +4,25 @@ try:
     from .data_orchestration_service import DataOrchestrationService
     from .expected_points_service import ExpectedPointsService
     from .ml_expected_points_service import MLExpectedPointsService
+    from .optimization_service import OptimizationService
     from .transfer_optimization_service import TransferOptimizationService
     from .squad_management_service import SquadManagementService
     from .chip_assessment_service import ChipAssessmentService
     from .performance_analytics_service import PerformanceAnalyticsService
     from .player_analytics_service import PlayerAnalyticsService
+    from .team_analytics_service import TeamAnalyticsService
 
     __all__ = [
         "DataOrchestrationService",
         "ExpectedPointsService",
         "MLExpectedPointsService",
+        "OptimizationService",
         "TransferOptimizationService",
         "SquadManagementService",
         "ChipAssessmentService",
         "PerformanceAnalyticsService",
         "PlayerAnalyticsService",
+        "TeamAnalyticsService",
     ]
 except ImportError:
     # Handle import errors gracefully during development

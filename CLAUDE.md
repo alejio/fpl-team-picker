@@ -332,7 +332,7 @@ Key configuration sections:
 - `find_bench_players()` - Bench ordering by expected points
 - `calculate_budget_pool()` - Advanced budget analysis including sellable player values
 - `plan_premium_acquisition()` - Multi-transfer scenarios for expensive targets
-- `select_captain_candidate()` - Risk-adjusted captaincy recommendations
+- `get_captain_recommendation()` - Risk-adjusted captaincy recommendations (returns structured data)
 
 **Architecture:** OptimizationService is a **leaf domain service** used by:
 - `TransferOptimizationService` - Orchestrates transfer workflows

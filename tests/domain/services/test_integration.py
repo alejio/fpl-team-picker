@@ -111,14 +111,14 @@ class TestDomainServicesIntegration:
         assert len(starting_11) == 11
 
         # Test captain recommendation from full database (for testing/analysis)
-        captain_recommendation = (
-            transfer_service.get_captain_recommendation_from_database(players_with_xp)
+        captain_data = transfer_service.get_captain_recommendation(
+            players_with_xp, top_n=5
         )
-        assert isinstance(captain_recommendation, dict)
-        assert (
-            "player_id" in captain_recommendation
-            or "web_name" in captain_recommendation
-        )
+        assert isinstance(captain_data, dict)
+        assert "captain" in captain_data
+        assert "vice_captain" in captain_data
+        assert "top_candidates" in captain_data
+        assert captain_data["captain"]["web_name"]  # Has a name
 
     def test_service_error_handling(self, data_service, xp_service):
         """Test that services handle errors gracefully."""

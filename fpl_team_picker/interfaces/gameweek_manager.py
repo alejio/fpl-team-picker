@@ -1008,32 +1008,21 @@ def _(mo, optimal_starting_11):
     # Captain Selection using domain service - clean architecture
     if isinstance(optimal_starting_11, list) and len(optimal_starting_11) > 0:
         from fpl_team_picker.domain.services import (
-            TransferOptimizationService as _TransferOptimizationServiceCaptain,
+            OptimizationService as _OptimizationServiceCaptain,
+        )
+        from fpl_team_picker.visualization.charts import (
+            create_captain_selection_display as _create_captain_display,
         )
         import pandas as _pd
 
-        _captain_service = _TransferOptimizationServiceCaptain()
+        _captain_service = _OptimizationServiceCaptain()
         squad_df = _pd.DataFrame(optimal_starting_11)
 
-        captain_recommendation = _captain_service.get_captain_recommendation_from_squad(
-            squad_df
-        )
+        # Get captain recommendation data (domain logic)
+        captain_data = _captain_service.get_captain_recommendation(squad_df, top_n=5)
 
-        captain_display = mo.vstack(
-            [
-                mo.md(
-                    "**Risk-adjusted captaincy recommendations based on expected points analysis.**"
-                ),
-                mo.md("---"),
-                mo.md(f"""
-    ### 🏆 **Recommended Captain**
-
-    **{captain_recommendation["web_name"]}** ({captain_recommendation["position"]})
-    - **Expected Points:** {captain_recommendation["xP"]:.2f}
-    - **Reasoning:** {captain_recommendation["reason"]}
-    """),
-            ]
-        )
+        # Create UI display (visualization layer)
+        captain_display = _create_captain_display(captain_data, mo)
     else:
         captain_display = mo.md("""
     **Please run transfer optimization first to enable captain selection.**
