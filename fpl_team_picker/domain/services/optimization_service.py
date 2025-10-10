@@ -40,6 +40,83 @@ class OptimizationService:
         else:  # "5gw"
             return "xP_5gw"
 
+    def _count_players_per_team(self, team: List[Dict]) -> Dict[str, int]:
+        """Count players per team.
+
+        Args:
+            team: List of player dictionaries with 'team' field
+
+        Returns:
+            Dictionary mapping team names to player counts
+        """
+        team_counts = {}
+        for player in team:
+            team_name = player["team"]
+            team_counts[team_name] = team_counts.get(team_name, 0) + 1
+        return team_counts
+
+    def _enumerate_formations_for_players(
+        self, by_position: Dict[str, List[Dict]], xp_column: str = "xP"
+    ) -> Tuple[List[Dict], str, float]:
+        """Core formation enumeration logic.
+
+        Evaluates all valid FPL formations and returns the one with highest XP.
+
+        Args:
+            by_position: Players grouped by position (GKP, DEF, MID, FWD)
+            xp_column: Column name for XP values
+
+        Returns:
+            Tuple of (best_11_players, formation_name, total_xp)
+        """
+        formations = [
+            (1, 3, 5, 2),
+            (1, 3, 4, 3),
+            (1, 4, 5, 1),
+            (1, 4, 4, 2),
+            (1, 4, 3, 3),
+            (1, 5, 4, 1),
+            (1, 5, 3, 2),
+            (1, 5, 2, 3),
+        ]
+        formation_names = {
+            "(1, 3, 5, 2)": "3-5-2",
+            "(1, 3, 4, 3)": "3-4-3",
+            "(1, 4, 5, 1)": "4-5-1",
+            "(1, 4, 4, 2)": "4-4-2",
+            "(1, 4, 3, 3)": "4-3-3",
+            "(1, 5, 4, 1)": "5-4-1",
+            "(1, 5, 3, 2)": "5-3-2",
+            "(1, 5, 2, 3)": "5-2-3",
+        }
+
+        best_11, best_xp, best_formation = [], 0, ""
+
+        for gkp, def_count, mid, fwd in formations:
+            if (
+                gkp <= len(by_position["GKP"])
+                and def_count <= len(by_position["DEF"])
+                and mid <= len(by_position["MID"])
+                and fwd <= len(by_position["FWD"])
+            ):
+                formation_11 = (
+                    by_position["GKP"][:gkp]
+                    + by_position["DEF"][:def_count]
+                    + by_position["MID"][:mid]
+                    + by_position["FWD"][:fwd]
+                )
+                formation_xp = sum(p.get(xp_column, 0) for p in formation_11)
+
+                if formation_xp > best_xp:
+                    best_xp = formation_xp
+                    best_11 = formation_11
+                    best_formation = formation_names.get(
+                        str((gkp, def_count, mid, fwd)),
+                        f"{gkp}-{def_count}-{mid}-{fwd}",
+                    )
+
+        return best_11, best_formation, best_xp
+
     def calculate_budget_pool(
         self,
         current_squad: pd.DataFrame,
@@ -143,56 +220,8 @@ class OptimizationService:
                 key=lambda p: p.get(sort_col, p.get("xP", 0)), reverse=True
             )
 
-        # Try formations and pick best
-        formations = [
-            (1, 3, 5, 2),
-            (1, 3, 4, 3),
-            (1, 4, 5, 1),
-            (1, 4, 4, 2),
-            (1, 4, 3, 3),
-            (1, 5, 4, 1),
-            (1, 5, 3, 2),
-            (1, 5, 2, 3),
-        ]
-        formation_names = {
-            "(1, 3, 5, 2)": "3-5-2",
-            "(1, 3, 4, 3)": "3-4-3",
-            "(1, 4, 5, 1)": "4-5-1",
-            "(1, 4, 4, 2)": "4-4-2",
-            "(1, 4, 3, 3)": "4-3-3",
-            "(1, 5, 4, 1)": "5-4-1",
-            "(1, 5, 3, 2)": "5-3-2",
-            "(1, 5, 2, 3)": "5-2-3",
-        }
-
-        best_11, best_xp, best_formation = [], 0, ""
-
-        for gkp, def_count, mid, fwd in formations:
-            if (
-                gkp <= len(by_position["GKP"])
-                and def_count <= len(by_position["DEF"])
-                and mid <= len(by_position["MID"])
-                and fwd <= len(by_position["FWD"])
-            ):
-                formation_11 = (
-                    by_position["GKP"][:gkp]
-                    + by_position["DEF"][:def_count]
-                    + by_position["MID"][:mid]
-                    + by_position["FWD"][:fwd]
-                )
-                formation_xp = sum(
-                    p.get(sort_col, p.get("xP", 0)) for p in formation_11
-                )
-
-                if formation_xp > best_xp:
-                    best_xp = formation_xp
-                    best_11 = formation_11
-                    best_formation = formation_names.get(
-                        str((gkp, def_count, mid, fwd)),
-                        f"{gkp}-{def_count}-{mid}-{fwd}",
-                    )
-
-        return best_11, best_formation, best_xp
+        # Use shared formation enumeration logic
+        return self._enumerate_formations_for_players(by_position, sort_col)
 
     def find_bench_players(
         self, squad_df: pd.DataFrame, starting_11: List[Dict], xp_column: str = "xP"
@@ -1328,12 +1357,8 @@ class OptimizationService:
             starting_11 = self._get_best_starting_11_from_squad(team, xp_column)
             base_xp = sum(p[xp_column] for p in starting_11)
 
-            # Penalty for constraint violations
-            team_counts = {}
-            for player in team:
-                team_name = player["team"]
-                team_counts[team_name] = team_counts.get(team_name, 0) + 1
-
+            # Penalty for constraint violations using shared utility
+            team_counts = self._count_players_per_team(team)
             constraint_penalty = sum(
                 (count - 3) * -10.0 for count in team_counts.values() if count > 3
             )
@@ -1362,12 +1387,10 @@ class OptimizationService:
                 if position_counts.get(pos, 0) != required:
                     return False
 
-            # Check 3-per-team
-            team_counts = {}
-            for player in team:
-                team_name = player["team"]
-                team_counts[team_name] = team_counts.get(team_name, 0) + 1
-                if team_counts[team_name] > 3:
+            # Check 3-per-team using shared utility
+            team_counts = self._count_players_per_team(team)
+            for count in team_counts.values():
+                if count > 3:
                     return False
 
             return True
@@ -1513,7 +1536,15 @@ class OptimizationService:
     def _get_best_starting_11_from_squad(
         self, squad: List[Dict], xp_column: str = "xP"
     ) -> List[Dict]:
-        """Get best starting 11 from 15-player squad."""
+        """Get best starting 11 from 15-player squad.
+
+        Args:
+            squad: List of 15 player dictionaries
+            xp_column: Column name for XP values
+
+        Returns:
+            List of 11 player dicts forming best starting team
+        """
         if len(squad) != 15:
             return []
 
@@ -1526,41 +1557,8 @@ class OptimizationService:
         for pos in by_position:
             by_position[pos].sort(key=lambda p: p[xp_column], reverse=True)
 
-        # Try valid formations
-        valid_formations = [
-            (1, 3, 5, 2),
-            (1, 3, 4, 3),
-            (1, 4, 5, 1),
-            (1, 4, 4, 2),
-            (1, 4, 3, 3),
-            (1, 5, 4, 1),
-            (1, 5, 3, 2),
-            (1, 5, 2, 3),
-        ]
-
-        best_11 = []
-        best_xp = 0
-
-        for gkp, def_count, mid, fwd in valid_formations:
-            if (
-                gkp <= len(by_position["GKP"])
-                and def_count <= len(by_position["DEF"])
-                and mid <= len(by_position["MID"])
-                and fwd <= len(by_position["FWD"])
-            ):
-                formation_11 = (
-                    by_position["GKP"][:gkp]
-                    + by_position["DEF"][:def_count]
-                    + by_position["MID"][:mid]
-                    + by_position["FWD"][:fwd]
-                )
-
-                formation_xp = sum(p[xp_column] for p in formation_11)
-
-                if formation_xp > best_xp:
-                    best_xp = formation_xp
-                    best_11 = formation_11
-
+        # Use shared formation enumeration logic (return just the players, ignore formation name)
+        best_11, _, _ = self._enumerate_formations_for_players(by_position, xp_column)
         return best_11
 
     def get_optimal_team_from_database(
