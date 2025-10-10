@@ -187,7 +187,6 @@ class TransferOptimizationService:
 
     def get_premium_acquisition_plan(
         self,
-        target_player_price: float,
         current_squad: pd.DataFrame,
         team_data: Dict[str, Any],
         players_with_xp: pd.DataFrame,
@@ -195,7 +194,6 @@ class TransferOptimizationService:
         """Create a plan for acquiring premium players through multiple transfers.
 
         Args:
-            target_player_price: Price of the target premium player
             current_squad: Current squad data - guaranteed clean
             team_data: Manager team data - guaranteed clean
             players_with_xp: Available players - guaranteed clean
