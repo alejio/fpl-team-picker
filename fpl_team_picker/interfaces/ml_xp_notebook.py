@@ -12,14 +12,16 @@ Key Features:
   * Rolling 5GW form features (GW N-6 to N-1)
   * Season-long and rolling per-90 efficiency metrics
   * Consistency and volatility indicators
+  * Team context features (rolling 5GW team form, cumulative team stats)
 - Position-specific model evaluation
 - Model comparison against rule-based baseline
 - Production-ready model export
 
 Modeling Strategy:
 - Use 5 preceding gameweeks (GW N-5 to N-1) to predict GW N performance
-- Player-based train/test split: 70% players for training, 30% for testing
-- All features properly lagged to prevent data leakage
+- Player-based train/test split using GroupKFold (ensures each player's data stays together)
+- All features properly lagged to prevent data leakage (shift(1) applied to all rolling stats)
+- Team features are safe: Testing "can we predict NEW players on KNOWN teams?" not future outcomes
 - Minimum requirement: GW6+ for complete rolling feature coverage
 - Tests model's ability to generalize to unseen players (not unseen time periods)
 """
@@ -603,6 +605,164 @@ def _(historical_df, mo, np, pd):
         )
 
         # ===================================================================
+        # TEAM-LEVEL FEATURES (leak-free context)
+        # ===================================================================
+        # Team features are safe with player-based GroupKFold validation:
+        # - We're testing "can we predict NEW players on KNOWN teams?"
+        # - Team identity (team_id) is static info, like position or price
+        # - Historical team performance uses only past gameweeks (shift(1))
+        # - This captures crucial context: defenders on strong teams get more CS,
+        #   attackers on high-scoring teams get more assists, etc.
+
+        if "team_id" in df.columns:
+            # Ensure team_id is numeric
+            df["team_id"] = (
+                pd.to_numeric(df["team_id"], errors="coerce").fillna(-1).astype(int)
+            )
+
+            # Sort by team_id and gameweek for temporal operations
+            df_sorted = df.sort_values(["team_id", "gameweek"]).reset_index(drop=True)
+
+            # Create team-level aggregates per gameweek
+            # For each team in each gameweek, calculate total goals, clean sheets, etc.
+            team_stats = (
+                df_sorted.groupby(["team_id", "gameweek"])
+                .agg(
+                    {
+                        "goals_scored": "sum",  # Team total goals scored
+                        "goals_conceded": "first"
+                        if "goals_conceded" in df.columns
+                        else lambda x: 0,  # Same for all players
+                        "clean_sheets": "max",  # Binary: 1 if team kept clean sheet
+                        "expected_goals": "sum",  # Team total xG
+                        "expected_goals_conceded": "first"
+                        if "expected_goals_conceded" in df.columns
+                        else lambda x: 0,
+                        "total_points": "sum",  # Sum of all player points (proxy for team success)
+                    }
+                )
+                .reset_index()
+            )
+
+            # Group by team for temporal rolling/cumulative operations
+            team_grouped = team_stats.groupby("team_id", group_keys=False)
+
+            # === ROLLING 5GW TEAM FORM (GW N-6 to N-1) ===
+            team_stats["team_rolling_5gw_goals_scored"] = (
+                team_grouped["goals_scored"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            team_stats["team_rolling_5gw_goals_conceded"] = (
+                team_grouped["goals_conceded"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            team_stats["team_rolling_5gw_xg"] = (
+                team_grouped["expected_goals"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            team_stats["team_rolling_5gw_xgc"] = (
+                team_grouped["expected_goals_conceded"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            team_stats["team_rolling_5gw_clean_sheets"] = (
+                team_grouped["clean_sheets"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            team_stats["team_rolling_5gw_points"] = (
+                team_grouped["total_points"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+
+            # === CUMULATIVE TEAM SEASON STATS (GW 1 to N-1) ===
+            team_stats["team_cumulative_goals_scored"] = (
+                team_grouped["goals_scored"].shift(1).fillna(0).cumsum()
+            )
+            team_stats["team_cumulative_goals_conceded"] = (
+                team_grouped["goals_conceded"].shift(1).fillna(0).cumsum()
+            )
+            team_stats["team_cumulative_clean_sheets"] = (
+                team_grouped["clean_sheets"].shift(1).fillna(0).cumsum()
+            )
+            team_stats["team_season_points"] = (
+                team_grouped["total_points"].shift(1).fillna(0).cumsum()
+            )
+
+            # === DERIVED TEAM METRICS ===
+            # Goal difference (rolling 5GW)
+            team_stats["team_rolling_5gw_goal_diff"] = (
+                team_stats["team_rolling_5gw_goals_scored"]
+                - team_stats["team_rolling_5gw_goals_conceded"]
+            )
+
+            # Expected goal difference (rolling 5GW)
+            team_stats["team_rolling_5gw_xg_diff"] = (
+                team_stats["team_rolling_5gw_xg"] - team_stats["team_rolling_5gw_xgc"]
+            )
+
+            # Merge team features back to player-level data
+            team_feature_cols = [
+                "team_id",
+                "gameweek",
+                "team_rolling_5gw_goals_scored",
+                "team_rolling_5gw_goals_conceded",
+                "team_rolling_5gw_xg",
+                "team_rolling_5gw_xgc",
+                "team_rolling_5gw_clean_sheets",
+                "team_rolling_5gw_points",
+                "team_cumulative_goals_scored",
+                "team_cumulative_goals_conceded",
+                "team_cumulative_clean_sheets",
+                "team_season_points",
+                "team_rolling_5gw_goal_diff",
+                "team_rolling_5gw_xg_diff",
+            ]
+
+            df = df.merge(
+                team_stats[team_feature_cols], on=["team_id", "gameweek"], how="left"
+            )
+
+            # Fill NaN team features with 0 (for players with missing team_id)
+            for col in team_feature_cols[2:]:  # Skip team_id and gameweek
+                if col in df.columns:
+                    df[col] = df[col].fillna(0)
+
+            # Static team encoding (team identity as categorical feature)
+            df["team_encoded"] = df["team_id"].astype("category").cat.codes
+        else:
+            # If team_id not available, create zero columns
+            df["team_encoded"] = -1
+            df["team_rolling_5gw_goals_scored"] = 0
+            df["team_rolling_5gw_goals_conceded"] = 0
+            df["team_rolling_5gw_xg"] = 0
+            df["team_rolling_5gw_xgc"] = 0
+            df["team_rolling_5gw_clean_sheets"] = 0
+            df["team_rolling_5gw_points"] = 0
+            df["team_cumulative_goals_scored"] = 0
+            df["team_cumulative_goals_conceded"] = 0
+            df["team_cumulative_clean_sheets"] = 0
+            df["team_season_points"] = 0
+            df["team_rolling_5gw_goal_diff"] = 0
+            df["team_rolling_5gw_xg_diff"] = 0
+
+        # ===================================================================
         # FILL MISSING VALUES
         # ===================================================================
         # List all engineered feature columns
@@ -659,6 +819,20 @@ def _(historical_df, mo, np, pd):
             "rolling_5gw_minutes_std",
             "minutes_played_rate",
             "form_trend",
+            # Team features (leak-free context)
+            "team_encoded",
+            "team_rolling_5gw_goals_scored",
+            "team_rolling_5gw_goals_conceded",
+            "team_rolling_5gw_xg",
+            "team_rolling_5gw_xgc",
+            "team_rolling_5gw_clean_sheets",
+            "team_rolling_5gw_points",
+            "team_cumulative_goals_scored",
+            "team_cumulative_goals_conceded",
+            "team_cumulative_clean_sheets",
+            "team_season_points",
+            "team_rolling_5gw_goal_diff",
+            "team_rolling_5gw_xg_diff",
         ]
         df[engineered_feature_cols] = df[engineered_feature_cols].fillna(0)
 
@@ -713,6 +887,24 @@ def _(historical_df, mo, np, pd):
                 mo.md("- `minutes_played_rate` - % of available minutes in last 5GW"),
                 mo.md(
                     "- `form_trend` - Linear trend coefficient (improving/declining)"
+                ),
+                mo.md(""),
+                mo.md("**Team Context Features (leak-free):**"),
+                mo.md("- `team_encoded` - Team identity (categorical)"),
+                mo.md(
+                    "- `team_rolling_5gw_goals_scored/conceded` - Team attacking/defensive form"
+                ),
+                mo.md("- `team_rolling_5gw_xg/xgc` - Team underlying quality"),
+                mo.md("- `team_rolling_5gw_clean_sheets` - Defensive consistency"),
+                mo.md(
+                    "- `team_cumulative_goals_scored/conceded` - Season-long team performance"
+                ),
+                mo.md(
+                    "- `team_rolling_5gw_goal_diff/xg_diff` - Team form differentials"
+                ),
+                mo.md(""),
+                mo.md(
+                    "💡 **Team features are safe with player-based GroupKFold:** We test the model's ability to predict NEW players on KNOWN teams, not future outcomes."
                 ),
                 mo.md(""),
                 mo.md(f"**Total features created:** {len(features_df.columns)}"),
@@ -881,6 +1073,20 @@ def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
                 "rolling_5gw_minutes_std",
                 "minutes_played_rate",
                 "form_trend",
+                # Team features (leak-free context - safe with player-based GroupKFold)
+                "team_encoded",
+                "team_rolling_5gw_goals_scored",
+                "team_rolling_5gw_goals_conceded",
+                "team_rolling_5gw_xg",
+                "team_rolling_5gw_xgc",
+                "team_rolling_5gw_clean_sheets",
+                "team_rolling_5gw_points",
+                "team_cumulative_goals_scored",
+                "team_cumulative_goals_conceded",
+                "team_cumulative_clean_sheets",
+                "team_season_points",
+                "team_rolling_5gw_goal_diff",
+                "team_rolling_5gw_xg_diff",
             ]
 
             # Validate all feature columns exist in the data

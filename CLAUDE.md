@@ -103,7 +103,9 @@ Or: `marimo run fpl_team_picker/interfaces/{notebook}.py`
 
 **Historical data**: `get_gameweek_performance(gw)`, `get_player_gameweek_history()`, `get_my_picks_history()`
 
-**Leak-free features**: Historical per-90 metrics, position-specific models (GKP/DEF/MID/FWD), temporal validation
+**Leak-free features**: Historical per-90 metrics, position-specific models (GKP/DEF/MID/FWD), temporal validation, team context features (rolling 5GW team form, cumulative team stats)
+
+**Team features rationale**: Safe with player-based GroupKFold validation - testing "can we predict NEW players on KNOWN teams?" not future outcomes. All team features use shift(1) to exclude current gameweek.
 
 ## Expected Points Models
 
