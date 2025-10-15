@@ -1,12 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Project Overview
-
-This is a Fantasy Premier League (FPL) analysis suite that provides both season-start team building and weekly gameweek management. The project implements a comprehensive mathematical framework combining Poisson distributions, team ratings, player performance metrics, fixture analysis, and live data integration for optimal FPL decision making.
-
-The project is structured as a Python package with modular architecture and provides two main interfaces via Marimo notebooks for interactive data analysis.
+Fantasy Premier League (FPL) analysis suite with season-start team building and weekly gameweek management. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
 
 ## Project Structure
 
@@ -59,1224 +53,126 @@ fpl-team-picker/
 
 ## Data Loading
 
-This project uses the fpl-dataset-builder database client library for all data operations.
+Uses fpl-dataset-builder client library (`from client import FPLDataClient`).
 
-### Usage
-```python
-from client import FPLDataClient
+**Key methods**: `get_current_players()`, `get_current_teams()`, `get_fixtures_normalized()`, `get_player_xg_xa_rates()`, `get_gameweek_live_data(gw)`, `get_gameweek_performance(gw)`, `get_player_deltas_current()`
 
-client = FPLDataClient()
-players = client.get_current_players()
-teams = client.get_current_teams()
-fixtures = client.get_fixtures_normalized()
-xg_rates = client.get_player_xg_xa_rates()
-live_data = client.get_gameweek_live_data(gw)
-```
-
-### Available Data Functions
-- `get_current_players()` - Current season player data (prices, positions, teams)
-- `get_current_teams()` - Team reference data for ID lookups
-- `get_fixtures_normalized()` - Normalized fixture data with team IDs and kickoff times
-- `get_player_xg_xa_rates()` - Expected goals (xG90) and expected assists (xA90) rates per 90 minutes
-- `get_gameweek_live_data(gw)` - Real-time player performance data for active/completed gameweeks
-- `get_gameweek_performance(gw)` - Detailed performance data for specific gameweek
-- `get_player_deltas_current()` - Week-over-week performance and market movement tracking
-
-### Installation
-The fpl-dataset-builder is configured as a local dependency:
-
-```bash
-uv sync
-```
-
-**Configuration in pyproject.toml:**
-```toml
-dependencies = [
-    "fpl-dataset-builder",
-    # ... other dependencies
-]
-
-[tool.uv.sources]
-fpl-dataset-builder = { path = "../fpl-dataset-builder", editable = true }
-```
+Install: `uv sync` (local dependency configured in pyproject.toml)
 
 ## Core Architecture
 
-The project follows **Clean Architecture principles** with clear separation between domain logic, infrastructure, and presentation layers. This design enables frontend flexibility and comprehensive testing while maintaining code quality.
+Clean Architecture with domain/infrastructure/presentation separation. All business logic in `domain/services/`.
 
-**✅ Migration Complete** - All business logic has been successfully migrated from `core/` to `domain/services/` following clean architecture patterns. The legacy `core/` directory has been removed.
+### Domain Services
 
-### 1. Domain Layer (`fpl_team_picker/domain/`) - **Frontend-Agnostic Business Logic**
+- **DataOrchestrationService**: Boundary validation, guaranteed clean data
+- **ExpectedPointsService**: Rule-based XP (1GW + 5GW projections)
+- **MLExpectedPointsService**: Ridge regression ML predictions
+- **TeamAnalyticsService**: Dynamic team strength ratings
+- **OptimizationService**: Transfer optimization, starting XI, captain selection, squad generation
+- **ChipAssessmentService**: Traffic light chip recommendations
+- **PerformanceAnalyticsService**: Form analysis, historical recomputation
+- **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
 
-The domain layer contains all business logic and is completely independent of any framework or UI technology.
+### Domain Models & Repositories
 
-#### Domain Services - **Pure Business Logic**
+- **EnrichedPlayerDomain**: 70+ validated attributes (47 enhanced + 29 derived + computed properties)
+- **PlayerRepository/TeamRepository/FixtureRepository**: Abstract data access
+- **DatabasePlayerRepository** (adapters): Concrete implementation via fpl-dataset-builder
 
-**Data Orchestration Service** (`data_orchestration_service.py`)
-```python
-from fpl_team_picker.domain.services import DataOrchestrationService
+### Configuration (`config/`)
 
-# Boundary validation - fail fast with clean data guarantee
-orchestration_service = DataOrchestrationService()
-gameweek_data = orchestration_service.load_gameweek_data(target_gameweek=10, form_window=5)
-# Returns: Guaranteed valid data dictionary - all downstream operations are deterministic
-```
+Pydantic models with env var overrides (`FPL_{SECTION}_{FIELD}`). Config sections: XPModel, TeamStrength, MinutesModel, StatisticalEstimation, Optimization, Visualization, ChipAssessment.
 
-**Expected Points Service** (`expected_points_service.py`)
-```python
-from fpl_team_picker.domain.services import ExpectedPointsService
+### Presentation Layer (`interfaces/`)
 
-# Pure rule-based XP calculation - works with any frontend
-xp_service = ExpectedPointsService()
-players_with_xp = xp_service.calculate_combined_results(
-    gameweek_data, use_ml_model=False
-)
-# Returns: 1GW + 5GW expected points with model metadata
-```
+Marimo notebooks orchestrating domain services (zero business logic):
+- **gameweek_manager.py** (969 lines): Weekly management with type-safe player operations
+- **season_planner.py** (2257 lines): Initial squad building
+- **ml_xp_experiment.py** (2947 lines): ML model development
+- **xp_accuracy_tracking.py**: Model validation & algorithm A/B testing
 
-**ML Expected Points Service** (`ml_expected_points_service.py`)
-```python
-from fpl_team_picker.domain.services import MLExpectedPointsService
 
-# ML-based XP calculation using Ridge regression
-ml_service = MLExpectedPointsService(
-    min_training_gameweeks=3,
-    training_gameweeks=5,
-    position_min_samples=30,
-    ensemble_rule_weight=0.3  # 70% ML + 30% rule-based
-)
+## CLI Commands
 
-# Can be used via ExpectedPointsService with use_ml_model=True
-players_with_xp = xp_service.calculate_combined_results(
-    gameweek_data, use_ml_model=True
-)
-# Returns: ML predictions with optional rule-based ensemble
-```
+`fpl-season-planner` | `fpl-gameweek-manager` | `fpl-xp-accuracy` | `fpl-ml-experiment`
 
-**Team Analytics Service** (`team_analytics_service.py`)
-```python
-from fpl_team_picker.domain.services import TeamAnalyticsService
+Or: `marimo run fpl_team_picker/interfaces/{notebook}.py`
 
-# Dynamic team strength calculations
-analytics_service = TeamAnalyticsService(debug=False)
+## ML Development
 
-# Get evolving team strength ratings
-strength_ratings = analytics_service.get_team_strength(
-    target_gameweek=10,
-    teams_data=teams,
-    current_season_data=current_season_data
-)
-# Returns: Dict[team_name, strength_rating] with GW8+ current season focus
-```
+**Historical data**: `get_gameweek_performance(gw)`, `get_player_gameweek_history()`, `get_my_picks_history()`
 
-**Optimization Service** (`optimization_service.py`)
-```python
-from fpl_team_picker.domain.services import OptimizationService
-
-# Comprehensive optimization service - all FPL optimization algorithms
-optimization_service = OptimizationService()
-
-# Transfer optimization: 0-3 transfer scenarios with constraint support
-display, optimal_squad, best_scenario = optimization_service.optimize_transfers(
-    current_squad=current_squad,
-    team_data=team_data,
-    players_with_xp=players_with_xp,
-    must_include_ids={player_id_1, player_id_2},
-    must_exclude_ids={player_id_3}
-)
-
-# Starting XI selection
-starting_11, formation, total_xp = optimization_service.find_optimal_starting_11(squad_df)
-
-# Captain recommendation
-captain_data = optimization_service.get_captain_recommendation(players_df, top_n=5)
-
-# Initial squad generation (simulated annealing)
-result = optimization_service.optimize_initial_squad(
-    players_with_xp=players_df,
-    budget=100.0,
-    formation=(2, 5, 5, 3),
-    iterations=5000
-)
-
-# Constraint validation
-validation = optimization_service.validate_optimization_constraints(
-    must_include_ids={1, 2, 3},
-    must_exclude_ids={4, 5, 6}
-)
-# Returns: All FPL optimization operations with clean data contracts
-```
-
-**Chip Assessment Service** (`chip_assessment_service.py`)
-```python
-from fpl_team_picker.domain.services import ChipAssessmentService
-
-# Traffic light chip recommendations
-chip_service = ChipAssessmentService()
-chip_recommendations = chip_service.assess_all_chips(
-    current_squad=squad_with_xp,
-    all_players=players_with_xp,
-    fixtures=fixtures,
-    available_chips=["wildcard", "bench_boost"]
-)
-# Returns: 🟢 RECOMMENDED, 🟡 CONSIDER, 🔴 HOLD status for each chip
-```
-
-**Performance Analytics Service** (`performance_analytics_service.py`)
-```python
-from fpl_team_picker.domain.services import PerformanceAnalyticsService
-
-# Form analysis and hot/cold player identification
-analytics_service = PerformanceAnalyticsService()
-form_analysis = analytics_service.analyze_player_form(
-    players_with_xp, form_window=5
-)
-# Returns: Form trends, momentum indicators, hot/cold classifications
-```
-
-**Fixture Analysis** - *Handled by visualization layer*
-```python
-# Fixture difficulty analysis is now handled directly in charts.py
-from fpl_team_picker.visualization.charts import create_fixture_difficulty_visualization
-
-fixture_analysis = create_fixture_difficulty_visualization(
-    target_gameweek=10, gameweeks_ahead=5, mo
-)
-# Returns: Interactive Marimo fixture difficulty display
-```
-
-**Player Analytics Service** (`player_analytics_service.py`)
-```python
-from fpl_team_picker.domain.services import PlayerAnalyticsService
-from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
-
-# Type-safe player operations using domain models
-player_repo = DatabasePlayerRepository()
-analytics_service = PlayerAnalyticsService(player_repo)
-
-# Get all players with 70+ validated attributes (enriched + derived metrics)
-players: List[EnrichedPlayerDomain] = analytics_service.get_all_players_enriched()
-
-# Type-safe filtering and analysis
-penalty_takers = analytics_service.get_penalty_takers()
-high_value = analytics_service.get_high_value_players(min_value_score=80)
-injury_risks = analytics_service.get_injury_risks(min_risk=0.5)
-form_improving = analytics_service.get_form_improving_players()
-top_value = analytics_service.get_top_players_by_value(limit=10)
-
-# Returns: List[EnrichedPlayerDomain] with full type safety and computed properties
-# player.is_high_value, player.has_injury_concern, player.is_penalty_taker, etc.
-```
-
-**Visualization** - *Handled by charts layer*
-```python
-# Chart generation is handled directly in charts.py for Marimo
-from fpl_team_picker.visualization.charts import create_xp_results_display
-
-xp_display = create_xp_results_display(players_with_xp, target_gameweek, mo)
-# Returns: Ready-to-use Marimo visualization components
-```
-
-#### Domain Models (`domain/models/`)
-- **PlayerDomain**: Core player entity with business rules and FPL validation
-- **EnrichedPlayerDomain**: Complete player model with 70+ validated attributes
-  - 47 enhanced fields from `get_players_enhanced()` (stats, ICT, xG/xA, market data)
-  - 29 derived analytics from `get_derived_player_metrics()` (value score, form trends, risk metrics)
-  - 25+ computed properties (`is_penalty_taker`, `is_high_value`, `has_injury_concern`, `goals_per_90`, etc.)
-  - Full Pydantic validation ensuring data integrity
-- **LiveDataDomain**: Gameweek-specific performance data with validation
-- **TeamDomain**: Team entity with strength calculations
-- **FixtureDomain**: Fixture entity with difficulty analysis
-
-#### Repository Contracts (`domain/repositories/`)
-- **PlayerRepository**: Abstract player data access with methods:
-  - `get_current_players()` - Basic player data with validation
-  - `get_enriched_players()` - Complete enriched players merging 3 data sources
-  - `get_player_by_id()`, `get_players_by_team()`, `get_players_by_position()`
-  - `get_live_data_for_gameweek()` - Live performance data
-- **TeamRepository**: Abstract team data access
-- **FixtureRepository**: Abstract fixture data access
-
-**Repository Implementation** (`adapters/database_repositories.py`):
-- `DatabasePlayerRepository` - Concrete implementation using fpl-dataset-builder
-  - Merges basic player data (11 cols) + enhanced stats (47 cols) + derived metrics (29 cols)
-  - Comprehensive Pydantic validation at every step
-  - Error handling with Result types (success/failure)
-
-### 2. Infrastructure Layer (`fpl_team_picker/adapters/`) - **Framework Implementations**
-
-**Database Repositories** (`database_repositories.py`)
-```python
-from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
-
-# Concrete implementations of repository contracts
-player_repo = DatabasePlayerRepository()  # Uses fpl-dataset-builder
-team_repo = DatabaseTeamRepository()      # FPL API integration
-fixture_repo = DatabaseFixtureRepository() # Fixture data access
-```
-
-### 3. Configuration System (`fpl_team_picker/config/`)
-
-**Centralized configuration management with Pydantic validation:**
-- **Type-safe configuration** with field validation and environment variable support
-- **Modular config sections**: XP Model, Team Strength, Minutes Model, Statistical Estimation, etc.
-- **Environment variable overrides** using pattern `FPL_{SECTION}_{FIELD}`
-- **JSON configuration file support** with graceful fallbacks
-
-Key configuration sections:
-- `XPModelConfig` - Form weighting, thresholds, debug settings
-- `TeamStrengthConfig` - Dynamic strength calculation parameters
-- `MinutesModelConfig` - Enhanced minutes prediction parameters
-- `StatisticalEstimationConfig` - xG/xA estimation parameters
-- `OptimizationConfig` - Transfer optimization settings
-- `VisualizationConfig` - Chart and display settings
-- `ChipAssessmentConfig` - Chip recommendation thresholds and parameters
-
-### 3. Optimization Service (`fpl_team_picker/domain/services/optimization_service.py`)
-
-**Consolidated FPL optimization service** - All optimization algorithms in one place:
-
-**OptimizationService - Complete FPL optimization solution:**
-- `optimize_transfers()` - Comprehensive 0-3 transfer scenario analysis with constraints
-- `find_optimal_starting_11()` - Formation enumeration and XP maximization
-- `find_bench_players()` - Bench ordering by expected points
-- `calculate_budget_pool()` - Advanced budget analysis including sellable player values
-- `plan_premium_acquisition()` - Multi-transfer scenarios for expensive targets
-- `get_captain_recommendation()` - Risk-adjusted captaincy recommendations
-- `optimize_initial_squad()` - Simulated annealing for initial 15-player squad generation
-- `get_optimal_team_from_database()` - Build theoretically best XI from all players
-- `validate_optimization_constraints()` - Constraint conflict detection
-
-**Architecture:** OptimizationService is the **single source of truth** for all FPL optimization operations.
-- Used directly by interfaces (gameweek_manager.py) and other domain services
-- All FPL business rules (formations, constraints, budget calculations) centralized
-- Clean data contracts with Pydantic validation
-
-**Key Design:** Eliminates duplication by consolidating all optimization logic in one service, ensuring consistency and maintainability.
-
-### 4. Visualization Suite (`fpl_team_picker/visualization/`)
-
-#### Interactive Charts (`charts.py`)
-**Plotly-based interactive visualizations:**
-- `create_xp_results_display()` - Expected points results with filtering
-- `create_form_analytics_display()` - Hot/cold player analysis
-- `create_player_trends_visualization()` - Historical performance trends
-- `create_fixture_difficulty_visualization()` - Fixture difficulty heatmaps
-
-### 5. Presentation Layer (`fpl_team_picker/interfaces/`) - **Frontend Adapters**
-
-The interfaces serve as **presentation adapters** that orchestrate domain services for specific frontends. They contain zero business logic and focus purely on composition and display.
-
-#### Clean Architecture Benefits Achieved:
-- **969 lines** (vs 1457 lines original) - **33% reduction** through domain service extraction
-- **Zero business logic** in presentation cells
-- **Frontend migration ready** - same services work for FastAPI, React, CLI
-- **Comprehensive testing** - domain services tested independently of UI
-- **Type-safe player operations** - Domain models with 70+ validated attributes and computed properties
-
-#### Domain Model Integration Status (Issue #31 ✅ COMPLETE)
-
-**✅ Fully Integrated Interfaces** (using `PlayerAnalyticsService` with domain models):
-1. **gameweek_manager.py** - Transfer constraints UI with type-safe player operations
-2. **player_timeseries_analysis.py** - Player selection with computed properties (penalty takers, injury concerns, etc.)
-
-**⚠️ DataFrame-Based Interfaces** (use raw `FPLDataClient` - by design):
-1. **season_planner.py** - Optimization algorithms expect DataFrame format
-2. **ml_xp_experiment.py** - ML training pipeline requires DataFrame compatibility
-3. **xp_accuracy_tracking.py** - Analytical queries optimized for DataFrame operations
-
-**Note**: Some interfaces intentionally use DataFrames for performance-critical operations (optimization, ML training) where domain model conversion would add overhead without benefits. Domain models are used where type safety and business logic validation provide clear value.
-
-#### Gameweek Manager (`gameweek_manager.py`) - **969 lines - Clean Architecture**
-**Marimo presentation adapter for weekly gameweek management:**
-
-**Service Orchestration Pattern:**
-```python
-# Pure composition - no business logic
-@app.cell
-def _(gameweek_data, mo):
-    if gameweek_data:
-        # Domain service usage
-        from fpl_team_picker.domain.services import ExpectedPointsService
-        xp_service = ExpectedPointsService()
-        players_with_xp = xp_service.calculate_combined_results(gameweek_data)
-
-        # Pure presentation
-        xp_results_display = create_xp_results_display(players_with_xp, mo)
-    else:
-        xp_results_display = mo.md("Load gameweek data first")
-    return xp_results_display,
-```
-
-**Key Features:**
-- **Data Loading**: Uses `DataOrchestrationService` for boundary validation
-- **Expected Points**: Orchestrates `ExpectedPointsService` (ML + rule-based models)
-- **Transfer Optimization**: Uses `OptimizationService` with 0-3 transfer scenarios and constraint support
-- **Form Analytics**: Leverages `PerformanceAnalyticsService` for hot/cold analysis
-- **Chip Assessment**: Integrates `ChipAssessmentService` with traffic light recommendations
-- **Captain Selection**: Risk-adjusted recommendations via `OptimizationService`
-- **Fixture Analysis**: Uses `create_fixture_difficulty_visualization()` for difficulty heatmaps
-- **Player Analytics**: Uses `PlayerAnalyticsService` for type-safe player operations with 70+ validated attributes
-
-#### Player Timeseries Analysis (`player_timeseries_analysis.py`) - **Domain Models**
-**Historical performance analysis using type-safe domain models:**
-- Uses `PlayerAnalyticsService.get_all_players_enriched()` for type-safe player loading
-- Computed property indicators: `is_premium` 💎, `is_penalty_taker` ⚽, `is_differential` 🔥, `has_injury_concern` 🤕
-- Type-safe attribute access (e.g., `player.web_name`, `player.position`, `player.price`)
-- Comprehensive validation with Pydantic ensuring data integrity
-
-#### Season Planner (`season_planner.py`) - **2257 lines**
-**Marimo notebook for season-start team building:**
-- Multi-gameweek xP calculations (GW1-5 weighted horizon)
-- Simulated Annealing team optimization with constraint satisfaction
-- Formation-flexible starting 11 selection (8 valid formations)
-- Transfer risk analysis and squad stability metrics
-
-#### ML Expected Points Experiment (`ml_xp_experiment.py`) - **2947 lines**
-**Marimo notebook for ML model development and validation:**
-- XGBoost-based expected points prediction with leak-free temporal validation
-- Enhanced feature engineering with historical per-90 metrics
-- Position-specific models (GKP, DEF, MID, FWD) with ensemble predictions
-- Form-weighted training data using historical gameweek performance
-- Model comparison and performance validation against actual FPL results
-
-#### xP Accuracy Tracking (`xp_accuracy_tracking.py`) - **Experimentation Notebook**
-**Marimo notebook for model accuracy analysis and algorithm optimization:**
-
-**Purpose:** Development and validation tool for algorithm experimentation (not for end-user predictions)
-
-**Key Features:**
-- **Historical Accuracy Tracking** - Monitor MAE/RMSE/correlation trends over completed gameweeks
-- **Algorithm A/B Testing** - Compare multiple algorithm versions side-by-side
-- **Position-Specific Analysis** - Identify which positions need model improvements
-- **Parameter Optimization** - Test form_weight (0.5, 0.7, 0.9) and form_window (3GW, 5GW, 8GW) variations
-
-**Interactive Controls:**
-- Gameweek range selection for analysis
-- Algorithm version selector (current, experimental_high_form, experimental_low_form, v1.0)
-- Position-specific accuracy breakdown
-- Real-time algorithm comparison with winner recommendations
-
-**Use Cases:**
-1. **Model Validation** - Measure prediction accuracy against actual FPL results
-2. **Algorithm Development** - Test new parameters on historical data before deployment
-3. **Performance Monitoring** - Track accuracy trends to detect model degradation
-4. **Evidence-Based Optimization** - Data-driven algorithm selection for gameweek manager
-
-**Workflow:**
-```bash
-# Run accuracy tracking notebook
-fpl-xp-accuracy
-
-# Analyze accuracy trends → Identify improvements → Test algorithm variants →
-# Validate on historical data → Select best performer → Update gameweek manager algorithm
-```
-
-## Command Line Interface
-
-The project provides CLI entry points for all interfaces:
-
-```bash
-# Season-start team building
-fpl-season-planner
-
-# Weekly gameweek management (production)
-fpl-gameweek-manager
-
-# Model accuracy analysis & experimentation (development)
-fpl-xp-accuracy
-
-# ML model development
-fpl-ml-experiment
-
-# Or run directly with Marimo
-marimo run fpl_team_picker/interfaces/season_planner.py
-marimo run fpl_team_picker/interfaces/gameweek_manager.py
-marimo run fpl_team_picker/interfaces/xp_accuracy_tracking.py
-marimo run fpl_team_picker/interfaces/ml_xp_experiment.py
-```
-
-## ML Model Development Data Sources
-
-### Historical Gameweek Performance Data
-The fpl-dataset-builder project provides comprehensive historical data for ML model development via the `FPLDataClient`:
-
-**Available Historical Data:**
-- `get_gameweek_performance(gw)` - All players' performance for specific gameweek
-- `get_player_gameweek_history(player_id, start_gw, end_gw)` - Historical performance for individual players
-- `get_my_picks_history(start_gw, end_gw)` - Historical team selections across gameweeks
-
-**Core Performance Fields (Leak-Free for ML Training):**
-- **Basic Stats**: `total_points`, `minutes`, `goals_scored`, `assists`, `clean_sheets`, `goals_conceded`
-- **Advanced Metrics**: `expected_goals`, `expected_assists`, `ict_index`, `bps`, `influence`, `creativity`, `threat`
-- **Context**: `team_id`, `opponent_team`, `was_home`, `value` (player price at time of gameweek)
-
-**ML Feature Engineering (Temporal Validation):**
-The ML experiment interface implements proper temporal validation to prevent data leakage:
-- Historical per-90 metrics calculated from cumulative data up to each training gameweek
-- Position-specific modeling with separate XGBoost models for GKP/DEF/MID/FWD
-- Ensemble predictions combining general + position-specific model outputs
-- Leak-free features: `xG90_historical`, `xA90_historical`, `points_per_90`, `bps_historical`, `ict_index_historical`
-
-**Usage Example:**
-```python
-from client import FPLDataClient
-
-client = FPLDataClient()
-
-# Get training data for multiple gameweeks with proper temporal validation
-for gw in range(2, 6):  # GW2-5 for training
-    gw_data = client.get_gameweek_performance(gw)
-    # Calculate cumulative historical stats up to previous gameweek only
-    # Use for training to predict current gameweek performance
-```
+**Leak-free features**: Historical per-90 metrics, position-specific models (GKP/DEF/MID/FWD), temporal validation
 
 ## Expected Points Models
 
-### Rule-Based Model (`ExpectedPointsService`)
-**Form-weighted predictions with live data integration:**
+**Rule-Based** (`ExpectedPointsService`): Form-weighted (70/30), live data, dynamic team strength, 1GW+5GW projections. Fast, works from GW1+.
 
-1. **Live Data Integration** - Real-time performance and market intelligence
-2. **Form-Weighted Calculations** - 70% recent form + 30% season average (configurable)
-3. **Dynamic Performance Adjustments** - Form multipliers and momentum tracking
-4. **Statistical xG/xA Estimation** - Multi-factor estimation for missing data
-5. **Dynamic Team Strength** - Evolving ratings throughout the season via `TeamAnalyticsService`
-6. **Enhanced Minutes Prediction** - SBP + availability + position-specific durability
-7. **Multi-Gameweek Capability** - 1GW and 5GW projections with horizon analysis
+**ML-Based** (`MLExpectedPointsService`): Ridge regression, position-specific models, temporal validation, optional ensemble. Requires 3+ GWs.
 
-**Key Features:**
-- Fast, interpretable predictions suitable for all gameweeks
-- Works with minimal historical data (GW1+)
-- Configurable form weighting and windows
-- ~1,049 lines in `expected_points_service.py`
+## Historical xP Recomputation
 
-### ML-Based Model (`MLExpectedPointsService`)
-**Ridge regression with position-specific models and ensemble capability:**
+Recompute historical xP with arbitrary algorithms for retroactive testing. Benefits: test algorithm variations, A/B comparisons, future-proof evaluation.
 
-1. **Ridge Regression** - Cross-validated regularization (RidgeCV) with MAE scoring
-2. **Enhanced Feature Engineering** - Historical per-90 metrics, lagged features, set piece roles
-3. **Position-Specific Models** - Separate Ridge models for GKP, DEF, MID, FWD positions
-4. **Ensemble Predictions** - Combines general + position-specific model outputs
-5. **Temporal Validation** - Leak-free training with proper time-series validation
-6. **Rule-Based Ensemble** - Optional ensemble with rule-based model (configurable weight)
+**Required data**: Historical prices, performance, fixtures, availability snapshots (`get_player_availability_snapshot(gw)`). Fail fast if missing.
 
-**Architecture Decision:**
-- **Separate Service** - `MLExpectedPointsService` (935 lines) kept separate from rule-based service
-- **Single Responsibility** - Each service ~1,000 lines, focused on one prediction approach
-- **Clean Integration** - `ExpectedPointsService.calculate_expected_points(use_ml_model=True)` delegates to ML service
-- **Maintainability** - Easier to test, modify, and understand each approach independently
+**Key APIs**:
+- `DataOrchestrationService.load_historical_gameweek_state()` - Load historical state
+- `PerformanceAnalyticsService.recompute_historical_xp()` - Single gameweek
+- `PerformanceAnalyticsService.batch_recompute_season()` - Multiple gameweeks/algorithms
+- `calculate_accuracy_metrics()` - MAE/RMSE/correlation by position
+- Visualization: `create_model_accuracy_visualization()`, `create_algorithm_comparison_visualization()`
 
-**Key Features:**
-- Uses only historical data available at prediction time (no future information)
-- Requires minimum 3 gameweeks of training data
-- Incorporates gameweek-by-gameweek performance history from fpl-dataset-builder
-- Validates against actual FPL results with performance metrics
-- Production-ready with fail-fast error handling (no silent fallbacks)
+**Algorithm versions**: v1.0, current, experimental_high_form, experimental_low_form (Pydantic configs)
 
-## Historical xP Recomputation Framework
-
-**Recomputation Strategy** - Instead of storing predictions at prediction time, we recompute historical xP using arbitrary algorithms to enable retroactive testing and model improvement.
-
-### Why Recomputation Over Storage?
-
-**Benefits:**
-- ✅ Test unlimited algorithm variations retroactively on historical data
-- ✅ Not locked into predictions made with old/buggy algorithm versions
-- ✅ Enable scientific hypothesis testing and A/B comparisons
-- ✅ Future-proof for evaluating new algorithms against 2+ seasons of data
-- ✅ Minimal storage overhead (reuse existing gameweek_performance data)
-
-### Historical Data Requirements
-
-**Required Data (Fail Fast if Missing):**
-- ✅ **Historical prices**: `raw_player_gameweek_performance.value` field
-- ✅ **Historical performance**: Goals, assists, minutes, bonus points, ICT
-- ✅ **Historical fixtures**: Team matchups, home/away, difficulty
-- ✅ **Historical team data**: Stable team references
-- ✅ **Historical availability**: `get_player_availability_snapshot(gw)` from dataset-builder
-  - Player status (available, injured, suspended, etc.)
-  - Chance of playing percentages
-  - Injury/suspension news
-
-**Data Quality Philosophy:**
-- ❌ **No fallbacks** - If data is missing, fail fast with actionable error message
-- ✅ **Boundary validation** - Validate at data loading boundary, trust downstream
-- ✅ **Upstream fixes** - Missing data indicates dataset-builder quality issue to fix
-
-**Before Recomputing Historical Gameweeks:**
-Ensure dataset-builder has captured snapshots for target gameweeks:
-```bash
-# Capture snapshot for specific gameweek
-cd ../fpl-dataset-builder
-uv run main.py snapshot --gameweek 8
-
-# Verify snapshot exists
-python -c "from client import FPLDataClient; print(FPLDataClient().get_player_availability_snapshot(8))"
-```
-
-**Error Handling:**
-Recomputation will fail with clear error messages if:
-- Historical prices missing for any gameweek
-- Availability snapshots not captured
-- Required data fields missing from dataset-builder schema
-- Player data incomplete or inconsistent
-
-Fix upstream data quality issues in dataset-builder rather than working around them.
-
-### Core Components
-
-#### 1. Historical Data Loader (`DataOrchestrationService`)
-
-```python
-from fpl_team_picker.domain.services import DataOrchestrationService
-
-orchestration_service = DataOrchestrationService()
-
-# Load gameweek state as it existed historically
-historical_data = orchestration_service.load_historical_gameweek_state(
-    target_gameweek=5,
-    form_window=5,
-    include_snapshots=True  # Use availability snapshots if available
-)
-
-# Returns: Same structure as load_gameweek_data() but with historical values
-# - players: with historical prices from gameweek_performance.value
-# - availability_snapshot: from dataset-builder (required - fails if missing)
-# - live_data_historical: cumulative up to target_gameweek only (no future data)
-
-# Fails fast with actionable error if:
-# - Historical prices missing for target gameweek
-# - Availability snapshot not captured
-# - Required fields missing from data
-```
-
-#### 2. Algorithm Version Management (`PerformanceAnalyticsService`)
-
-```python
-from fpl_team_picker.domain.services.performance_analytics_service import (
-    AlgorithmVersion,
-    ALGORITHM_VERSIONS,
-)
-
-# Pydantic-based algorithm configuration
-class AlgorithmVersion(BaseModel):
-    name: str
-    form_weight: float  # 0.0-1.0
-    form_window: int    # 1-10 gameweeks
-    use_team_strength: bool
-    team_strength_params: Dict[str, Any]
-    minutes_model_params: Dict[str, Any]
-    statistical_estimation_params: Dict[str, Any]
-
-# Pre-configured algorithm versions
-ALGORITHM_VERSIONS = {
-    "v1.0": AlgorithmVersion(form_weight=0.7, form_window=5, ...),
-    "current": AlgorithmVersion(form_weight=0.7, form_window=5, ...),
-    "experimental_high_form": AlgorithmVersion(form_weight=0.9, form_window=3, ...),
-    "experimental_low_form": AlgorithmVersion(form_weight=0.5, form_window=8, ...),
-}
-```
-
-#### 3. Historical Recomputation Engine
-
-```python
-from fpl_team_picker.domain.services import PerformanceAnalyticsService
-
-analytics_service = PerformanceAnalyticsService()
-
-# Recompute xP for a single historical gameweek
-predictions_gw5 = analytics_service.recompute_historical_xp(
-    target_gameweek=5,
-    algorithm_version="current",
-    include_snapshots=True
-)
-# Returns: DataFrame with xP, xP_5gw, algorithm_version, computed_at, target_gameweek
-
-# Batch recompute across multiple gameweeks and algorithms
-comparison_df = analytics_service.batch_recompute_season(
-    start_gw=1,
-    end_gw=7,
-    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"],
-    include_snapshots=True
-)
-# Returns: Multi-index DataFrame (gameweek, player_id, algorithm_version) → xP
-```
-
-#### 4. Accuracy Metrics Calculation
-
-```python
-# Get actual results from dataset-builder
-from client import FPLDataClient
-client = FPLDataClient()
-actual_results = client.get_gameweek_performance(5)
-
-# Calculate accuracy metrics
-accuracy_metrics = analytics_service.calculate_accuracy_metrics(
-    predictions_df=predictions_gw5,
-    actual_results_df=actual_results,
-    by_position=True  # Position-specific metrics
-)
-
-# Returns:
-# {
-#   "overall": {"mae": 2.1, "rmse": 2.8, "correlation": 0.65, ...},
-#   "by_position": {
-#     "GKP": {"mae": 1.5, "rmse": 2.0, "correlation": 0.70, ...},
-#     "DEF": {"mae": 2.0, "rmse": 2.5, "correlation": 0.60, ...},
-#     "MID": {"mae": 2.3, "rmse": 3.0, "correlation": 0.62, ...},
-#     "FWD": {"mae": 2.5, "rmse": 3.2, "correlation": 0.58, ...}
-#   },
-#   "player_count": 587
-# }
-```
-
-#### 5. Accuracy Tracking Visualizations
-
-**Model Accuracy Tracking** - Visualize accuracy trends across historical gameweeks:
-
-```python
-from fpl_team_picker.visualization.charts import create_model_accuracy_visualization
-
-# Track model accuracy over last 5 completed gameweeks
-accuracy_viz = create_model_accuracy_visualization(
-    target_gameweek=8,  # Current gameweek
-    lookback_gameweeks=5,  # Analyze GW3-7
-    algorithm_versions=["current"],  # Can compare multiple algorithms
-    mo_ref=mo  # Marimo reference
-)
-# Returns: Interactive charts with MAE trends, correlation analysis, and gameweek breakdown
-```
-
-**Position-Specific Accuracy** - Analyze accuracy by position (GKP, DEF, MID, FWD):
-
-```python
-from fpl_team_picker.visualization.charts import create_position_accuracy_visualization
-
-# Analyze position-specific accuracy for a completed gameweek
-position_accuracy = create_position_accuracy_visualization(
-    target_gameweek=7,  # Must be completed
-    algorithm_version="current",
-    mo_ref=mo
-)
-# Returns: Position-wise MAE/correlation charts and breakdown tables
-```
-
-**Algorithm Comparison** - Compare multiple algorithm versions to find best performer:
-
-```python
-from fpl_team_picker.visualization.charts import create_algorithm_comparison_visualization
-
-# Compare algorithm performance across historical gameweeks
-comparison = create_algorithm_comparison_visualization(
-    start_gw=3,
-    end_gw=7,
-    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"],
-    mo_ref=mo
-)
-# Returns: Side-by-side comparison with winner recommendations
-```
-
-**Integration with Gameweek Manager:**
-
-The accuracy tracking visualizations can be added to the gameweek manager interface:
-
-```python
-# In gameweek_manager.py
-@app.cell
-def _(target_gameweek, mo):
-    from fpl_team_picker.visualization.charts import create_model_accuracy_visualization
-
-    # Show accuracy tracking for completed gameweeks
-    if target_gameweek > 1:
-        accuracy_display = create_model_accuracy_visualization(
-            target_gameweek=target_gameweek,
-            lookback_gameweeks=5,
-            mo_ref=mo
-        )
-    else:
-        accuracy_display = mo.md("*No completed gameweeks for accuracy tracking*")
-
-    return accuracy_display,
-```
-
-### Use Cases
-
-**1. Algorithm Optimization:**
-```python
-# Test 3 different form weights on GW1-7
-results = analytics_service.batch_recompute_season(
-    start_gw=1, end_gw=7,
-    algorithm_versions=["current", "experimental_high_form", "experimental_low_form"]
-)
-
-# Compare accuracy for each algorithm version
-for algo in ["current", "experimental_high_form", "experimental_low_form"]:
-    algo_predictions = results.xs(algo, level="algorithm_version")
-    metrics = analytics_service.calculate_accuracy_metrics(
-        algo_predictions, actual_results
-    )
-    print(f"{algo}: MAE={metrics['overall']['mae']}")
-```
-
-**2. Transfer ROI Analysis:**
-```python
-# Reconstruct what xP would have predicted at GW3 (before transfer decision)
-gw3_predictions = analytics_service.recompute_historical_xp(target_gameweek=3)
-
-# Compare transferred-in vs transferred-out players
-# Calculate net points over 5GW horizon
-# Identify systematic transfer biases
-```
-
-**3. Model Validation:**
-```python
-# Validate current algorithm against last 10 gameweeks
-validation_results = []
-for gw in range(1, 11):
-    predictions = analytics_service.recompute_historical_xp(target_gameweek=gw)
-    actual = client.get_gameweek_performance(gw)
-    metrics = analytics_service.calculate_accuracy_metrics(predictions, actual)
-    validation_results.append(metrics)
-
-# Analyze accuracy trends over time
-```
-
-### Testing
-
-```bash
-# Run historical recomputation and accuracy tracking tests
-pytest tests/domain/services/test_performance_analytics_service.py::TestAccuracyTracking -v
-
-# Test coverage includes:
-# - Historical data loading with temporal consistency
-# - Algorithm version validation
-# - Single gameweek recomputation
-# - Batch recomputation across gameweeks and algorithms
-# - Accuracy metrics calculation (overall + position-specific)
-# - Algorithm version registry validation
-# - Error handling for invalid inputs and missing data
-
-# Run all performance analytics tests
-pytest tests/domain/services/test_performance_analytics_service.py -v
-```
+Tests: `pytest tests/domain/services/test_performance_analytics_service.py -v`
 
 ## Development Commands
 
-**Primary Interfaces:**
-```bash
-# Install dependencies
-uv sync
+**Setup**: `uv sync`
 
-# Run season planner
-fpl-season-planner
-# or: marimo run fpl_team_picker/interfaces/season_planner.py
+**Code Quality**: `ruff check/format fpl_team_picker/`, `marimo check fpl_team_picker/interfaces/ --fix`, `vulture fpl_team_picker/`
 
-# Run gameweek manager
-fpl-gameweek-manager
-# or: marimo run fpl_team_picker/interfaces/gameweek_manager.py
+**Tests**: `pytest tests/domain/services/ -v`, `pytest tests/domain/services/test_integration.py -v`
 
-# Development mode
-marimo edit fpl_team_picker/interfaces/season_planner.py
-marimo edit fpl_team_picker/interfaces/gameweek_manager.py
-marimo edit fpl_team_picker/interfaces/ml_xp_experiment.py
-```
+## Technical Specs
 
-**Code Quality:**
-```bash
-# Lint and fix code issues
-ruff check fpl_team_picker/ --fix
+**Stack**: Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, pytest, ruff, fpl-dataset-builder
 
-# Format code
-ruff format fpl_team_picker/
+**Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models (70+ player attributes), repository pattern, 29/29 tests passing
 
-# Check and fix marimo notebooks
-marimo check fpl_team_picker/interfaces/ --fix
+## Data Contract & Boundary Validation
 
-# Find unused code
-vulture fpl_team_picker/
+**"Fail Fast, Validate Once"** - All validation at DataOrchestrationService boundary, deterministic downstream.
 
-# Run domain service tests
-pytest tests/domain/services/ -v
+**NO FALLBACKS**: ❌ `.get(key, "default")`, `.fillna()` → ✅ Explicit validation with clear error messages
 
-# Run integration tests
-pytest tests/domain/services/test_integration.py -v
-```
+Benefits: Deterministic behavior, fast debugging, data quality assurance, maintainable code
 
-## Technical Specifications
+## FPL Rules
 
-**Dependencies:**
-- Python 3.13+
-- marimo>=0.16.2 (interactive notebook interface - upgraded)
-- pandas>=2.3.1 (data manipulation)
-- numpy>=2.3.2 (numerical computations)
-- plotly>=6.3.0 (interactive visualizations)
-- pydantic>=2.11.0 (configuration validation and domain models)
-- requests>=2.31.0 (HTTP client)
-- xgboost>=3.0.5 (machine learning for expected points models)
-- scikit-learn>=1.7.2 (ML utilities and preprocessing)
-- pytest>=8.0.0 (testing framework)
-- ruff>=0.12.10 (linting and formatting)
-- fpl-dataset-builder (local dependency for historical data)
-
-**Key Architectural Features:**
-- **Clean Architecture** - Domain, infrastructure, and presentation layer separation
-- **Frontend-Agnostic Design** - Ready for FastAPI, React, CLI, mobile frontends
-- **Boundary Validation Pattern** - Fail fast at data boundaries, deterministic business logic
-- **Domain Services** - Pure business logic with zero framework dependencies
-- **Domain Models** - Type-safe entities with Pydantic validation (70+ player attributes)
-- **Comprehensive Testing** - Domain service unit tests and integration tests (29/29 tests passing)
-- **Type-Safe Configuration** - Pydantic models with validation and environment overrides
-- **Repository Pattern** - Abstract data access with concrete implementations
-- **Interactive Notebooks** - Marimo-based presentation adapters (33% code reduction achieved)
-- **CLI Integration** - Command-line entry points for all interfaces
-
-## Data Contract & Boundary Validation Principles
-
-### "Fail Fast, Validate Once" Pattern
-
-The system implements a strict **boundary validation pattern** where all data validation occurs at the boundary (DataOrchestrationService), ensuring deterministic business logic downstream.
-
-#### Core Principle: NO FALLBACKS
-**❌ Never use fallbacks or silent error handling:**
-```python
-# WRONG - Silent failure hides data integrity issues
-team_name = team_map.get(team_id, "Unknown Team")
-player_data = data.fillna("Default Value")
-```
-
-**✅ Always fail fast with actionable error messages:**
-```python
-# CORRECT - Explicit validation with clear error messages
-if not set(team_values).issubset(available_teams):
-    missing_teams = set(team_values) - available_teams
-    raise ValueError(f"Data contract violation: team IDs {missing_teams} not found in teams data")
-```
-
-#### Boundary Validation Contract
-
-**DataOrchestrationService** - THE validation boundary:
-```python
-def load_gameweek_data(self, target_gameweek: int) -> Dict[str, Any]:
-    """FAIL FAST if data is bad - guarantee clean data downstream"""
-
-    # Comprehensive validation here
-    if len(teams) != 20:
-        raise ValueError(f"Invalid team data: expected 20 teams, got {len(teams)}")
-
-    if players.empty:
-        raise ValueError("No player data available")
-
-    # Validate team ID consistency
-    player_teams = set(players["team_id"].unique())
-    available_teams = set(teams["team_id"].unique())
-    if not player_teams.issubset(available_teams):
-        missing = player_teams - available_teams
-        raise ValueError(f"Team ID mismatch: players reference teams {missing} not in teams data")
-
-    # Return: "Clean data dictionary - guaranteed to be valid"
-    return validated_data
-```
-
-**Domain Services** - Trust the data contract:
-```python
-def calculate_expected_points(self, gameweek_data: Dict[str, Any]) -> pd.DataFrame:
-    """Args: gameweek_data - guaranteed clean data
-    Returns: DataFrame with expected points - deterministic"""
-
-    # No validation needed - trust the contract
-    players = gameweek_data["players"]  # Known to be valid
-    return mathematical_transformation(players)
-```
-
-#### Data Integrity Enforcement
-
-**In optimization and display layers:**
-```python
-# Validate data contract before mapping operations
-team_values = df["team"].unique()
-available_teams = set(teams["team_id"])
-
-if not set(team_values).issubset(available_teams):
-    missing_teams = set(team_values) - available_teams
-    raise ValueError(f"Data contract violation: team IDs {missing_teams} not found")
-
-# Only proceed with mapping if validation passes
-df["name"] = df["team"].map(team_map)  # Guaranteed to work
-```
-
-#### Benefits of This Approach
-
-1. **Deterministic Behavior** - No silent failures or unpredictable fallbacks
-2. **Fast Debugging** - Clear error messages pinpoint exact data issues
-3. **Data Quality Assurance** - Forces upstream data problems to be fixed
-4. **Maintainable Code** - Business logic can trust data contracts
-5. **No Technical Debt** - Prevents accumulation of workaround code
-
-#### Common Anti-Patterns to Avoid
-
-```python
-# ❌ ANTI-PATTERN: Silent fallbacks hide problems
-df["name"] = df["team"].map(team_map).fillna("Unknown")
-
-# ❌ ANTI-PATTERN: Generic error handling
-try:
-    df["name"] = df["team"].map(team_map)
-except:
-    df["name"] = "Error"
-
-# ❌ ANTI-PATTERN: Default value masking
-team_name = team_map.get(team_id, "N/A")
-```
-
-```python
-# ✅ CORRECT PATTERN: Explicit validation and clear failures
-if team_id not in team_map:
-    raise ValueError(f"Team ID {team_id} not found in teams data. Available: {list(team_map.keys())}")
-team_name = team_map[team_id]
-```
-
-This pattern ensures that when something fails, you get **actionable debugging information** rather than mysterious "object" values or silent data corruption.
-
-## FPL Rules Reference
-
-All implementations must comply with official FPL rules documented in `fpl_rules.md`. Key constraints include:
-- Squad composition: 2 GKP, 5 DEF, 5 MID, 3 FWD
-- £100m budget limit
-- Max 3 players per real team
-- Valid formations for starting 11
+See `fpl_rules.md`. Key: 2 GKP, 5 DEF, 5 MID, 3 FWD; £100m budget; max 3 players/team; valid formations
 
 ## Configuration
 
-The project uses a comprehensive configuration system. Create `config.json` to override defaults:
-
-```json
-{
-  "xp_model": {
-    "form_weight": 0.7,
-    "form_window": 5
-  },
-  "team_strength": {
-    "historical_transition_gw": 8
-  },
-  "optimization": {
-    "transfer_cost": 4.0,
-    "max_transfers": 3
-  }
-}
-```
-
-Environment variables can override any setting:
-```bash
-export FPL_XP_MODEL_FORM_WEIGHT=0.8
-export FPL_TEAM_STRENGTH_HISTORICAL_TRANSITION_GW=10
-```
+Override via `config.json` or env vars (`FPL_{SECTION}_{FIELD}`)
 
 ## Performance Benchmark
 
-**2024-25 FPL Winner**: 2,810 points (74 points per gameweek average)
-- Target: 5-week xP projections should align with ~370 points (5 × 74) for competitive squads
-- Validation: Premium players should project 8-12 xP per gameweek, budget options 4-7 xP
+2024-25 winner: 2,810 points (74/GW avg). Target: ~370 pts over 5GW. Premium 8-12 xP, budget 4-7 xP.
 
-## Clean Architecture Patterns & Frontend Migration
+## Frontend Migration Ready
 
-### **Boundary Validation Pattern - "Fail Fast, Validate Once"**
+Domain services work with Marimo (current), FastAPI, React, CLI, or mobile. Zero UI dependencies in business logic. Test domain services independently.
 
-The system implements a sophisticated validation pattern where all data validation occurs at the boundary, ensuring deterministic business logic:
+## Domain Models (Issue #31 ✅)
 
-```python
-# DataOrchestrationService - THE validation boundary
-def load_gameweek_data(self, target_gameweek: int) -> Dict[str, Any]:
-    """FAIL FAST if data is bad - guarantee clean data downstream"""
+**EnrichedPlayerDomain**: 70+ validated attributes (core, performance, advanced, market, set pieces, derived, computed properties)
 
-    # Comprehensive validation here
-    if len(teams) != 20:
-        raise ValueError(f"Invalid team data: expected 20 teams, got {len(teams)}")
+**PlayerAnalyticsService**: Type-safe queries (`get_penalty_takers()`, `get_high_value_players()`, `get_injury_risks()`, etc.)
 
-    # Return: "Clean data dictionary - guaranteed to be valid"
-    return validated_data
-
-# ExpectedPointsService - Trusts the data contract
-def calculate_expected_points(self, gameweek_data: Dict[str, Any]) -> pd.DataFrame:
-    """Args: gameweek_data - guaranteed clean data
-    Returns: DataFrame with expected points - deterministic"""
-
-    # No validation needed - trust the contract
-    players = gameweek_data["players"]  # Known to be valid
-    return mathematical_transformation(players)
-```
-
-### **Frontend Migration Readiness**
-
-The clean architecture enables seamless migration to any frontend technology:
-
-```python
-# 1. Current: Marimo Notebook
-@app.cell
-def _(gameweek_input, mo):
-    orchestration_service = DataOrchestrationService()
-    gameweek_data = orchestration_service.load_gameweek_data(gameweek_input.value)
-
-    xp_service = ExpectedPointsService()
-    players_with_xp = xp_service.calculate_combined_results(gameweek_data)
-
-    return create_marimo_display(players_with_xp)
-
-# 2. Future: FastAPI Backend
-@app.post("/analyze-gameweek")
-def analyze_gameweek(request: GameweekRequest):
-    orchestration_service = DataOrchestrationService()
-    gameweek_data = orchestration_service.load_gameweek_data(request.gameweek)
-
-    xp_service = ExpectedPointsService()
-    players_with_xp = xp_service.calculate_combined_results(gameweek_data)
-
-    return {"status": "success", "data": players_with_xp.to_dict()}
-
-# 3. Future: React Frontend (via API)
-const GameweekAnalysis = ({ gameweek }) => {
-    const { data: analysisData } = useQuery(
-        ['gameweek-analysis', gameweek],
-        () => fetch(`/api/analyze-gameweek`, {
-            method: 'POST',
-            body: JSON.stringify({ gameweek })
-        }).then(res => res.json())
-    );
-
-    return <AnalysisDisplay data={analysisData} />;
-};
-
-# 4. Future: CLI Interface
-def cli_analyze_gameweek(gameweek: int):
-    orchestration_service = DataOrchestrationService()
-    gameweek_data = orchestration_service.load_gameweek_data(gameweek)
-
-    xp_service = ExpectedPointsService()
-    players_with_xp = xp_service.calculate_combined_results(gameweek_data)
-
-    print(format_cli_table(players_with_xp))
-```
-
-### **Testing Strategy**
-
-**Domain Service Testing** - Complete isolation from UI:
-```python
-# tests/domain/services/test_integration.py
-def test_expected_points_service_integration(data_service, xp_service):
-    """Test XP service with real data - no UI dependencies"""
-    gameweek_data = data_service.load_gameweek_data(target_gameweek=1)
-
-    players_with_xp = xp_service.calculate_combined_results(gameweek_data)
-
-    assert isinstance(players_with_xp, pd.DataFrame)
-    assert players_with_xp["xP"].min() >= 0
-    assert players_with_xp["xP"].max() <= 20
-```
-
-**Interface Compatibility Testing**:
-```python
-# tests/interfaces/test_marimo_compatibility.py
-def test_gameweek_manager_loads_without_errors():
-    """Ensure marimo interface works with domain services"""
-    # Test marimo notebook can import and use domain services
-    from fpl_team_picker.domain.services import DataOrchestrationService
-    service = DataOrchestrationService()
-    assert service is not None
-```
-
-## Development Workflow
-
-### **Current Development (Clean Architecture)**
-1. **Season Start**: Use season planner for initial 15-player squad building
-2. **Weekly Planning**: Use clean gameweek manager (969 lines) with domain service orchestration
-3. **Post-Gameweek**: Analyze results using domain services independently
-4. **ML Model Development**: Use ML experiment interface for model improvement
-5. **Domain Service Development**: Add/modify business logic in isolated domain services
-6. **Frontend Experimentation**: Build new interfaces using existing domain services
-
-### **Future Development (Multi-Frontend)**
-1. **FastAPI Backend**: Expose domain services as REST API endpoints
-2. **React Frontend**: Build modern web interface consuming REST API
-3. **Mobile Development**: iOS/Android apps using same business logic via API
-4. **CLI Tools**: Command-line utilities for power users and automation
-5. **Third-Party Integrations**: Enable other developers to use FPL analysis services
-
-### **Testing & Validation Workflow**
-```bash
-# 1. Domain service testing (business logic)
-pytest tests/domain/services/ -v
-
-# 2. Integration testing (end-to-end)
-pytest tests/domain/services/test_integration.py -v
-
-# 3. Interface compatibility testing
-pytest tests/interfaces/ -v
-
-# 4. Code quality and formatting
-ruff check fpl_team_picker/ --fix
-marimo check fpl_team_picker/interfaces/ --fix
-```
-
-The clean architecture transformation enables rapid iteration across multiple frontends while maintaining a single source of truth for all FPL analysis logic. Domain services can be developed, tested, and deployed independently of any specific UI technology.
-
-## Domain Model Architecture (Issue #31 ✅ COMPLETE)
-
-### Implementation Summary
-
-**Completed Phases:**
-1. ✅ **Domain Model Extension** - `EnrichedPlayerDomain` with 70+ validated attributes
-2. ✅ **Repository Implementation** - `DatabasePlayerRepository.get_enriched_players()` merging 3 data sources
-3. ✅ **Service Layer** - `PlayerAnalyticsService` with 18 type-safe query methods
-4. ✅ **Interface Integration** - 2 production interfaces using domain models
-
-**Key Achievements:**
-- **Type Safety**: Full Pydantic validation with computed properties
-- **Testing**: 29/29 tests passing (11 model tests + 18 service tests)
-- **Production Use**: Successfully deployed in gameweek_manager.py and player_timeseries_analysis.py
-- **Performance**: No measurable overhead from domain model validation
-
-**Domain Model Benefits:**
-```python
-# Before (raw DataFrame access)
-for _, player in players_df.iterrows():
-    if player.get('penalties_order', None) and player['penalties_order'] <= 2:
-        print(player['web_name'])  # No type safety, error-prone
-
-# After (type-safe domain models)
-for player in analytics_service.get_penalty_takers():
-    print(player.web_name)  # Full IDE autocomplete and type checking
-    print(player.is_high_value)  # Computed properties available
-```
-
-**Available Player Attributes** (70+ fields):
-- **Core**: player_id, web_name, team_id, position, price, selected_by_percent
-- **Performance**: total_points, form, minutes, starts, goals, assists, clean_sheets
-- **Advanced**: expected_goals_per_90, expected_assists_per_90, ICT components
-- **Market**: transfers_in, transfers_out, value_form, value_season
-- **Set Pieces**: penalties_order, corners_order (with computed `is_penalty_taker`)
-- **Derived**: value_score, form_momentum, injury_risk, rotation_risk, consistency
-- **Computed Properties**: is_high_value, has_injury_concern, is_premium, is_differential, goals_per_90, etc.
-
-**Usage in Interfaces:**
-```python
-from fpl_team_picker.domain.services import PlayerAnalyticsService
-from fpl_team_picker.adapters.database_repositories import DatabasePlayerRepository
-
-# Initialize service
-player_repo = DatabasePlayerRepository()
-analytics_service = PlayerAnalyticsService(player_repo)
-
-# Type-safe queries
-players = analytics_service.get_all_players_enriched()  # List[EnrichedPlayerDomain]
-penalty_takers = analytics_service.get_penalty_takers()
-high_value = analytics_service.get_high_value_players(min_value_score=80)
-injury_risks = analytics_service.get_injury_risks(min_risk=0.5)
-top_value = analytics_service.get_top_players_by_value(limit=10)
-
-# Computed properties (no manual calculation needed)
-for player in players:
-    if player.is_penalty_taker and not player.has_injury_concern:
-        print(f"{player.web_name}: {player.goals_per_90:.2f} goals/90")
-```
+Full Pydantic validation, 29/29 tests passing, production-ready in gameweek_manager.py
 
 ---
 
