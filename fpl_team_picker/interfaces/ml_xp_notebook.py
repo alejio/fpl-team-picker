@@ -51,6 +51,15 @@ def _():
         DataOrchestrationService,
         ExpectedPointsService,
     )
+
+    # Production ML modules - USE THESE instead of custom functions
+    from fpl_team_picker.domain.services.ml_feature_engineering import (
+        FPLFeatureEngineer,
+    )
+    from fpl_team_picker.domain.services.ml_pipeline_factory import (
+        create_fpl_pipeline,
+        get_team_strength_ratings,
+    )
     from client import FPLDataClient
 
     # Initialize services
@@ -58,6 +67,7 @@ def _():
     xp_service = ExpectedPointsService()
     client = FPLDataClient()
     return (
+        FPLFeatureEngineer,
         GradientBoostingRegressor,
         GroupKFold,
         Pipeline,
@@ -65,8 +75,10 @@ def _():
         Ridge,
         StandardScaler,
         client,
+        create_fpl_pipeline,
         cross_val_score,
         data_service,
+        get_team_strength_ratings,
         mo,
         np,
         pd,
@@ -275,59 +287,9 @@ def _(mo):
 
 
 @app.cell
-def _(teams_df, mo):
-    # Calculate team strength ratings based on historical performance
-    def get_team_strength_ratings():
-        """
-        Team strength ratings based on 2023-24 final table positions.
-        Returns dict mapping team name to strength factor [0.7, 1.3]
-        Higher value = stronger team
-        """
-        team_positions = {
-            "Manchester City": 1,
-            "Arsenal": 2,
-            "Liverpool": 3,
-            "Aston Villa": 4,
-            "Tottenham": 5,
-            "Chelsea": 6,
-            "Newcastle": 7,
-            "Manchester Utd": 8,
-            "West Ham": 9,
-            "Crystal Palace": 10,
-            "Brighton": 11,
-            "Bournemouth": 12,
-            "Fulham": 13,
-            "Wolves": 14,
-            "Everton": 15,
-            "Brentford": 16,
-            "Nottingham Forest": 17,
-            "Luton": 18,
-            "Burnley": 19,
-            "Sheffield Utd": 20,
-            # Add newly promoted/relegated teams
-            "Ipswich": 21,
-            "Leicester": 21,
-            "Southampton": 21,
-            # Add team name aliases to match fixture data
-            "Man City": 1,
-            "Man Utd": 8,
-            "Nott'm Forest": 17,
-            "Spurs": 5,
-        }
-
-        # Convert to strength ratings (1st place = 1.3, 20th = 0.7, promoted teams lower)
-        strength_ratings = {}
-        for team, position in team_positions.items():
-            if position <= 20:
-                # Standard PL teams: 1st = 1.3, 20th = 0.7
-                strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
-            else:
-                # Promoted teams: below worst PL team (0.7)
-                strength = 0.65
-            strength_ratings[team] = round(strength, 3)
-
-        return strength_ratings
-
+def _(teams_df, mo, get_team_strength_ratings):
+    # ✅ USE PRODUCTION CODE: Team strength ratings from ml_pipeline_factory
+    # This ensures notebook and gameweek_manager.py use IDENTICAL logic
     team_strength = get_team_strength_ratings()
 
     # Display team strength summary
@@ -363,15 +325,33 @@ def _(mo):
 
 
 @app.cell
-def _(fixtures_df, historical_df, mo, np, pd, team_strength, teams_df):
-    # Feature engineering with temporal validation
-    def create_features_leak_free(
+def _(
+    fixtures_df, historical_df, mo, np, pd, team_strength, teams_df, FPLFeatureEngineer
+):
+    # ===================================================================
+    # ✅ USE PRODUCTION CODE: FPLFeatureEngineer from ml_feature_engineering.py
+    # ===================================================================
+    # This ensures notebook and gameweek_manager.py use IDENTICAL feature engineering
+    # Any changes to feature logic propagate automatically to production!
+    #
+    # OLD: custom create_features_leak_free() function (DEPRECATED - see below)
+    # NEW: FPLFeatureEngineer class (scroll down to see usage)
+    # ===================================================================
+
+    # ⚠️ DEPRECATED FUNCTION - Kept for reference only, not used anymore
+    # The actual feature engineering is done by FPLFeatureEngineer below
+    def create_features_leak_free_DEPRECATED(
         df: pd.DataFrame,
         fixtures: pd.DataFrame,
         teams: pd.DataFrame,
         team_strengths: dict,
     ) -> pd.DataFrame:
         """
+        ⚠️ DEPRECATED: Use FPLFeatureEngineer from production code instead.
+
+        This function is kept for reference but is NOT USED.
+        Scroll down to see the NEW implementation using FPLFeatureEngineer.
+
         Create features without data leakage - only use past data.
 
         For predicting gameweek N, uses:
@@ -1135,16 +1115,41 @@ def _(fixtures_df, historical_df, mo, np, pd, team_strength, teams_df):
 
         return df
 
+    # ===================================================================
+    # ✅ PRODUCTION INTEGRATION: Feature Engineering
+    # ===================================================================
+    # This section uses FPLFeatureEngineer from ml_feature_engineering.py
+    # Benefits:
+    #   - Single source of truth for feature logic
+    #   - Changes here automatically propagate to gameweek_manager.py
+    #   - No code duplication or drift between notebook and production
+    #   - Easier to test and maintain
+    # ===================================================================
+
     if not historical_df.empty:
-        if not fixtures_df.empty and not teams_df.empty:
-            features_df = create_features_leak_free(
-                historical_df, fixtures_df, teams_df, team_strength
-            )
-        else:
-            # No fixture data available - use empty DataFrames
-            features_df = create_features_leak_free(
-                historical_df, pd.DataFrame(), pd.DataFrame(), {}
-            )
+        # Initialize production feature engineer
+        feature_engineer = FPLFeatureEngineer(
+            fixtures_df=fixtures_df if not fixtures_df.empty else None,
+            teams_df=teams_df if not teams_df.empty else None,
+            team_strength=team_strength if team_strength else None,
+        )
+
+        # Transform historical data to features (same as production!)
+        features_df = feature_engineer.fit_transform(
+            historical_df, historical_df["total_points"]
+        )
+
+        # Add back metadata for notebook analysis
+        # (FPLFeatureEngineer sorts by player_id, gameweek internally)
+        historical_df_sorted = historical_df.sort_values(
+            ["player_id", "gameweek"]
+        ).reset_index(drop=True)
+        features_df["player_id"] = historical_df_sorted["player_id"].values
+        features_df["gameweek"] = historical_df_sorted["gameweek"].values
+        features_df["total_points"] = historical_df_sorted["total_points"].values
+
+        # Get feature names from production code (to be used in CV/training)
+        production_feature_cols = list(feature_engineer.get_feature_names_out())
 
         # Show feature engineering results
         feature_summary = mo.vstack(
@@ -1242,10 +1247,11 @@ def _(fixtures_df, historical_df, mo, np, pd, team_strength, teams_df):
         )
     else:
         features_df = pd.DataFrame()
+        production_feature_cols = []
         feature_summary = mo.md("⚠️ **Load data first**")
 
     feature_summary
-    return (features_df,)
+    return (features_df, production_feature_cols)
 
 
 @app.cell
@@ -1321,7 +1327,7 @@ def _(mo):
 
 
 @app.cell
-def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
+def _(end_gw_input, features_df, mo, n_folds_input, np, pd, production_feature_cols):
     # Prepare data for cross-validation
     # Strategy: Use ALL available gameweeks (GW6+) with player-based stratified k-fold
     if not features_df.empty and end_gw_input.value and n_folds_input.value:
@@ -1346,81 +1352,11 @@ def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
                 & (features_df["gameweek"] <= end_gw_input.value)
             ].copy()
 
-            # Define feature columns - EXPLICIT list to prevent leakage
-            # Only use engineered features (lagged historical data) and pre-gameweek info
-            feature_cols = [
-                # Static features (known before gameweek)
-                "price",
-                "position_encoded",
-                "games_played",
-                # Cumulative season statistics (up to GW N-1)
-                "cumulative_minutes",
-                "cumulative_goals",
-                "cumulative_assists",
-                "cumulative_points",
-                "cumulative_bonus",
-                "cumulative_clean_sheets",
-                "cumulative_xg",
-                "cumulative_xa",
-                "cumulative_bps",
-                # Cumulative per-90 rates (season-long efficiency)
-                "goals_per_90",
-                "assists_per_90",
-                "points_per_90",
-                "xg_per_90",
-                "xa_per_90",
-                "bps_per_90",
-                "clean_sheet_rate",
-                # Rolling 5GW form features (GW N-6 to N-1)
-                "rolling_5gw_points",
-                "rolling_5gw_minutes",
-                "rolling_5gw_goals",
-                "rolling_5gw_assists",
-                "rolling_5gw_xg",
-                "rolling_5gw_xa",
-                "rolling_5gw_bps",
-                "rolling_5gw_bonus",
-                "rolling_5gw_clean_sheets",
-                "rolling_5gw_ict_index",
-                "rolling_5gw_influence",
-                "rolling_5gw_creativity",
-                "rolling_5gw_threat",
-                # Rolling 5GW per-90 rates (recent efficiency)
-                "rolling_5gw_goals_per_90",
-                "rolling_5gw_assists_per_90",
-                "rolling_5gw_points_per_90",
-                # Defensive metrics (rolling 5GW)
-                "rolling_5gw_goals_conceded",
-                "rolling_5gw_saves",
-                "rolling_5gw_xgi",
-                "rolling_5gw_xgc",
-                # Consistency & volatility (rolling 5GW)
-                "rolling_5gw_points_std",
-                "rolling_5gw_minutes_std",
-                "minutes_played_rate",
-                "form_trend",
-                # Team features (leak-free context - safe with player-based GroupKFold)
-                "team_encoded",
-                "team_rolling_5gw_goals_scored",
-                "team_rolling_5gw_goals_conceded",
-                "team_rolling_5gw_xg",
-                "team_rolling_5gw_xgc",
-                "team_rolling_5gw_clean_sheets",
-                "team_rolling_5gw_points",
-                "team_cumulative_goals_scored",
-                "team_cumulative_goals_conceded",
-                "team_cumulative_clean_sheets",
-                "team_season_points",
-                "team_rolling_5gw_goal_diff",
-                "team_rolling_5gw_xg_diff",
-                # Fixture features (opponent context)
-                "is_home",
-                "opponent_strength",
-                "fixture_difficulty",
-                "opponent_rolling_5gw_goals_conceded",
-                "opponent_rolling_5gw_clean_sheets",
-                "opponent_rolling_5gw_xgc",
-            ]
+            # ✅ USE PRODUCTION FEATURE LIST from FPLFeatureEngineer
+            # This ensures notebook training uses same features as gameweek_manager.py
+            # OLD: Hardcoded list of 63 features (could drift from production)
+            # NEW: Dynamic list from production code (always in sync)
+            feature_cols = production_feature_cols
 
             # Validate all feature columns exist in the data
             missing_features = [
