@@ -134,9 +134,11 @@ def _(data_service, mo):
 
 @app.cell
 def _(client, end_gw_input, mo, pd, start_gw_input):
-    # Load historical gameweek performance data
+    # Load historical gameweek performance data + fixtures & teams for opponent features
     historical_data = []
     data_load_status = []
+    fixtures_df = pd.DataFrame()
+    teams_df = pd.DataFrame()
 
     if start_gw_input.value and end_gw_input.value:
         if end_gw_input.value <= start_gw_input.value:
@@ -188,6 +190,19 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
                             f"Failed to enrich historical data with position information: {str(e)}"
                         )
 
+                    # Load fixtures and teams data for fixture-specific features
+                    try:
+                        fixtures_df = client.get_fixtures_normalized()
+                        teams_df = client.get_current_teams()
+
+                        data_load_status.append(
+                            f"✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}"
+                        )
+                    except Exception as e:
+                        data_load_status.append(
+                            f"⚠️ Warning: Could not load fixtures/teams: {str(e)}"
+                        )
+
                     load_summary = mo.vstack(
                         [
                             mo.md(f"### ✅ Loaded {len(historical_data)} Gameweeks"),
@@ -210,7 +225,7 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
         load_summary = mo.md("⚠️ **Select gameweek range to load data**")
 
     load_summary
-    return (historical_df,)
+    return fixtures_df, historical_df, teams_df
 
 
 @app.cell
@@ -255,14 +270,107 @@ def _(historical_df, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 2️⃣ Feature Engineering - Leak-Free Historical Features""")
+    mo.md(r"""## 2️⃣ Team Strength Ratings - Opponent Quality Context""")
     return
 
 
 @app.cell
-def _(historical_df, mo, np, pd):
+def _(teams_df, mo):
+    # Calculate team strength ratings based on historical performance
+    def get_team_strength_ratings():
+        """
+        Team strength ratings based on 2023-24 final table positions.
+        Returns dict mapping team name to strength factor [0.7, 1.3]
+        Higher value = stronger team
+        """
+        team_positions = {
+            "Manchester City": 1,
+            "Arsenal": 2,
+            "Liverpool": 3,
+            "Aston Villa": 4,
+            "Tottenham": 5,
+            "Chelsea": 6,
+            "Newcastle": 7,
+            "Manchester Utd": 8,
+            "West Ham": 9,
+            "Crystal Palace": 10,
+            "Brighton": 11,
+            "Bournemouth": 12,
+            "Fulham": 13,
+            "Wolves": 14,
+            "Everton": 15,
+            "Brentford": 16,
+            "Nottingham Forest": 17,
+            "Luton": 18,
+            "Burnley": 19,
+            "Sheffield Utd": 20,
+            # Add newly promoted/relegated teams
+            "Ipswich": 21,
+            "Leicester": 21,
+            "Southampton": 21,
+            # Add team name aliases to match fixture data
+            "Man City": 1,
+            "Man Utd": 8,
+            "Nott'm Forest": 17,
+            "Spurs": 5,
+        }
+
+        # Convert to strength ratings (1st place = 1.3, 20th = 0.7, promoted teams lower)
+        strength_ratings = {}
+        for team, position in team_positions.items():
+            if position <= 20:
+                # Standard PL teams: 1st = 1.3, 20th = 0.7
+                strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
+            else:
+                # Promoted teams: below worst PL team (0.7)
+                strength = 0.65
+            strength_ratings[team] = round(strength, 3)
+
+        return strength_ratings
+
+    team_strength = get_team_strength_ratings()
+
+    # Display team strength summary
+    if not teams_df.empty:
+        strength_summary = []
+        for team_name, strength in sorted(
+            team_strength.items(), key=lambda x: x[1], reverse=True
+        )[:20]:
+            strength_summary.append(f"- **{team_name}**: {strength}")
+
+        team_strength_display = mo.vstack(
+            [
+                mo.md("### ✅ Team Strength Ratings Calculated"),
+                mo.md(
+                    f"**Total teams:** {len(team_strength)} | **Range:** [0.65, 1.30]"
+                ),
+                mo.md("**Top 5 Teams:**"),
+                mo.md("\n".join(strength_summary[:5])),
+                mo.md("---"),
+            ]
+        )
+    else:
+        team_strength_display = mo.md("⚠️ **Load teams data first**")
+
+    team_strength_display
+    return (team_strength,)
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""## 3️⃣ Feature Engineering - Leak-Free Historical + Fixture Features""")
+    return
+
+
+@app.cell
+def _(fixtures_df, historical_df, mo, np, pd, team_strength, teams_df):
     # Feature engineering with temporal validation
-    def create_features_leak_free(df: pd.DataFrame) -> pd.DataFrame:
+    def create_features_leak_free(
+        df: pd.DataFrame,
+        fixtures: pd.DataFrame,
+        teams: pd.DataFrame,
+        team_strengths: dict,
+    ) -> pd.DataFrame:
         """
         Create features without data leakage - only use past data.
 
@@ -270,6 +378,7 @@ def _(historical_df, mo, np, pd):
         - Cumulative stats up to GW N-1 (season-long totals)
         - Rolling 5GW stats from GW N-6 to N-1 (recent form)
         - Static features (price, position) known before GW N starts
+        - Fixture features (opponent strength, home/away, opponent defensive metrics)
         """
         if df.empty:
             return df
@@ -763,6 +872,187 @@ def _(historical_df, mo, np, pd):
             df["team_rolling_5gw_xg_diff"] = 0
 
         # ===================================================================
+        # FIXTURE-SPECIFIC FEATURES (opponent strength, home/away, opponent defensive metrics)
+        # ===================================================================
+        # These features capture match-specific context known before gameweek starts
+        # - Opponent strength: How strong is the team you're facing?
+        # - Home/away: Venue advantage/disadvantage
+        # - Opponent defensive form: How many goals/clean sheets does opponent concede?
+
+        if not fixtures.empty and not teams.empty and "team_id" in df.columns:
+            # Data contract: fixtures has [event, home_team_id, away_team_id]
+            # Data contract: teams has [team_id, name]
+            fixtures_copy = fixtures.rename(columns={"event": "gameweek"})
+
+            # Create opponent mapping for each team in each gameweek
+            # Home fixtures: team plays at home vs away team
+            home_fixtures = fixtures_copy[
+                ["gameweek", "home_team_id", "away_team_id"]
+            ].copy()
+            home_fixtures = home_fixtures.rename(
+                columns={"home_team_id": "team_id", "away_team_id": "opponent_team_id"}
+            )
+            home_fixtures["is_home"] = 1
+
+            # Away fixtures: team plays away vs home team
+            away_fixtures = fixtures_copy[
+                ["gameweek", "home_team_id", "away_team_id"]
+            ].copy()
+            away_fixtures = away_fixtures.rename(
+                columns={"away_team_id": "team_id", "home_team_id": "opponent_team_id"}
+            )
+            away_fixtures["is_home"] = 0
+
+            # Combine home and away fixtures
+            all_team_fixtures = pd.concat(
+                [home_fixtures, away_fixtures], ignore_index=True
+            )
+
+            # Merge opponent team names
+            all_team_fixtures = all_team_fixtures.merge(
+                teams[["team_id", "name"]],
+                left_on="opponent_team_id",
+                right_on="team_id",
+                how="left",
+                suffixes=("", "_opponent"),
+            )
+            all_team_fixtures = all_team_fixtures.rename(
+                columns={"name": "opponent_name"}
+            )
+            all_team_fixtures = all_team_fixtures.drop(columns=["team_id_opponent"])
+
+            # Add opponent strength from team_strengths dict
+            all_team_fixtures["opponent_strength"] = (
+                all_team_fixtures["opponent_name"].map(team_strengths).fillna(1.0)
+            )
+
+            # Calculate fixture difficulty (higher = easier)
+            # Using inverse of opponent strength with home advantage multiplier
+            all_team_fixtures["fixture_difficulty"] = np.where(
+                all_team_fixtures["is_home"] == 1,
+                (2.0 - all_team_fixtures["opponent_strength"]) * 1.1,  # Home advantage
+                2.0 - all_team_fixtures["opponent_strength"],  # Away
+            )
+
+            # Merge fixture features to player data
+            df = df.merge(
+                all_team_fixtures[
+                    [
+                        "gameweek",
+                        "team_id",
+                        "is_home",
+                        "opponent_strength",
+                        "fixture_difficulty",
+                    ]
+                ],
+                on=["gameweek", "team_id"],
+                how="left",
+            )
+
+            # Fill missing fixture features with neutral values
+            df["is_home"] = df["is_home"].fillna(0.5)  # Neutral if unknown
+            df["opponent_strength"] = df["opponent_strength"].fillna(
+                1.0
+            )  # Average opponent
+            df["fixture_difficulty"] = df["fixture_difficulty"].fillna(
+                1.0
+            )  # Average difficulty
+
+            # === OPPONENT DEFENSIVE METRICS (rolling 5GW) ===
+            # How many goals/clean sheets does the opponent concede?
+            # Calculate opponent's defensive stats from historical data
+            opponent_defensive_stats = (
+                df.groupby(["team_id", "gameweek"])
+                .agg(
+                    {
+                        "goals_conceded": "first"
+                        if "goals_conceded" in df.columns
+                        else lambda x: 0,
+                        "clean_sheets": "max",  # Binary: 1 if team kept clean sheet
+                        "expected_goals_conceded": "first"
+                        if "expected_goals_conceded" in df.columns
+                        else lambda x: 0,
+                    }
+                )
+                .reset_index()
+            )
+
+            # Sort by team and gameweek for temporal operations
+            opponent_defensive_stats = opponent_defensive_stats.sort_values(
+                ["team_id", "gameweek"]
+            ).reset_index(drop=True)
+
+            # Calculate rolling 5GW defensive metrics for each team
+            opp_grouped = opponent_defensive_stats.groupby("team_id", group_keys=False)
+
+            opponent_defensive_stats["opponent_rolling_5gw_goals_conceded"] = (
+                opp_grouped["goals_conceded"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            opponent_defensive_stats["opponent_rolling_5gw_clean_sheets"] = (
+                opp_grouped["clean_sheets"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+            opponent_defensive_stats["opponent_rolling_5gw_xgc"] = (
+                opp_grouped["expected_goals_conceded"]
+                .shift(1)
+                .rolling(window=5, min_periods=1)
+                .mean()
+                .fillna(0)
+            )
+
+            # Merge opponent defensive stats back to player data via opponent_team_id
+            # First merge opponent_team_id to df
+            df = df.merge(
+                all_team_fixtures[["gameweek", "team_id", "opponent_team_id"]],
+                on=["gameweek", "team_id"],
+                how="left",
+            )
+
+            # Then merge opponent defensive metrics
+            df = df.merge(
+                opponent_defensive_stats[
+                    [
+                        "team_id",
+                        "gameweek",
+                        "opponent_rolling_5gw_goals_conceded",
+                        "opponent_rolling_5gw_clean_sheets",
+                        "opponent_rolling_5gw_xgc",
+                    ]
+                ],
+                left_on=["opponent_team_id", "gameweek"],
+                right_on=["team_id", "gameweek"],
+                how="left",
+                suffixes=("", "_opp"),
+            )
+
+            # Clean up duplicate team_id column
+            df = df.drop(columns=["team_id_opp"])
+
+            # Fill missing opponent defensive features
+            df["opponent_rolling_5gw_goals_conceded"] = df[
+                "opponent_rolling_5gw_goals_conceded"
+            ].fillna(0)
+            df["opponent_rolling_5gw_clean_sheets"] = df[
+                "opponent_rolling_5gw_clean_sheets"
+            ].fillna(0)
+            df["opponent_rolling_5gw_xgc"] = df["opponent_rolling_5gw_xgc"].fillna(0)
+        else:
+            # No fixture/team data available - create zero columns
+            df["is_home"] = 0.5
+            df["opponent_strength"] = 1.0
+            df["fixture_difficulty"] = 1.0
+            df["opponent_rolling_5gw_goals_conceded"] = 0
+            df["opponent_rolling_5gw_clean_sheets"] = 0
+            df["opponent_rolling_5gw_xgc"] = 0
+
+        # ===================================================================
         # FILL MISSING VALUES
         # ===================================================================
         # List all engineered feature columns
@@ -833,18 +1123,35 @@ def _(historical_df, mo, np, pd):
             "team_season_points",
             "team_rolling_5gw_goal_diff",
             "team_rolling_5gw_xg_diff",
+            # Fixture features (opponent context)
+            "is_home",
+            "opponent_strength",
+            "fixture_difficulty",
+            "opponent_rolling_5gw_goals_conceded",
+            "opponent_rolling_5gw_clean_sheets",
+            "opponent_rolling_5gw_xgc",
         ]
         df[engineered_feature_cols] = df[engineered_feature_cols].fillna(0)
 
         return df
 
     if not historical_df.empty:
-        features_df = create_features_leak_free(historical_df)
+        if not fixtures_df.empty and not teams_df.empty:
+            features_df = create_features_leak_free(
+                historical_df, fixtures_df, teams_df, team_strength
+            )
+        else:
+            # No fixture data available - use empty DataFrames
+            features_df = create_features_leak_free(
+                historical_df, pd.DataFrame(), pd.DataFrame(), {}
+            )
 
         # Show feature engineering results
         feature_summary = mo.vstack(
             [
-                mo.md("### ✅ Features Engineered (5-Gameweek Rolling Windows)"),
+                mo.md(
+                    "### ✅ Features Engineered (5-Gameweek Rolling Windows + Fixtures)"
+                ),
                 mo.md("**Static Features:**"),
                 mo.md("- `price` - Player price (£M)"),
                 mo.md(
@@ -903,13 +1210,32 @@ def _(historical_df, mo, np, pd):
                     "- `team_rolling_5gw_goal_diff/xg_diff` - Team form differentials"
                 ),
                 mo.md(""),
+                mo.md("**Fixture-Specific Features (NEW!):**"),
+                mo.md("- `is_home` - Home (1), Away (0), Neutral (0.5)"),
+                mo.md("- `opponent_strength` - Opponent team strength [0.65, 1.30]"),
+                mo.md(
+                    "- `fixture_difficulty` - Higher = easier (inverse of opponent strength with home advantage)"
+                ),
+                mo.md(
+                    "- `opponent_rolling_5gw_goals_conceded` - Opponent's defensive weakness"
+                ),
+                mo.md(
+                    "- `opponent_rolling_5gw_clean_sheets` - Opponent's defensive strength"
+                ),
+                mo.md(
+                    "- `opponent_rolling_5gw_xgc` - Opponent's expected goals conceded"
+                ),
+                mo.md(""),
                 mo.md(
                     "💡 **Team features are safe with player-based GroupKFold:** We test the model's ability to predict NEW players on KNOWN teams, not future outcomes."
                 ),
                 mo.md(""),
                 mo.md(f"**Total features created:** {len(features_df.columns)}"),
                 mo.md(
-                    "**Features using 5GW windows:** All rolling features now use 5-gameweek lookback"
+                    "**Features using 5GW windows:** All rolling features use 5-gameweek lookback"
+                ),
+                mo.md(
+                    "**Fixture features:** Match-specific context known before gameweek starts"
                 ),
                 mo.md("---"),
             ]
@@ -975,7 +1301,7 @@ def _(features_df, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 3️⃣ Cross-Validation Setup - Player-Based Stratified K-Fold""")
+    mo.md(r"""## 4️⃣ Cross-Validation Setup - Player-Based Stratified K-Fold""")
     return
 
 
@@ -1087,6 +1413,13 @@ def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
                 "team_season_points",
                 "team_rolling_5gw_goal_diff",
                 "team_rolling_5gw_xg_diff",
+                # Fixture features (opponent context)
+                "is_home",
+                "opponent_strength",
+                "fixture_difficulty",
+                "opponent_rolling_5gw_goals_conceded",
+                "opponent_rolling_5gw_clean_sheets",
+                "opponent_rolling_5gw_xgc",
             ]
 
             # Validate all feature columns exist in the data
@@ -1152,6 +1485,10 @@ def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
                     mo.md("- Rolling 5GW Per-90 Rates: 3 features"),
                     mo.md("- Defensive Metrics: 4 features"),
                     mo.md("- Consistency & Volatility: 4 features"),
+                    mo.md("- Team Context: 14 features"),
+                    mo.md(
+                        "- **Fixture Features (NEW!): 6 features** (opponent strength, home/away, opponent defense)"
+                    ),
                     mo.md(""),
                     mo.md(f"**Total: {len(feature_cols)} features**"),
                     mo.md("---"),
@@ -1171,7 +1508,7 @@ def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 4️⃣ Model Training - Multiple Algorithms""")
+    mo.md(r"""## 5️⃣ Model Training - Multiple Algorithms""")
     return
 
 
@@ -1422,7 +1759,7 @@ def _(
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 5️⃣ Cross-Validation Results Visualization""")
+    mo.md(r"""## 6️⃣ Cross-Validation Results Visualization""")
     return
 
 
@@ -1496,7 +1833,7 @@ def _(cv_results, mo, pd, px):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 6️⃣ Feature Importance - What Drives xP?""")
+    mo.md(r"""## 7️⃣ Feature Importance - What Drives xP?""")
     return
 
 
@@ -1579,7 +1916,7 @@ def _(feature_cols, mo, pd, px, trained_models):
 def _(mo):
     mo.md(
         r"""
-    ## 7️⃣ Summary & Next Steps
+    ## 8️⃣ Summary & Next Steps
 
     **Cross-validation provides robust model evaluation with confidence intervals.**
 
