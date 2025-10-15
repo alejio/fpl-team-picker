@@ -40,11 +40,8 @@ def _():
     # ML libraries
     from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
     from sklearn.linear_model import Ridge
-    from sklearn.metrics import (
-        mean_absolute_error,
-        mean_squared_error,
-        r2_score,
-    )
+    from sklearn.model_selection import cross_val_score, GroupKFold
+    from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
     # FPL services
@@ -60,18 +57,18 @@ def _():
     client = FPLDataClient()
     return (
         GradientBoostingRegressor,
+        GroupKFold,
+        Pipeline,
         RandomForestRegressor,
         Ridge,
         StandardScaler,
         client,
+        cross_val_score,
         data_service,
-        mean_absolute_error,
-        mean_squared_error,
         mo,
         np,
         pd,
         px,
-        r2_score,
         xp_service,
     )
 
@@ -212,6 +209,46 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
 
     load_summary
     return (historical_df,)
+
+
+@app.cell
+def _(historical_df, mo):
+    # Interactive table to explore loaded data
+    if not historical_df.empty:
+        # Select key columns for display
+        _hist_display_cols = [
+            "gameweek",
+            "player_id",
+            "web_name",
+            "position",
+            "team",
+            "total_points",
+            "minutes",
+            "goals_scored",
+            "assists",
+            "clean_sheets",
+            "expected_goals",
+            "expected_assists",
+            "bps",
+            "ict_index",
+            "value",
+        ]
+        _hist_available_cols = [
+            col for col in _hist_display_cols if col in historical_df.columns
+        ]
+
+        historical_data_table = mo.ui.table(
+            historical_df[_hist_available_cols],
+            selection=None,
+            pagination=True,
+            page_size=20,
+            label="Historical Gameweek Performance Data",
+        )
+    else:
+        historical_data_table = mo.md("_No data loaded yet_")
+
+    historical_data_table
+    return (historical_data_table,)
 
 
 @app.cell
@@ -694,54 +731,102 @@ def _(historical_df, mo, np, pd):
 
 
 @app.cell
+def _(features_df, mo):
+    # Interactive table to explore feature-engineered data
+    if not features_df.empty:
+        # Select key columns for display - mix of original and engineered features
+        _feat_display_cols = [
+            "gameweek",
+            "player_id",
+            "web_name",
+            "position",
+            "team",
+            "total_points",  # Target variable
+            "price",
+            "games_played",
+            # Cumulative stats
+            "cumulative_points",
+            "cumulative_minutes",
+            "cumulative_goals",
+            "cumulative_assists",
+            # Per-90 rates
+            "goals_per_90",
+            "assists_per_90",
+            "points_per_90",
+            # Rolling 5GW features
+            "rolling_5gw_points",
+            "rolling_5gw_minutes",
+            "rolling_5gw_goals_per_90",
+            "rolling_5gw_assists_per_90",
+            # Consistency
+            "rolling_5gw_points_std",
+            "form_trend",
+            "minutes_played_rate",
+        ]
+        _feat_available_cols = [
+            col for col in _feat_display_cols if col in features_df.columns
+        ]
+
+        features_table = mo.ui.table(
+            features_df[_feat_available_cols],
+            selection=None,
+            pagination=True,
+            page_size=20,
+            label="Feature-Engineered Data (Leak-Free)",
+        )
+    else:
+        features_table = mo.md("_No features engineered yet_")
+
+    features_table
+    return (features_table,)
+
+
+@app.cell
 def _(mo):
-    mo.md(r"""## 3️⃣ Train/Test Split - Player-Based Validation""")
+    mo.md(r"""## 3️⃣ Cross-Validation Setup - Player-Based Stratified K-Fold""")
     return
 
 
 @app.cell
-def _(end_gw_input, features_df, mo, np, pd):
-    # Split data: 70% players for training, 30% for testing
-    # Strategy: Use ALL available gameweeks (GW6+) to maximize training data
-    # Player-based split ensures model generalizes to unseen players
-    if not features_df.empty and end_gw_input.value:
+def _(mo):
+    # Number of folds for cross-validation
+    n_folds_input = mo.ui.slider(
+        start=3,
+        stop=10,
+        value=5,
+        step=1,
+        label="Number of Cross-Validation Folds",
+        show_value=True,
+    )
+    n_folds_input
+    return (n_folds_input,)
+
+
+@app.cell
+def _(end_gw_input, features_df, mo, n_folds_input, np, pd):
+    # Prepare data for cross-validation
+    # Strategy: Use ALL available gameweeks (GW6+) with player-based stratified k-fold
+    if not features_df.empty and end_gw_input.value and n_folds_input.value:
         # Validate sufficient training history for 5GW rolling features
         # Need at least GW6 to have 5 preceding gameweeks of data
         if end_gw_input.value < 6:
-            split_summary = mo.md(
+            cv_summary = mo.md(
                 f"⚠️ **Target gameweek must be GW6 or later for 5GW rolling features.**\n\n"
                 f"Current selection: GW{end_gw_input.value}\n\n"
                 f"Rolling 5GW features require data from GW N-5 to N-1 to predict GW N."
             )
-            X_train = pd.DataFrame()
-            y_train = pd.Series()
-            X_test = pd.DataFrame()
-            y_test = pd.Series()
+            X_cv = pd.DataFrame()
+            y_cv = pd.Series()
+            cv_data = pd.DataFrame()
             feature_cols = []
-            train_df = pd.DataFrame()
-            test_df = pd.DataFrame()
+            cv_groups = None
         else:
             # Use all completed gameweeks from GW6 up to end_gw (inclusive)
             # This provides more training data across multiple gameweeks
-            training_gws = features_df[
+            cv_data = features_df[
                 (features_df["gameweek"] >= 6)
                 & (features_df["gameweek"] <= end_gw_input.value)
             ].copy()
-
-            # Player-based split: 70% train, 30% test (consistent across all gameweeks)
-            # Ensures model is tested on unseen players, not unseen time periods
-            all_players = training_gws["player_id"].unique()
-            np.random.seed(42)  # Reproducibility
-            np.random.shuffle(all_players)
-
-            split_idx = int(len(all_players) * 0.7)
-            train_players = set(all_players[:split_idx])
-            test_players = set(all_players[split_idx:])
-
-            train_df = training_gws[
-                training_gws["player_id"].isin(train_players)
-            ].copy()
-            test_df = training_gws[training_gws["player_id"].isin(test_players)].copy()
 
             # Define feature columns - EXPLICIT list to prevent leakage
             # Only use engineered features (lagged historical data) and pre-gameweek info
@@ -800,39 +885,39 @@ def _(end_gw_input, features_df, mo, np, pd):
 
             # Validate all feature columns exist in the data
             missing_features = [
-                col for col in feature_cols if col not in train_df.columns
+                col for col in feature_cols if col not in cv_data.columns
             ]
             if missing_features:
                 raise ValueError(
                     f"Missing feature columns: {missing_features}. "
-                    f"Available columns: {list(train_df.columns)}"
+                    f"Available columns: {list(cv_data.columns)}"
                 )
 
-            # Prepare X and y for training
-            X_train = train_df[feature_cols].fillna(0)
-            y_train = train_df["total_points"]
+            # Prepare X and y for cross-validation
+            X_cv = cv_data[feature_cols].fillna(0)
+            y_cv = cv_data["total_points"]
 
-            X_test = test_df[feature_cols].fillna(0)
-            y_test = test_df["total_points"]
+            # Create groups for GroupKFold based on player_id
+            # This ensures each player's data stays together in folds
+            cv_groups = cv_data["player_id"].values
 
             # Calculate gameweek coverage
-            train_gws = sorted(train_df["gameweek"].unique())
-            test_gws = sorted(test_df["gameweek"].unique())
-            gw_range = (
-                f"GW{min(train_gws)}-{max(train_gws)}"
-                if len(train_gws) > 1
-                else f"GW{train_gws[0]}"
+            _cv_gws = sorted(cv_data["gameweek"].unique())
+            _gw_range = (
+                f"GW{min(_cv_gws)}-{max(_cv_gws)}"
+                if len(_cv_gws) > 1
+                else f"GW{_cv_gws[0]}"
             )
 
-            split_summary = mo.vstack(
+            cv_summary = mo.vstack(
                 [
-                    mo.md("### ✅ Train/Test Split Complete (Player-Based)"),
-                    mo.md(f"**Strategy:** 70/30 player split across {gw_range}"),
+                    mo.md("### ✅ Cross-Validation Setup Complete"),
                     mo.md(
-                        f"**Training:** {len(train_players)} players × {len(train_gws)} gameweeks = {len(train_df):,} records"
+                        f"**Strategy:** {n_folds_input.value}-Fold Player-Based Cross-Validation"
                     ),
+                    mo.md(f"**Data:** {_gw_range} ({len(cv_data):,} total records)"),
                     mo.md(
-                        f"**Testing:** {len(test_players)} players × {len(test_gws)} gameweeks = {len(test_df):,} records"
+                        f"**Players:** {cv_data['player_id'].nunique():,} unique players"
                     ),
                     mo.md(
                         f"**Features:** {len(feature_cols)} columns (5GW rolling windows)"
@@ -842,9 +927,16 @@ def _(end_gw_input, features_df, mo, np, pd):
                     mo.md("- All features use `.shift(1)` to exclude current gameweek"),
                     mo.md("- Cumulative stats: up to GW N-1 only"),
                     mo.md("- Rolling features: GW N-6 to N-1 window"),
+                    mo.md("- Player-based CV ensures generalization to unseen players"),
+                    mo.md(""),
+                    mo.md("**Cross-Validation Details:**"),
                     mo.md(
-                        "- Player-based split ensures generalization to unseen players"
+                        f"- Each fold tests on ~{100 // n_folds_input.value}% of players"
                     ),
+                    mo.md(
+                        f"- {n_folds_input.value} independent evaluations for robust metrics"
+                    ),
+                    mo.md("- GroupKFold ensures player data stays within single fold"),
                     mo.md(""),
                     mo.md("**Feature Categories:**"),
                     mo.md("- Static: 3 features (price, position, games_played)"),
@@ -860,17 +952,15 @@ def _(end_gw_input, features_df, mo, np, pd):
                 ]
             )
     else:
-        X_train = pd.DataFrame()
-        y_train = pd.Series()
-        X_test = pd.DataFrame()
-        y_test = pd.Series()
+        X_cv = pd.DataFrame()
+        y_cv = pd.Series()
+        cv_data = pd.DataFrame()
         feature_cols = []
-        train_df = pd.DataFrame()
-        test_df = pd.DataFrame()
-        split_summary = mo.md("⚠️ **Engineer features first**")
+        cv_groups = None
+        cv_summary = mo.md("⚠️ **Engineer features first**")
 
-    split_summary
-    return X_test, X_train, feature_cols, test_df, y_test, y_train
+    cv_summary
+    return X_cv, cv_data, cv_groups, feature_cols, y_cv
 
 
 @app.cell
@@ -913,48 +1003,84 @@ def _(mo):
 @app.cell
 def _(
     GradientBoostingRegressor,
+    GroupKFold,
+    Pipeline,
     RandomForestRegressor,
     Ridge,
     StandardScaler,
-    X_test,
-    X_train,
-    mean_absolute_error,
-    mean_squared_error,
+    X_cv,
+    cross_val_score,
+    cv_groups,
     mo,
     model_selector,
+    n_folds_input,
     np,
-    r2_score,
     train_button,
-    y_test,
-    y_train,
+    y_cv,
 ):
-    # Train models
+    # Train models with cross-validation
     trained_models = {}
-    predictions = {}
-    metrics = {}
+    cv_results = {}
+    _final_metrics = {}
 
-    if train_button.value and not X_train.empty:
-        # Scale features
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+    if train_button.value and not X_cv.empty and cv_groups is not None:
+        # Initialize GroupKFold cross-validator
+        _gkf = GroupKFold(n_splits=n_folds_input.value)
 
         # Train selected model(s)
         if model_selector.value == "ridge" or model_selector.value == "ensemble":
-            ridge_model = Ridge(alpha=1.0)
-            ridge_model.fit(X_train_scaled, y_train)
-            ridge_pred = ridge_model.predict(X_test_scaled)
-            ridge_pred = np.clip(ridge_pred, 0, None)  # No negative points
+            # Ridge Regression with StandardScaler pipeline
+            ridge_pipeline = Pipeline(
+                [("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))]
+            )
 
-            trained_models["ridge"] = ridge_model
-            predictions["ridge"] = ridge_pred
-            metrics["ridge"] = {
-                "MAE": mean_absolute_error(y_test, ridge_pred),
-                "RMSE": np.sqrt(mean_squared_error(y_test, ridge_pred)),
-                "R²": r2_score(y_test, ridge_pred),
+            # Cross-validation scoring
+            _ridge_mae_scores = -cross_val_score(
+                ridge_pipeline,
+                X_cv,
+                y_cv,
+                groups=cv_groups,
+                cv=_gkf,
+                scoring="neg_mean_absolute_error",
+                n_jobs=-1,
+            )
+            _ridge_rmse_scores = np.sqrt(
+                -cross_val_score(
+                    ridge_pipeline,
+                    X_cv,
+                    y_cv,
+                    groups=cv_groups,
+                    cv=_gkf,
+                    scoring="neg_mean_squared_error",
+                    n_jobs=-1,
+                )
+            )
+            _ridge_r2_scores = cross_val_score(
+                ridge_pipeline,
+                X_cv,
+                y_cv,
+                groups=cv_groups,
+                cv=_gkf,
+                scoring="r2",
+                n_jobs=-1,
+            )
+
+            # Train final model on all data
+            ridge_pipeline.fit(X_cv, y_cv)
+            trained_models["ridge"] = ridge_pipeline
+
+            cv_results["ridge"] = {
+                "MAE_mean": _ridge_mae_scores.mean(),
+                "MAE_std": _ridge_mae_scores.std(),
+                "RMSE_mean": _ridge_rmse_scores.mean(),
+                "RMSE_std": _ridge_rmse_scores.std(),
+                "R²_mean": _ridge_r2_scores.mean(),
+                "R²_std": _ridge_r2_scores.std(),
+                "fold_scores": _ridge_mae_scores,
             }
 
         if model_selector.value == "rf" or model_selector.value == "ensemble":
+            # Random Forest (no scaling needed)
             rf_model = RandomForestRegressor(
                 n_estimators=100,
                 max_depth=10,
@@ -962,156 +1088,204 @@ def _(
                 random_state=42,
                 n_jobs=-1,
             )
-            rf_model.fit(X_train, y_train)  # RF doesn't need scaling
-            rf_pred = rf_model.predict(X_test)
-            rf_pred = np.clip(rf_pred, 0, None)
 
+            # Cross-validation scoring
+            _rf_mae_scores = -cross_val_score(
+                rf_model,
+                X_cv,
+                y_cv,
+                groups=cv_groups,
+                cv=_gkf,
+                scoring="neg_mean_absolute_error",
+                n_jobs=-1,
+            )
+            _rf_rmse_scores = np.sqrt(
+                -cross_val_score(
+                    rf_model,
+                    X_cv,
+                    y_cv,
+                    groups=cv_groups,
+                    cv=_gkf,
+                    scoring="neg_mean_squared_error",
+                    n_jobs=-1,
+                )
+            )
+            _rf_r2_scores = cross_val_score(
+                rf_model,
+                X_cv,
+                y_cv,
+                groups=cv_groups,
+                cv=_gkf,
+                scoring="r2",
+                n_jobs=-1,
+            )
+
+            # Train final model on all data
+            rf_model.fit(X_cv, y_cv)
             trained_models["rf"] = rf_model
-            predictions["rf"] = rf_pred
-            metrics["rf"] = {
-                "MAE": mean_absolute_error(y_test, rf_pred),
-                "RMSE": np.sqrt(mean_squared_error(y_test, rf_pred)),
-                "R²": r2_score(y_test, rf_pred),
+
+            cv_results["rf"] = {
+                "MAE_mean": _rf_mae_scores.mean(),
+                "MAE_std": _rf_mae_scores.std(),
+                "RMSE_mean": _rf_rmse_scores.mean(),
+                "RMSE_std": _rf_rmse_scores.std(),
+                "R²_mean": _rf_r2_scores.mean(),
+                "R²_std": _rf_r2_scores.std(),
+                "fold_scores": _rf_mae_scores,
             }
 
         if model_selector.value == "gb" or model_selector.value == "ensemble":
+            # Gradient Boosting (no scaling needed)
             gb_model = GradientBoostingRegressor(
                 n_estimators=100,
                 max_depth=5,
                 learning_rate=0.1,
                 random_state=42,
             )
-            gb_model.fit(X_train, y_train)
-            gb_pred = gb_model.predict(X_test)
-            gb_pred = np.clip(gb_pred, 0, None)
 
+            # Cross-validation scoring
+            _gb_mae_scores = -cross_val_score(
+                gb_model,
+                X_cv,
+                y_cv,
+                groups=cv_groups,
+                cv=_gkf,
+                scoring="neg_mean_absolute_error",
+                n_jobs=-1,
+            )
+            _gb_rmse_scores = np.sqrt(
+                -cross_val_score(
+                    gb_model,
+                    X_cv,
+                    y_cv,
+                    groups=cv_groups,
+                    cv=_gkf,
+                    scoring="neg_mean_squared_error",
+                    n_jobs=-1,
+                )
+            )
+            _gb_r2_scores = cross_val_score(
+                gb_model, X_cv, y_cv, groups=cv_groups, cv=_gkf, scoring="r2", n_jobs=-1
+            )
+
+            # Train final model on all data
+            gb_model.fit(X_cv, y_cv)
             trained_models["gb"] = gb_model
-            predictions["gb"] = gb_pred
-            metrics["gb"] = {
-                "MAE": mean_absolute_error(y_test, gb_pred),
-                "RMSE": np.sqrt(mean_squared_error(y_test, gb_pred)),
-                "R²": r2_score(y_test, gb_pred),
+
+            cv_results["gb"] = {
+                "MAE_mean": _gb_mae_scores.mean(),
+                "MAE_std": _gb_mae_scores.std(),
+                "RMSE_mean": _gb_rmse_scores.mean(),
+                "RMSE_std": _gb_rmse_scores.std(),
+                "R²_mean": _gb_r2_scores.mean(),
+                "R²_std": _gb_r2_scores.std(),
+                "fold_scores": _gb_mae_scores,
             }
 
-        # Ensemble predictions (average of all models)
-        if model_selector.value == "ensemble" and len(predictions) > 1:
-            ensemble_pred = np.mean(list(predictions.values()), axis=0)
-            predictions["ensemble"] = ensemble_pred
-            metrics["ensemble"] = {
-                "MAE": mean_absolute_error(y_test, ensemble_pred),
-                "RMSE": np.sqrt(mean_squared_error(y_test, ensemble_pred)),
-                "R²": r2_score(y_test, ensemble_pred),
-            }
-
-        # Display results
-        metrics_display = [mo.md("### ✅ Training Complete")]
-        for _model_name, _model_metrics in metrics.items():
-            metrics_display.extend(
+        # Display cross-validation results
+        _metrics_display = [
+            mo.md(f"### ✅ Cross-Validation Complete ({n_folds_input.value} folds)")
+        ]
+        for _model_name, _cv_metrics in cv_results.items():
+            _metrics_display.extend(
                 [
-                    mo.md(f"**{_model_name.upper()} Metrics:**"),
-                    mo.md(f"- MAE: {_model_metrics['MAE']:.3f} points"),
-                    mo.md(f"- RMSE: {_model_metrics['RMSE']:.3f} points"),
-                    mo.md(f"- R²: {_model_metrics['R²']:.3f}"),
+                    mo.md(f"**{_model_name.upper()} Cross-Validation Metrics:**"),
+                    mo.md(
+                        f"- MAE: {_cv_metrics['MAE_mean']:.3f} ± {_cv_metrics['MAE_std']:.3f} points"
+                    ),
+                    mo.md(
+                        f"- RMSE: {_cv_metrics['RMSE_mean']:.3f} ± {_cv_metrics['RMSE_std']:.3f} points"
+                    ),
+                    mo.md(
+                        f"- R²: {_cv_metrics['R²_mean']:.3f} ± {_cv_metrics['R²_std']:.3f}"
+                    ),
+                    mo.md(
+                        f"- Fold MAE scores: {', '.join([f'{s:.2f}' for s in _cv_metrics['fold_scores']])}"
+                    ),
                     mo.md(""),
                 ]
             )
 
-        training_summary = mo.vstack(metrics_display + [mo.md("---")])
+        training_summary = mo.vstack(_metrics_display + [mo.md("---")])
     else:
-        scaler = None
         training_summary = mo.md("👆 **Click train button after preparing data**")
 
     training_summary
-    return metrics, predictions, scaler, trained_models
+    return cv_results, trained_models
 
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 5️⃣ Model Evaluation - Predictions vs Actuals""")
+    mo.md(r"""## 5️⃣ Cross-Validation Results Visualization""")
     return
 
 
 @app.cell
-def _(metrics, mo, pd, predictions, px, test_df, y_test):
-    # Visualize predictions vs actuals
-    if predictions and not test_df.empty:
-        # Create comparison DataFrame
-        comparison_data = []
-        for _model_name, _model_predictions in predictions.items():
-            temp_df = test_df[["player_id"]].copy()
-            temp_df["predicted_points"] = _model_predictions
-            temp_df["actual_points"] = y_test.values
-            temp_df["model"] = _model_name.upper()
-            temp_df["error"] = temp_df["actual_points"] - temp_df["predicted_points"]
-            temp_df["abs_error"] = abs(temp_df["error"])
-            comparison_data.append(temp_df)
+def _(cv_results, mo, pd, px):
+    # Visualize cross-validation fold scores
+    if cv_results:
+        # Create fold scores DataFrame for plotting
+        _fold_data = []
+        for _model_name, _cv_metrics in cv_results.items():
+            for _fold_idx, _mae in enumerate(_cv_metrics["fold_scores"], 1):
+                _fold_data.append(
+                    {
+                        "Model": _model_name.upper(),
+                        "Fold": _fold_idx,
+                        "MAE": _mae,
+                    }
+                )
 
-        comparison_df = pd.concat(comparison_data, ignore_index=True)
+        _fold_df = pd.DataFrame(_fold_data)
 
-        # Scatter plot: predicted vs actual
-        fig_scatter = px.scatter(
-            comparison_df,
-            x="predicted_points",
-            y="actual_points",
-            color="model",
-            hover_data=["player_id", "error"],
-            title="Predicted vs Actual Points",
-            labels={
-                "predicted_points": "Predicted Points",
-                "actual_points": "Actual Points",
-            },
-            opacity=0.6,
-        )
-        fig_scatter.add_shape(
-            type="line",
-            x0=0,
-            y0=0,
-            x1=max(
-                comparison_df["actual_points"].max(),
-                comparison_df["predicted_points"].max(),
-            ),
-            y1=max(
-                comparison_df["actual_points"].max(),
-                comparison_df["predicted_points"].max(),
-            ),
-            line=dict(color="red", dash="dash"),
+        # Box plot of fold scores
+        _fig_box = px.box(
+            _fold_df,
+            x="Model",
+            y="MAE",
+            points="all",
+            title="Cross-Validation MAE Scores by Fold",
+            labels={"MAE": "Mean Absolute Error (points)"},
         )
 
-        # Error distribution
-        fig_error = px.histogram(
-            comparison_df,
-            x="error",
-            color="model",
-            title="Prediction Error Distribution",
-            labels={"error": "Prediction Error (Actual - Predicted)"},
-            barmode="overlay",
-            opacity=0.7,
+        # Bar chart comparing mean scores
+        _mean_df = pd.DataFrame(
+            [
+                {
+                    "Model": _m.upper(),
+                    "MAE": _cv["MAE_mean"],
+                    "RMSE": _cv["RMSE_mean"],
+                    "R²": _cv["R²_mean"],
+                }
+                for _m, _cv in cv_results.items()
+            ]
         )
 
-        # Top/bottom performers
-        best_model = min(metrics.items(), key=lambda x: x[1]["MAE"])[0]
-        model_comp_df = comparison_df[comparison_df["model"] == best_model.upper()]
-        top_10_errors = model_comp_df.nlargest(10, "abs_error")[
-            ["player_id", "predicted_points", "actual_points", "error", "abs_error"]
-        ]
+        _fig_comparison = px.bar(
+            _mean_df,
+            x="Model",
+            y=["MAE", "RMSE"],
+            title="Model Comparison (Mean CV Scores)",
+            barmode="group",
+            labels={"value": "Score", "variable": "Metric"},
+        )
 
         eval_display = mo.vstack(
             [
-                mo.md("### 📊 Model Performance Visualization"),
-                mo.ui.plotly(fig_scatter),
+                mo.md("### 📊 Cross-Validation Results"),
+                mo.ui.plotly(_fig_box),
                 mo.md("---"),
-                mo.ui.plotly(fig_error),
+                mo.ui.plotly(_fig_comparison),
                 mo.md("---"),
-                mo.md(f"### 🎯 Largest Prediction Errors ({best_model.upper()})"),
-                mo.ui.table(top_10_errors.round(2), page_size=10),
+                mo.md("### 📋 Detailed Metrics"),
+                mo.ui.table(_mean_df.round(3), page_size=10),
             ]
         )
     else:
-        comparison_df = pd.DataFrame()
         eval_display = mo.md("⚠️ **Train models first**")
 
     eval_display
-    return (best_model,)
+    return (eval_display,)
 
 
 @app.cell
@@ -1126,12 +1300,14 @@ def _(feature_cols, mo, pd, px, trained_models):
     if trained_models and feature_cols:
         importance_data = []
 
-        # Ridge coefficients (absolute values)
+        # Ridge coefficients (absolute values) - extract from pipeline
         if "ridge" in trained_models:
             ridge_importance = pd.DataFrame(
                 {
                     "feature": feature_cols,
-                    "importance": abs(trained_models["ridge"].coef_),
+                    "importance": abs(
+                        trained_models["ridge"].named_steps["ridge"].coef_
+                    ),
                     "model": "Ridge",
                 }
             ).nlargest(15, "importance")
@@ -1197,316 +1373,19 @@ def _(feature_cols, mo, pd, px, trained_models):
 def _(mo):
     mo.md(
         r"""
-    ## 7️⃣ Comparison with Rule-Based Model
+    ## 7️⃣ Summary & Next Steps
 
-    **Compare ML predictions against the current rule-based xP model.**
+    **Cross-validation provides robust model evaluation with confidence intervals.**
+
+    The CV metrics above show mean ± std across all folds, giving you confidence in model performance.
+
+    ### Next Steps:
+    1. Compare Ridge, Random Forest, and Gradient Boosting models
+    2. Select the best performer based on CV MAE scores
+    3. Export the trained model for production use
+    4. Integrate with `MLExpectedPointsService` in the main codebase
     """
     )
-    return
-
-
-@app.cell
-def _(data_service, end_gw_input, mo, test_df, xp_service):
-    # Load rule-based predictions for comparison
-    if not test_df.empty and end_gw_input.value:
-        try:
-            # Load gameweek data for rule-based model
-            gw_data = data_service.load_gameweek_data(
-                target_gameweek=end_gw_input.value, form_window=5
-            )
-
-            # Calculate rule-based xP
-            rule_based_xp = xp_service.calculate_combined_results(
-                gw_data, use_ml_model=False
-            )
-
-            # Merge with test data
-            # Note: position column should already exist in test_df from feature engineering
-            test_with_rule_based = test_df.merge(
-                rule_based_xp[["player_id", "xP"]],
-                on="player_id",
-                how="left",
-            )
-            test_with_rule_based = test_with_rule_based.rename(
-                columns={"xP": "rule_based_xp"}
-            )
-
-            # Validate position column exists for position-specific analysis
-            if "position" not in test_with_rule_based.columns:
-                raise ValueError(
-                    f"Position column missing from test data. Available columns: {list(test_with_rule_based.columns)}"
-                )
-
-            comparison_status = mo.md(
-                f"✅ **Rule-based xP loaded for {len(test_with_rule_based)} players**"
-            )
-        except Exception as e:
-            test_with_rule_based = test_df.copy()
-            comparison_status = mo.md(f"❌ **Rule-based comparison failed:** {str(e)}")
-    else:
-        test_with_rule_based = test_df.copy()
-        comparison_status = mo.md("⚠️ **Train ML models first**")
-
-    comparison_status
-    return (test_with_rule_based,)
-
-
-@app.cell
-def _(
-    best_model,
-    mean_absolute_error,
-    mean_squared_error,
-    metrics,
-    mo,
-    np,
-    predictions,
-    px,
-    r2_score,
-    test_with_rule_based,
-):
-    # Compare ML vs Rule-Based
-    if "rule_based_xp" in test_with_rule_based.columns and predictions:
-        # Calculate rule-based metrics
-        rule_based_metrics = {
-            "MAE": mean_absolute_error(
-                test_with_rule_based["total_points"],
-                test_with_rule_based["rule_based_xp"],
-            ),
-            "RMSE": np.sqrt(
-                mean_squared_error(
-                    test_with_rule_based["total_points"],
-                    test_with_rule_based["rule_based_xp"],
-                )
-            ),
-            "R²": r2_score(
-                test_with_rule_based["total_points"],
-                test_with_rule_based["rule_based_xp"],
-            ),
-        }
-
-        # Add rule-based to comparison
-        test_comparison_df = test_with_rule_based.copy()
-        test_comparison_df["ml_prediction"] = predictions[best_model]
-
-        # Scatter plot comparison
-        fig_comparison = px.scatter(
-            test_comparison_df,
-            x="rule_based_xp",
-            y="ml_prediction",
-            color="total_points",
-            hover_data=["player_id"],
-            title="ML vs Rule-Based Predictions (colored by actual points)",
-            labels={
-                "rule_based_xp": "Rule-Based xP",
-                "ml_prediction": f"ML Prediction ({best_model.upper()})",
-            },
-            color_continuous_scale="Viridis",
-        )
-
-        # Add diagonal line
-        max_val = max(
-            test_comparison_df["rule_based_xp"].max(),
-            test_comparison_df["ml_prediction"].max(),
-        )
-        fig_comparison.add_shape(
-            type="line",
-            x0=0,
-            y0=0,
-            x1=max_val,
-            y1=max_val,
-            line=dict(color="red", dash="dash"),
-        )
-
-        # Display comparison
-        rule_comparison_display = mo.vstack(
-            [
-                mo.md("### 🎯 ML vs Rule-Based Comparison"),
-                mo.md("**Rule-Based Model Metrics:**"),
-                mo.md(f"- MAE: {rule_based_metrics['MAE']:.3f} points"),
-                mo.md(f"- RMSE: {rule_based_metrics['RMSE']:.3f} points"),
-                mo.md(f"- R²: {rule_based_metrics['R²']:.3f}"),
-                mo.md(""),
-                mo.md(f"**Best ML Model ({best_model.upper()}) Improvement:**"),
-                mo.md(
-                    f"- MAE: {((rule_based_metrics['MAE'] - metrics[best_model]['MAE']) / rule_based_metrics['MAE'] * 100):.1f}% better"
-                ),
-                mo.md(
-                    f"- RMSE: {((rule_based_metrics['RMSE'] - metrics[best_model]['RMSE']) / rule_based_metrics['RMSE'] * 100):.1f}% better"
-                ),
-                mo.md("---"),
-                mo.ui.plotly(fig_comparison),
-            ]
-        )
-    else:
-        rule_based_metrics = {}
-        rule_comparison_display = mo.md("⚠️ **Load rule-based predictions first**")
-
-    rule_comparison_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 8️⃣ Position-Specific Analysis
-
-    **Analyze model performance by player position.**
-    """
-    )
-    return
-
-
-@app.cell
-def _(
-    best_model,
-    mean_absolute_error,
-    mo,
-    pd,
-    predictions,
-    px,
-    test_with_rule_based,
-):
-    # Position-specific evaluation
-    if (
-        not test_with_rule_based.empty
-        and predictions
-        and "rule_based_xp" in test_with_rule_based.columns
-    ):
-        position_metrics = []
-
-        for position in ["GKP", "DEF", "MID", "FWD"]:
-            pos_data = test_with_rule_based[
-                test_with_rule_based["position"] == position
-            ]
-
-            if len(pos_data) > 0:
-                # Get indices for this position's predictions
-                pos_indices = pos_data.index
-
-                # ML metrics
-                ml_mae = mean_absolute_error(
-                    pos_data["total_points"],
-                    [
-                        predictions[best_model][i]
-                        for i in range(len(predictions[best_model]))
-                        if test_with_rule_based.index[i] in pos_indices
-                    ],
-                )
-
-                # Rule-based metrics
-                rb_mae = mean_absolute_error(
-                    pos_data["total_points"],
-                    pos_data["rule_based_xp"],
-                )
-
-                position_metrics.append(
-                    {
-                        "Position": position,
-                        "ML MAE": ml_mae,
-                        "Rule-Based MAE": rb_mae,
-                        "Improvement %": ((rb_mae - ml_mae) / rb_mae * 100)
-                        if rb_mae > 0
-                        else 0,
-                        "Players": len(pos_data),
-                    }
-                )
-
-        position_metrics_df = pd.DataFrame(position_metrics)
-
-        # Plot position comparison
-        fig_position = px.bar(
-            position_metrics_df,
-            x="Position",
-            y=["ML MAE", "Rule-Based MAE"],
-            title="MAE by Position: ML vs Rule-Based",
-            labels={"value": "Mean Absolute Error", "variable": "Model"},
-            barmode="group",
-        )
-
-        position_display = mo.vstack(
-            [
-                mo.md("### 📊 Position-Specific Performance"),
-                mo.ui.plotly(fig_position),
-                mo.md("---"),
-                mo.ui.table(position_metrics_df.round(2), page_size=4),
-            ]
-        )
-    else:
-        position_metrics_df = pd.DataFrame()
-        position_display = mo.md(
-            "⚠️ **Complete model training and rule-based comparison first**"
-        )
-
-    position_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 9️⃣ Next Steps & Production Deployment
-
-    **How to integrate the best ML model into gameweek_manager.py:**
-
-    1. **Export Best Model**: Save the trained model and scaler as pickle files
-    2. **Update MLExpectedPointsService**: Load the model in the service
-    3. **Enable in Config**: Set `use_ml_model=True` in gameweek_manager.py
-    4. **Monitor Performance**: Track live predictions vs actual results
-
-    ---
-    """
-    )
-    return
-
-
-@app.cell
-def _(best_model, mo):
-    # Model export button
-    export_button = mo.ui.run_button(
-        label=f"💾 Export {best_model.upper() if 'best_model' in dir() else 'BEST'} Model",
-        kind="success",
-    )
-
-    export_button
-    return (export_button,)
-
-
-@app.cell
-def _(best_model, export_button, mo, scaler, trained_models):
-    # Handle model export
-    if export_button.value and trained_models:
-        import pickle
-        from pathlib import Path
-
-        model_dir = Path("models")
-        model_dir.mkdir(exist_ok=True)
-
-        # Save model and scaler
-        model_path = model_dir / f"ml_xp_{best_model}_model.pkl"
-        scaler_path = model_dir / "ml_xp_scaler.pkl"
-
-        with open(model_path, "wb") as f:
-            pickle.dump(trained_models[best_model], f)
-
-        with open(scaler_path, "wb") as f:
-            pickle.dump(scaler, f)
-
-        export_status = mo.md(
-            f"""
-        ✅ **Model Exported Successfully**
-
-        - Model: `{model_path}`
-        - Scaler: `{scaler_path}`
-
-        **Next:** Update `MLExpectedPointsService` to load these files.
-        """
-        )
-    else:
-        export_status = mo.md("👆 **Click to export model after training**")
-
-    export_status
     return
 
 
