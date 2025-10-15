@@ -429,20 +429,131 @@ def _(mo):
 
 @app.cell
 def _(gameweek_data, mo):
-    # Calculate expected points using domain service
+    # Calculate expected points using ML pipeline (NEW!)
     if gameweek_data:
-        from fpl_team_picker.domain.services import ExpectedPointsService
+        from fpl_team_picker.domain.services import (
+            MLExpectedPointsService,
+            ExpectedPointsService,
+        )
         from fpl_team_picker.config import config
         from fpl_team_picker.visualization.charts import create_xp_results_display
+        from pathlib import Path
+        import pandas as _pd
 
-        xp_service = ExpectedPointsService()
-        players_with_xp = xp_service.calculate_combined_results(
-            gameweek_data, use_ml_model=config.xp_model.use_ml_model
-        )
+        # Choose ML or rule-based model based on config
+        use_ml = config.xp_model.use_ml_model
 
-        # Enrich with additional season statistics
-        players_with_xp = xp_service.enrich_players_with_season_stats(players_with_xp)
-        model_info = xp_service.get_model_info(config.xp_model.use_ml_model)
+        if use_ml:
+            # Try to use pre-trained ML model with sklearn pipeline
+            model_path = Path("models/fpl_xp_rf.joblib")
+
+            if model_path.exists():
+                # Use pre-trained ML model (FAST!)
+                ml_xp_service = MLExpectedPointsService(
+                    model_path=str(model_path),
+                    ensemble_rule_weight=0.0,  # Pure ML
+                    debug=False,
+                )
+                model_type_label = "ML Pipeline (Pre-trained RandomForest)"
+            else:
+                # No pre-trained model, train on-the-fly (SLOWER)
+                ml_xp_service = MLExpectedPointsService(
+                    model_type="rf",
+                    ensemble_rule_weight=0.0,
+                    debug=True,
+                )
+                model_type_label = "ML Pipeline (Training on-the-fly)"
+
+            # Calculate xP using ML service (no fallback - fail explicitly)
+            # Note: ML service currently only does 1GW predictions
+            # TODO: Implement proper 5GW lookahead with fixture-specific predictions
+            players_with_xp = ml_xp_service.calculate_expected_points(
+                players_data=gameweek_data.get("players", _pd.DataFrame()),
+                teams_data=gameweek_data.get("teams", _pd.DataFrame()),
+                xg_rates_data=gameweek_data.get("xg_rates", _pd.DataFrame()),
+                fixtures_data=gameweek_data.get("fixtures", _pd.DataFrame()),
+                target_gameweek=gameweek_data["target_gameweek"],
+                live_data=gameweek_data.get("live_data_historical", _pd.DataFrame()),
+                gameweeks_ahead=1,
+            )
+
+            # Enrich with additional season statistics FIRST
+            rule_service = ExpectedPointsService()
+            players_with_xp = rule_service.enrich_players_with_season_stats(
+                players_with_xp
+            )
+
+            # Create 5GW approximation and derived metrics (simple: 1GW * 5)
+            # This is a placeholder until proper multi-gameweek ML predictions are implemented
+            players_with_xp["xP_5gw"] = players_with_xp["xP"] * 5
+            players_with_xp["xP_per_price"] = (
+                players_with_xp["xP"] / players_with_xp["price"]
+            )
+            players_with_xp["xP_per_price_5gw"] = (
+                players_with_xp["xP_5gw"] / players_with_xp["price"]
+            )
+            players_with_xp["xP_horizon_advantage"] = (
+                0.0  # Placeholder - would measure 5GW vs 1GW difference
+            )
+            players_with_xp["fixture_difficulty"] = 1.0  # Neutral
+            players_with_xp["fixture_difficulty_5gw"] = 1.0  # Neutral
+            players_with_xp["fixture_outlook"] = "Average"  # Placeholder
+
+            # Add form analytics columns
+            # Calculate form multiplier from recent performance (use form_season if available)
+            if "form_season" in players_with_xp.columns:
+                players_with_xp["form_multiplier"] = (
+                    1.0 + (players_with_xp["form_season"].astype(float) - 3.0) / 10.0
+                )
+                players_with_xp["form_multiplier"] = players_with_xp[
+                    "form_multiplier"
+                ].clip(0.5, 1.5)
+            else:
+                players_with_xp["form_multiplier"] = 1.0
+
+            # Calculate recent points per game
+            if "points_per_game_season" in players_with_xp.columns:
+                players_with_xp["recent_points_per_game"] = players_with_xp[
+                    "points_per_game_season"
+                ]
+            elif "points_per_game" in players_with_xp.columns:
+                players_with_xp["recent_points_per_game"] = players_with_xp[
+                    "points_per_game"
+                ]
+            else:
+                players_with_xp["recent_points_per_game"] = 0.0
+
+            # Assign momentum indicators based on form
+            def assign_momentum(row):
+                ppg = row.get("recent_points_per_game", 0)
+                if ppg >= 6.0:
+                    return "🔥"  # Hot
+                elif ppg >= 4.5:
+                    return "📈"  # Rising
+                elif ppg >= 3.0:
+                    return "➡️"  # Stable
+                elif ppg >= 2.0:
+                    return "📉"  # Declining
+                else:
+                    return "❄️"  # Cold
+
+            players_with_xp["momentum"] = players_with_xp.apply(assign_momentum, axis=1)
+
+            model_info = {
+                "type": model_type_label,
+                "features": "63 features (5GW rolling, team context, fixtures)",
+                "status": "✅ ML predictions generated",
+            }
+        else:
+            # Use rule-based model
+            xp_service = ExpectedPointsService()
+            players_with_xp = xp_service.calculate_combined_results(
+                gameweek_data, use_ml_model=False
+            )
+            players_with_xp = xp_service.enrich_players_with_season_stats(
+                players_with_xp
+            )
+            model_info = xp_service.get_model_info(False)
 
         xp_results_display = create_xp_results_display(
             players_with_xp, gameweek_data["target_gameweek"], mo
@@ -451,6 +562,9 @@ def _(gameweek_data, mo):
         xp_section_display = mo.vstack(
             [
                 mo.md(f"**Model Type:** {model_info['type']}"),
+                mo.md(
+                    f"_{model_info.get('status', '')}_{model_info.get('features', '')}"
+                ),
                 xp_results_display,
             ]
         )

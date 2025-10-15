@@ -1,31 +1,33 @@
 """
 FPL Machine Learning Expected Points (ML-XP) Service
 
-Advanced ML-based XP predictions using Ridge regression with rich database features.
-Designed to replace or complement the rule-based XP model with improved accuracy
-and generalization.
+Advanced ML-based XP predictions using sklearn pipelines with comprehensive features.
+Designed to replace or complement the rule-based XP model with improved accuracy.
 
 Key Features:
-- Ridge regression with feature scaling and cross-validated regularization
-- Rich database features: injury risk, set piece orders, performance rankings
-- Position-specific models for GKP/DEF/MID/FWD with ensemble predictions
-- Temporal validation: leak-free training with proper time-series validation
-- Ensemble capability: can combine with rule-based predictions
+- Scikit-learn pipelines for production-ready models
+- Rich 63-feature set: 5GW rolling windows, team context, fixture difficulty
+- Position-specific models (optional) for GKP/DEF/MID/FWD
+- Leak-free temporal features (all features use past data only)
+- Save/load capability for pre-trained models
+- Drop-in replacement for old MLExpectedPointsService (same interface)
 """
 
 import pandas as pd
 import numpy as np
 import warnings
-from typing import Dict, Tuple, List
-import pickle
+from typing import Dict, Optional
+from pathlib import Path
 import logging
 
-from sklearn.linear_model import RidgeCV
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_absolute_error
+from sklearn.pipeline import Pipeline
 
-from client import FPLDataClient
+from .ml_pipeline_factory import (
+    create_fpl_pipeline,
+    save_pipeline,
+    load_pipeline,
+    get_team_strength_ratings,
+)
 
 warnings.filterwarnings("ignore")
 
@@ -35,637 +37,162 @@ logger = logging.getLogger(__name__)
 
 class MLExpectedPointsService:
     """
-    Machine Learning Expected Points Service using Ridge Regression
+    Machine Learning Expected Points Service using Sklearn Pipelines
 
-    Predicts expected points using advanced ML techniques with rich database features:
-    - Historical performance metrics (xG90, xA90, points per 90)
-    - Enhanced player features (injury risk, set piece roles, rankings)
-    - Temporal features (lagged performance from previous gameweek)
-    - Position-specific models with ensemble predictions
+    Uses comprehensive 63-feature set with:
+    - 5GW rolling form windows (cumulative & per-90 stats)
+    - Team context features (rolling team performance)
+    - Fixture-specific features (opponent strength, home/away, opponent defense)
+    - Leak-free temporal features (all use past data only)
+
+    Maintains same public interface as old service for drop-in replacement in gameweek_manager.py
     """
 
     def __init__(
         self,
-        min_training_gameweeks: int = 3,
-        training_gameweeks: int = 5,
-        position_min_samples: int = 30,
-        ensemble_rule_weight: float = 0.3,
+        model_type: str = "rf",
+        model_path: Optional[str] = None,
+        min_training_gameweeks: int = 6,
+        ensemble_rule_weight: float = 0.0,
         debug: bool = False,
     ):
         """
         Initialize ML XP Service
 
         Args:
-            min_training_gameweeks: Minimum gameweeks needed for training
-            training_gameweeks: Number of recent gameweeks to use for training
-            position_min_samples: Minimum samples required for position-specific models
-            ensemble_rule_weight: Weight for rule-based predictions in ensemble (0-1)
+            model_type: Model type ('rf' for RandomForest, 'gb' for GradientBoosting, 'ridge')
+            model_path: Path to pre-trained model (if None, trains on-the-fly each time)
+            min_training_gameweeks: Minimum gameweeks needed for training (5+ for rolling 5GW features)
+            ensemble_rule_weight: Weight for rule-based predictions in ensemble (0=pure ML, 1=pure rule-based)
             debug: Enable debug logging
         """
-        self.min_training_gameweeks = min_training_gameweeks
-        self.training_gameweeks = training_gameweeks
-        self.position_min_samples = position_min_samples
+        self.model_type = model_type
+        self.model_path = model_path
+        self.min_training_gameweeks = max(
+            min_training_gameweeks, 5
+        )  # Minimum 5 GW for rolling features
         self.ensemble_rule_weight = ensemble_rule_weight
         self.debug = debug
 
-        # Model components
-        self.general_model = None
-        self.general_scaler = None
-        self.position_models = {}  # {position: (model, scaler)}
-        self.label_encoder = LabelEncoder()
-        self.ml_features = []
-        self.target_variable = "total_points"
+        # Pipeline components
+        self.pipeline: Optional[Pipeline] = None
+        self.pipeline_metadata: Optional[Dict] = None
 
-        # Enhanced features from database
-        self.enhanced_features_cols = [
-            "chance_of_playing_next_round",  # Next gameweek availability
-            "corners_and_indirect_freekicks_order",
-            "direct_freekicks_order",
-            "penalties_order",
-            "expected_goals_per_90",
-            "expected_assists_per_90",
-            "form_rank",
-            "ict_index_rank",
-            "points_per_game_rank",
-            "influence_rank",
-            "creativity_rank",
-            "threat_rank",
-            "value_form",
-            "cost_change_start",
-        ]
+        # Load pre-trained model if path provided
+        if model_path and Path(model_path).exists():
+            self._load_pretrained_model()
 
         if self.debug:
             logger.setLevel(logging.DEBUG)
+            logger.debug(
+                f"Initialized ML XP Service: model_type={model_type}, ensemble_weight={ensemble_rule_weight}"
+            )
 
-    def prepare_training_data(
-        self, live_data_df: pd.DataFrame, target_gw: int
-    ) -> Tuple[pd.DataFrame, List[str]]:
+    def _load_pretrained_model(self):
+        """Load a pre-trained pipeline from disk."""
+        try:
+            self.pipeline, self.pipeline_metadata = load_pipeline(Path(self.model_path))
+            if self.debug:
+                logger.debug(f"✅ Loaded pre-trained model from {self.model_path}")
+                if self.pipeline_metadata:
+                    mae = self.pipeline_metadata.get("cv_mae_mean", "N/A")
+                    logger.debug(f"   Model CV MAE: {mae}")
+        except Exception as e:
+            logger.warning(
+                f"Failed to load pre-trained model: {e}. Will train on-the-fly."
+            )
+            self.pipeline = None
+            self.pipeline_metadata = None
+
+    def _train_pipeline(
+        self,
+        historical_df: pd.DataFrame,
+        fixtures_df: pd.DataFrame,
+        teams_df: pd.DataFrame,
+    ) -> Pipeline:
         """
-        Prepare training data with enhanced features for ML model
+        Train a new pipeline on historical data.
 
         Args:
-            live_data_df: Historical live gameweek data
-            target_gw: Target gameweek for prediction
+            historical_df: Historical player performance data (with gameweek column)
+            fixtures_df: Fixture data [event, home_team_id, away_team_id]
+            teams_df: Teams data [team_id, name]
 
         Returns:
-            Tuple of (training_data, ml_features)
+            Trained sklearn Pipeline
         """
-        try:
-            # Get training gameweeks (before target gameweek)
-            historical_gws = sorted(
-                [gw for gw in live_data_df["event"].unique() if gw < target_gw]
+        if self.debug:
+            logger.debug(f"Training new {self.model_type} pipeline...")
+
+        # Get team strength ratings
+        team_strength = get_team_strength_ratings()
+
+        # Create pipeline
+        pipeline = create_fpl_pipeline(
+            model_type=self.model_type,
+            fixtures_df=fixtures_df,
+            teams_df=teams_df,
+            team_strength=team_strength,
+            random_state=42,
+        )
+
+        # CRITICAL FIX: Transform ALL data first, THEN filter to GW6+ for training
+        # The issue: Rolling 5GW features for GW6 need data from GW1-5
+        # If we filter to GW6+ before transform, those earlier gameweeks aren't available!
+        #
+        # Strategy (matching ml_xp_notebook.py exactly):
+        #   1. Transform ALL historical data (GW1-7) to calculate complete rolling features
+        #   2. Filter transformed features to GW6+ for training (complete 5GW windows)
+        #   3. Train model on those filtered features
+
+        # Step 1: Transform ALL data to get complete rolling features
+        feature_engineer = pipeline.named_steps["feature_engineer"]
+        all_features = feature_engineer.fit_transform(
+            historical_df, historical_df["total_points"]
+        )
+
+        # Add back gameweek and total_points for filtering
+        # CRITICAL: historical_df is sorted by [player_id, gameweek] in feature_engineer.transform()
+        historical_df_sorted = historical_df.sort_values(
+            ["player_id", "gameweek"]
+        ).reset_index(drop=True)
+        all_features_with_meta = all_features.copy()
+        all_features_with_meta["gameweek"] = historical_df_sorted["gameweek"].values
+        all_features_with_meta["total_points"] = historical_df_sorted[
+            "total_points"
+        ].values
+
+        # Step 2: Filter to GW6+ (now features are complete because they were calculated from all data)
+        train_features = all_features_with_meta[
+            all_features_with_meta["gameweek"] >= 6
+        ].copy()
+
+        if self.debug:
+            print(
+                f"🔧 ML Training: {len(historical_df)} records → {len(train_features)} after GW6+ filter"
+            )
+            print(f"   Training GWs: {sorted(train_features['gameweek'].unique())}")
+            print(
+                f"   Target stats: mean={train_features['total_points'].mean():.2f}, max={train_features['total_points'].max()}"
             )
 
-            if len(historical_gws) < self.min_training_gameweeks:
-                raise ValueError(
-                    f"Need at least {self.min_training_gameweeks} historical gameweeks, found {len(historical_gws)}"
-                )
-
-            # Use recent gameweeks for training
-            train_gws = (
-                historical_gws[-self.training_gameweeks :]
-                if len(historical_gws) >= self.training_gameweeks
-                else historical_gws
+        if len(train_features) < 100:
+            raise ValueError(
+                f"Insufficient training data: {len(train_features)} samples after GW6+ filter"
             )
 
-            if self.debug:
-                logger.debug(f"Training on gameweeks: {train_gws}")
+        # Step 3: Train only the model (feature engineer already fitted)
+        X_train = train_features[feature_engineer.feature_names_]
+        y_train = train_features["total_points"]
 
-            training_records = []
+        # Train just the model step (feature_engineer already fitted above)
+        model = pipeline.named_steps["model"]
+        model.fit(X_train, y_train)
 
-            # Get enhanced player data
-            training_client = FPLDataClient()
-            current_players = training_client.get_current_players()
-            enhanced_players = training_client.get_players_enhanced()
-            player_positions = (
-                current_players[["player_id", "position"]]
-                .set_index("player_id")["position"]
-                .to_dict()
-            )
+        if self.debug:
+            logger.debug(f"✅ Model trained on {len(train_features)} GW6+ samples")
 
-            # Filter available enhanced features
-            available_enhanced_cols = [
-                col
-                for col in self.enhanced_features_cols
-                if col in enhanced_players.columns
-            ]
-            player_enhanced_features = enhanced_players[
-                ["player_id"] + available_enhanced_cols
-            ].set_index("player_id")
-
-            for gw in train_gws:
-                # Target: what we want to predict (current gameweek performance)
-                gw_target = live_data_df[live_data_df["event"] == gw][
-                    ["player_id", "total_points"]
-                ].copy()
-
-                # Calculate cumulative stats up to BEFORE this gameweek (no data leakage)
-                historical_data_up_to_gw = live_data_df[live_data_df["event"] < gw]
-
-                if not historical_data_up_to_gw.empty:
-                    # Calculate cumulative season stats
-                    cumulative_stats = (
-                        historical_data_up_to_gw.groupby("player_id")
-                        .agg(
-                            {
-                                "total_points": "sum",
-                                "minutes": "sum",
-                                "expected_goals": "sum",
-                                "expected_assists": "sum",
-                                "bps": "mean",
-                                "ict_index": "mean",
-                            }
-                        )
-                        .reset_index()
-                    )
-
-                    # Calculate per-90 stats
-                    cumulative_stats["xG90_historical"] = np.where(
-                        cumulative_stats["minutes"] > 0,
-                        (
-                            cumulative_stats["expected_goals"]
-                            / cumulative_stats["minutes"]
-                        )
-                        * 90,
-                        0,
-                    )
-                    cumulative_stats["xA90_historical"] = np.where(
-                        cumulative_stats["minutes"] > 0,
-                        (
-                            cumulative_stats["expected_assists"]
-                            / cumulative_stats["minutes"]
-                        )
-                        * 90,
-                        0,
-                    )
-                    cumulative_stats["points_per_90"] = np.where(
-                        cumulative_stats["minutes"] > 0,
-                        (cumulative_stats["total_points"] / cumulative_stats["minutes"])
-                        * 90,
-                        0,
-                    )
-
-                    # Add position data
-                    cumulative_stats["position"] = (
-                        cumulative_stats["player_id"]
-                        .map(player_positions)
-                        .fillna("MID")
-                    )
-
-                    # Add enhanced static features
-                    for enhanced_col in available_enhanced_cols:
-                        cumulative_stats[f"{enhanced_col}_static"] = (
-                            cumulative_stats["player_id"]
-                            .map(
-                                player_enhanced_features[enhanced_col]
-                                if enhanced_col in player_enhanced_features.columns
-                                else pd.Series(dtype=float)
-                            )
-                            .fillna(
-                                0
-                                if enhanced_col != "chance_of_playing_next_round"
-                                else 100
-                            )
-                        )
-
-                    # Prepare historical features
-                    historical_features = cumulative_stats[
-                        [
-                            "player_id",
-                            "position",
-                            "xG90_historical",
-                            "xA90_historical",
-                            "points_per_90",
-                        ]
-                    ].rename(
-                        columns={
-                            "bps": "bps_historical",
-                            "ict_index": "ict_index_historical",
-                        }
-                    )
-
-                    # Add enhanced features
-                    for enhanced_col in available_enhanced_cols:
-                        static_col = f"{enhanced_col}_static"
-                        if static_col in cumulative_stats.columns:
-                            historical_features[static_col] = cumulative_stats[
-                                static_col
-                            ]
-
-                    # Merge with target
-                    gw_features = gw_target.merge(
-                        historical_features, on="player_id", how="left"
-                    )
-
-                    # Add lagged features from previous gameweek
-                    prev_gw_data = (
-                        live_data_df[live_data_df["event"] == (gw - 1)]
-                        if gw > 1
-                        else pd.DataFrame()
-                    )
-                    if not prev_gw_data.empty:
-                        # Get lagged features
-                        available_cols = ["player_id"] + [
-                            col
-                            for col in ["minutes", "goals_scored", "assists", "bonus"]
-                            if col in prev_gw_data.columns
-                        ]
-                        lagged_features = prev_gw_data[available_cols].copy()
-
-                        # Rename with prev_ prefix
-                        rename_map = {}
-                        if "minutes" in available_cols:
-                            rename_map["minutes"] = "prev_minutes"
-                        if "goals_scored" in available_cols:
-                            rename_map["goals_scored"] = "prev_goals"
-                        if "assists" in available_cols:
-                            rename_map["assists"] = "prev_assists"
-                        if "bonus" in available_cols:
-                            rename_map["bonus"] = "prev_bonus"
-
-                        lagged_features = lagged_features.rename(columns=rename_map)
-                        gw_features = gw_features.merge(
-                            lagged_features, on="player_id", how="left"
-                        )
-
-                        # Calculate per-90 lagged features
-                        gw_features["prev_goals_per_90"] = np.where(
-                            gw_features["prev_minutes"] > 0,
-                            (gw_features["prev_goals"] / gw_features["prev_minutes"])
-                            * 90,
-                            0,
-                        )
-                        gw_features["prev_assists_per_90"] = np.where(
-                            gw_features["prev_minutes"] > 0,
-                            (gw_features["prev_assists"] / gw_features["prev_minutes"])
-                            * 90,
-                            0,
-                        )
-                        gw_features["prev_bonus_per_90"] = np.where(
-                            gw_features["prev_minutes"] > 0,
-                            (gw_features["prev_bonus"] / gw_features["prev_minutes"])
-                            * 90,
-                            0,
-                        )
-                    else:
-                        # No previous gameweek data
-                        for col in [
-                            "prev_minutes",
-                            "prev_goals",
-                            "prev_assists",
-                            "prev_bonus",
-                            "prev_goals_per_90",
-                            "prev_assists_per_90",
-                            "prev_bonus_per_90",
-                        ]:
-                            gw_features[col] = 0
-
-                    # Fill missing values
-                    fill_values = {
-                        "xG90_historical": 0,
-                        "xA90_historical": 0,
-                        "points_per_90": 0,
-                        "position": "MID",
-                    }
-
-                    # Add defaults for enhanced features
-                    for enhanced_col in available_enhanced_cols:
-                        static_col = f"{enhanced_col}_static"
-                        if "chance_of_playing" in enhanced_col:
-                            fill_values[static_col] = 100
-                        elif "rank" in enhanced_col:
-                            fill_values[static_col] = 300
-                        elif "order" in enhanced_col:
-                            fill_values[static_col] = 0
-                        else:
-                            fill_values[static_col] = 0
-
-                    gw_features = gw_features.fillna(fill_values)
-                    training_records.append(gw_features)
-
-            if not training_records:
-                raise ValueError("No training records created")
-
-            # Combine all training data
-            training_data = pd.concat(training_records, ignore_index=True)
-
-            # Feature engineering
-            self.label_encoder = LabelEncoder()
-            training_data["position_encoded"] = self.label_encoder.fit_transform(
-                training_data["position"]
-            )
-
-            # Define feature set
-            base_features = [
-                "position_encoded",
-                "xG90_historical",
-                "xA90_historical",
-                "points_per_90",
-            ]
-
-            # Add enhanced static features
-            enhanced_static_features = [
-                f"{col}_static" for col in available_enhanced_cols
-            ]
-            available_enhanced_static = [
-                f for f in enhanced_static_features if f in training_data.columns
-            ]
-
-            # Add lagged features
-            lagged_features = [
-                "prev_goals_per_90",
-                "prev_assists_per_90",
-                "prev_bonus_per_90",
-                "prev_minutes",
-                "prev_goals",
-                "prev_assists",
-                "prev_bonus",
-            ]
-            available_lagged = [
-                f for f in lagged_features if f in training_data.columns
-            ]
-
-            # Combine all feature sets
-            ml_features = base_features + available_enhanced_static + available_lagged
-
-            # Clean data
-            training_data = training_data.dropna(
-                subset=ml_features + [self.target_variable]
-            )
-
-            if self.debug:
-                logger.debug(
-                    f"Training data prepared: {len(training_data)} samples, {len(ml_features)} features"
-                )
-                logger.debug(f"Features: {ml_features}")
-
-            return training_data, ml_features
-
-        except Exception as e:
-            logger.error(f"Training data preparation failed: {str(e)}")
-            raise
-
-    def train_models(self, training_data: pd.DataFrame, ml_features: List[str]) -> Dict:
-        """
-        Train general and position-specific Ridge regression models
-
-        Args:
-            training_data: Prepared training data
-            ml_features: List of feature names
-
-        Returns:
-            Dictionary with training metrics
-        """
-        try:
-            # Prepare features and target
-            X = training_data[ml_features]
-            y = training_data[self.target_variable]
-
-            # Train/test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
-
-            # Train general model
-            self.general_scaler = StandardScaler()
-            X_train_scaled = self.general_scaler.fit_transform(X_train)
-            X_test_scaled = self.general_scaler.transform(X_test)
-
-            self.general_model = RidgeCV(
-                alphas=[0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0],
-                cv=5,
-                scoring="neg_mean_absolute_error",
-            )
-
-            self.general_model.fit(X_train_scaled, y_train)
-
-            # Evaluate general model
-            train_pred = self.general_model.predict(X_train_scaled)
-            test_pred = self.general_model.predict(X_test_scaled)
-
-            general_train_mae = mean_absolute_error(y_train, train_pred)
-            general_test_mae = mean_absolute_error(y_test, test_pred)
-
-            metrics = {
-                "general": {
-                    "train_mae": general_train_mae,
-                    "test_mae": general_test_mae,
-                    "samples": len(training_data),
-                    "alpha": self.general_model.alpha_,
-                },
-                "position_specific": {},
-            }
-
-            # Train position-specific models
-            for position in ["GKP", "DEF", "MID", "FWD"]:
-                pos_data = training_data[training_data["position"] == position].copy()
-
-                if len(pos_data) >= self.position_min_samples:
-                    # Prepare position-specific data
-                    X_pos = pos_data[ml_features]
-                    y_pos = pos_data[self.target_variable]
-
-                    X_train_pos, X_test_pos, y_train_pos, y_test_pos = train_test_split(
-                        X_pos, y_pos, test_size=0.2, random_state=42
-                    )
-
-                    # Scale features
-                    pos_scaler = StandardScaler()
-                    X_train_pos_scaled = pos_scaler.fit_transform(X_train_pos)
-                    X_test_pos_scaled = pos_scaler.transform(X_test_pos)
-
-                    # Train position-specific model with stronger regularization for small datasets
-                    alpha_range = (
-                        [10.0, 100.0, 1000.0]
-                        if position in ["GKP", "FWD"]
-                        else [0.1, 1.0, 10.0, 100.0]
-                    )
-                    pos_model = RidgeCV(
-                        alphas=alpha_range,
-                        cv=min(5, len(X_train_pos) // 10),
-                        scoring="neg_mean_absolute_error",
-                    )
-
-                    pos_model.fit(X_train_pos_scaled, y_train_pos)
-
-                    # Evaluate
-                    train_pred_pos = pos_model.predict(X_train_pos_scaled)
-                    test_pred_pos = pos_model.predict(X_test_pos_scaled)
-
-                    pos_train_mae = mean_absolute_error(y_train_pos, train_pred_pos)
-                    pos_test_mae = mean_absolute_error(y_test_pos, test_pred_pos)
-
-                    # Store model and scaler
-                    self.position_models[position] = (pos_model, pos_scaler)
-
-                    metrics["position_specific"][position] = {
-                        "train_mae": pos_train_mae,
-                        "test_mae": pos_test_mae,
-                        "samples": len(pos_data),
-                        "alpha": pos_model.alpha_,
-                    }
-
-                    if self.debug:
-                        logger.debug(
-                            f"{position}: Train MAE {pos_train_mae:.2f}, Test MAE {pos_test_mae:.2f}"
-                        )
-                else:
-                    metrics["position_specific"][position] = {
-                        "status": f"Insufficient data ({len(pos_data)} < {self.position_min_samples})"
-                    }
-
-            self.ml_features = ml_features
-
-            if self.debug:
-                logger.debug(
-                    f"General model: Train MAE {general_train_mae:.2f}, Test MAE {general_test_mae:.2f}"
-                )
-                logger.debug(
-                    f"Trained {len(self.position_models)} position-specific models"
-                )
-
-            return metrics
-
-        except Exception as e:
-            logger.error(f"Model training failed: {str(e)}")
-            raise
-
-    def predict(self, current_data: pd.DataFrame) -> pd.DataFrame:
-        """
-        Generate ML predictions for current gameweek
-
-        Args:
-            current_data: Current gameweek player data
-
-        Returns:
-            DataFrame with ML predictions added
-        """
-        try:
-            if self.general_model is None:
-                raise ValueError("Models not trained. Call train_models() first.")
-
-            # Prepare current data with enhanced features
-            prediction_client = FPLDataClient()
-            enhanced_players_current = prediction_client.get_players_enhanced()
-
-            # Add available enhanced features
-            available_enhanced_pred = [
-                col
-                for col in self.enhanced_features_cols
-                if col in enhanced_players_current.columns
-            ]
-            if available_enhanced_pred:
-                enhanced_subset = enhanced_players_current[
-                    ["player_id"] + available_enhanced_pred
-                ]
-                current_data = current_data.merge(
-                    enhanced_subset, on="player_id", how="left"
-                )
-
-                # Fill missing enhanced features
-                for col in available_enhanced_pred:
-                    if "chance_of_playing" in col:
-                        current_data[col] = current_data[col].fillna(100)
-                    elif "rank" in col:
-                        current_data[col] = current_data[col].fillna(300)
-                    elif "order" in col:
-                        current_data[col] = current_data[col].fillna(0)
-                    else:
-                        current_data[col] = current_data[col].fillna(0)
-
-            # Add enhanced static features with _static suffix to match training
-            for col in available_enhanced_pred:
-                if col in current_data.columns:
-                    current_data[f"{col}_static"] = current_data[col]
-
-            # Add missing features with defaults
-            for feature in self.ml_features:
-                if feature not in current_data.columns:
-                    if "position_encoded" in feature:
-                        # Handle position encoding
-                        if "position" in current_data.columns:
-                            current_data["position_encoded"] = (
-                                self.label_encoder.transform(
-                                    current_data["position"].fillna("MID")
-                                )
-                            )
-                        else:
-                            current_data["position_encoded"] = 2  # Default to MID
-                    elif "historical" in feature or "per_90" in feature:
-                        current_data[feature] = 0
-                    elif "prev_" in feature:
-                        current_data[feature] = 0
-                    elif "_static" in feature:
-                        if "chance_of_playing" in feature:
-                            current_data[feature] = 100
-                        elif "rank" in feature:
-                            current_data[feature] = 300
-                        elif "order" in feature:
-                            current_data[feature] = 0
-                        else:
-                            current_data[feature] = 0
-                    else:
-                        current_data[feature] = 0
-
-            # Prepare features for prediction
-            X_current = current_data[self.ml_features].fillna(0)
-
-            # Ensure non-negative values
-            for col in X_current.columns:
-                if X_current[col].min() < 0:
-                    X_current[col] = X_current[col].clip(lower=0)
-
-            # Scale features for general model
-            X_current_scaled = self.general_scaler.transform(X_current)
-
-            # Generate general ML predictions
-            ml_general_predictions = self.general_model.predict(X_current_scaled)
-            ml_general_predictions = np.clip(ml_general_predictions, 0, 20)
-
-            # Generate position-specific predictions
-            ml_position_predictions = np.zeros(len(current_data))
-
-            if self.position_models:
-                for position in ["GKP", "DEF", "MID", "FWD"]:
-                    if position in self.position_models:
-                        pos_mask = current_data["position"] == position
-                        pos_players = current_data[pos_mask]
-
-                        if len(pos_players) > 0:
-                            X_pos = pos_players[self.ml_features].fillna(0)
-                            for col in X_pos.columns:
-                                if X_pos[col].min() < 0:
-                                    X_pos[col] = X_pos[col].clip(lower=0)
-
-                            # Unpack model and scaler
-                            pos_model, pos_scaler = self.position_models[position]
-                            X_pos_scaled = pos_scaler.transform(X_pos)
-                            pos_pred = pos_model.predict(X_pos_scaled)
-                            pos_pred = np.clip(pos_pred, 0, 20)
-                            ml_position_predictions[pos_mask] = pos_pred
-
-            # Create ensemble predictions
-            has_position_pred = ml_position_predictions > 0
-            ml_ensemble_predictions = np.where(
-                has_position_pred,
-                0.6 * ml_position_predictions + 0.4 * ml_general_predictions,
-                ml_general_predictions,
-            )
-
-            # Add predictions to current data
-            result = current_data.copy()
-            result["ml_general_xP"] = ml_general_predictions
-            result["ml_position_xP"] = ml_position_predictions
-            result["ml_ensemble_xP"] = ml_ensemble_predictions
-
-            if self.debug:
-                logger.debug(f"Generated predictions for {len(result)} players")
-
-            return result
-
-        except Exception as e:
-            logger.error(f"Prediction failed: {str(e)}")
-            raise
+        return pipeline
 
     def calculate_expected_points(
         self,
@@ -679,45 +206,134 @@ class MLExpectedPointsService:
         rule_based_model=None,
     ) -> pd.DataFrame:
         """
-        Main interface method compatible with existing XPModel
+        Main interface method compatible with existing XP calculations.
+
+        This is the method called by gameweek_manager.py and expected_points_service.py
 
         Args:
-            players_data: Player data
+            players_data: Current player data (will be enriched with features)
             teams_data: Team data
-            xg_rates_data: xG rates data
+            xg_rates_data: xG rates data (not used in new approach)
             fixtures_data: Fixtures data
-            target_gameweek: Target gameweek
-            live_data: Historical live data
-            gameweeks_ahead: Number of gameweeks ahead (1 or 5)
-            rule_based_model: Optional rule-based model for ensemble
+            target_gameweek: Target gameweek for prediction
+            live_data: Historical live gameweek data for training
+            gameweeks_ahead: Number of gameweeks ahead (1 or 5) - not yet implemented
+            rule_based_model: Optional rule-based model for ensemble predictions
 
         Returns:
-            DataFrame with ML-based expected points
+            DataFrame with ML-based expected points in 'xP' column
         """
         try:
-            # Prepare training data
-            training_data, ml_features = self.prepare_training_data(
-                live_data, target_gameweek
+            # Validate we have enough historical data
+            if live_data.empty:
+                raise ValueError("No historical live_data provided for training")
+
+            historical_gws = sorted(
+                live_data["event"].unique()
+                if "event" in live_data.columns
+                else live_data["gameweek"].unique()
             )
 
-            # Train models
-            metrics = self.train_models(training_data, ml_features)
+            # Strategy: Need at least 5 completed gameweeks for rolling 5GW features
+            # Example: GW1-5 data predicts GW6, GW2-6 data predicts GW7, etc.
+            min_required = 5
+            if len(historical_gws) < min_required:
+                raise ValueError(
+                    f"Need at least {min_required} historical gameweeks for rolling 5GW features. "
+                    f"Found {len(historical_gws)} gameweeks: {historical_gws}. "
+                    f"Strategy: Use GW1-5 to predict GW6, GW2-6 to predict GW7, etc."
+                )
 
-            if self.debug:
-                logger.debug(f"Training metrics: {metrics}")
+            # Standardize column names
+            if "event" in live_data.columns and "gameweek" not in live_data.columns:
+                live_data = live_data.rename(columns={"event": "gameweek"})
 
-            # Generate predictions
+            # Train or use pre-trained pipeline
+            if self.pipeline is None:
+                if self.debug:
+                    logger.debug("No pre-trained model, training on-the-fly...")
+
+                self.pipeline = self._train_pipeline(
+                    historical_df=live_data,
+                    fixtures_df=fixtures_data,
+                    teams_df=teams_data,
+                )
+
+            # Prepare current gameweek data for prediction
+            # Need to add gameweek column and ensure all required columns exist
             current_data = players_data.copy()
-            predictions_df = self.predict(current_data)
+            current_data["gameweek"] = target_gameweek
+
+            # CRITICAL: Ensure current_data has same columns as historical data
+            # Add missing performance columns with 0 (they haven't happened yet for future GW)
+            required_cols = [
+                "total_points",
+                "minutes",
+                "goals_scored",
+                "assists",
+                "clean_sheets",
+                "goals_conceded",
+                "yellow_cards",
+                "red_cards",
+                "saves",
+                "bonus",
+                "bps",
+                "influence",
+                "creativity",
+                "threat",
+                "ict_index",
+                "expected_goals",
+                "expected_assists",
+                "expected_goal_involvements",
+                "expected_goals_conceded",
+                "value",
+            ]
+            for col in required_cols:
+                if col not in current_data.columns:
+                    if col == "value" and "price" in current_data.columns:
+                        current_data["value"] = (
+                            current_data["price"] * 10
+                        )  # Convert price back to value
+                    else:
+                        current_data[col] = 0  # Future performance = 0 (unknown)
+
+            # CRITICAL: The feature engineer needs ALL historical data to calculate rolling features!
+            # Append current data to historical - pass ALL data through pipeline
+            prediction_data_all = pd.concat(
+                [live_data, current_data], ignore_index=True
+            )
+
+            # CRITICAL FIX: Sort by player_id and gameweek BEFORE prediction
+            # The feature engineer sorts internally, so we must maintain this order
+            # to correctly align predictions with player_ids
+            prediction_data_all = prediction_data_all.sort_values(
+                ["player_id", "gameweek"]
+            ).reset_index(drop=True)
+
+            # Make predictions for ALL gameweeks (pipeline calculates rolling features correctly)
+            all_predictions = self.pipeline.predict(prediction_data_all)
+
+            # Extract ONLY predictions for target gameweek (now properly aligned)
+            target_mask = prediction_data_all["gameweek"] == target_gameweek
+            predictions = all_predictions[target_mask]
+            predictions = np.clip(predictions, 0, 20)  # Reasonable bounds
+
+            # Get player_ids in the same order as predictions (after sorting)
+            target_player_ids = prediction_data_all.loc[target_mask, "player_id"].values
+
+            # Create result DataFrame and align predictions with original players_data order
+            result = players_data.copy()
+
+            # Map predictions to correct player_ids
+            prediction_map = dict(zip(target_player_ids, predictions))
+            result["ml_xP"] = result["player_id"].map(prediction_map).fillna(0)
+            result["xP"] = result["ml_xP"]
 
             # Calculate expected_minutes using rule-based logic
-            from fpl_team_picker.domain.services import ExpectedPointsService
+            from .expected_points_service import ExpectedPointsService
 
             temp_xp_service = ExpectedPointsService()
-            predictions_df = temp_xp_service._calculate_expected_minutes(predictions_df)
-
-            # Use ensemble prediction as main xP
-            predictions_df["xP"] = predictions_df["ml_ensemble_xP"]
+            result = temp_xp_service._calculate_expected_minutes(result)
 
             # If rule-based model provided, create weighted ensemble
             if rule_based_model is not None and self.ensemble_rule_weight > 0:
@@ -734,78 +350,96 @@ class MLExpectedPointsService:
 
                     # Create weighted ensemble
                     ml_weight = 1 - self.ensemble_rule_weight
-                    predictions_df["xP"] = (
-                        ml_weight * predictions_df["ml_ensemble_xP"]
+                    result["xP"] = (
+                        ml_weight * result["ml_xP"]
                         + self.ensemble_rule_weight * rule_predictions["xP"]
                     )
 
                     if self.debug:
                         logger.debug(
-                            f"Created ensemble with ML weight {ml_weight:.2f}, Rule weight {self.ensemble_rule_weight:.2f}"
+                            f"Created ensemble: ML={ml_weight:.2f}, Rule={self.ensemble_rule_weight:.2f}"
                         )
 
                 except Exception as e:
-                    logger.warning(
-                        f"Rule-based ensemble failed, using pure ML: {str(e)}"
-                    )
+                    logger.warning(f"Rule-based ensemble failed, using pure ML: {e}")
 
-            return predictions_df
+            if self.debug:
+                logger.debug(f"Generated ML predictions for {len(result)} players")
+                logger.debug(
+                    f"xP range: {result['xP'].min():.2f} - {result['xP'].max():.2f}"
+                )
+
+            return result
 
         except Exception as e:
             logger.error(f"ML XP calculation failed: {str(e)}")
-            # Re-raise to let ExpectedPointsService handle fallback
             raise
+
+    def save_models(self, filepath: str):
+        """
+        Save trained pipeline to file (maintains old interface)
+
+        Args:
+            filepath: Path to save the model
+        """
+        if self.pipeline is None:
+            raise ValueError("No pipeline to save. Train or load a model first.")
+
+        save_pipeline(self.pipeline, Path(filepath), self.pipeline_metadata)
+
+        if self.debug:
+            logger.debug(f"Saved pipeline to {filepath}")
+
+    def load_models(self, filepath: str):
+        """
+        Load trained pipeline from file (maintains old interface)
+
+        Args:
+            filepath: Path to saved model
+        """
+        self.model_path = filepath
+        self._load_pretrained_model()
+
+        if self.debug:
+            logger.debug(f"Loaded pipeline from {filepath}")
 
     def get_feature_importance(self) -> pd.DataFrame:
         """
-        Get feature importance from the general model
+        Get feature importance from the trained model.
 
         Returns:
-            DataFrame with features and importance scores
+            DataFrame with features and importance scores (for tree-based models)
         """
-        if self.general_model is None:
-            raise ValueError("Model not trained")
+        if self.pipeline is None:
+            raise ValueError(
+                "Model not trained. Call calculate_expected_points() first."
+            )
 
-        importance_df = pd.DataFrame(
-            {"feature": self.ml_features, "importance": abs(self.general_model.coef_)}
-        ).sort_values("importance", ascending=False)
+        # Extract model from pipeline
+        model = self.pipeline.named_steps.get("model")
+        if model is None:
+            raise ValueError("No model found in pipeline")
+
+        # Get feature names from feature engineer
+        feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+        if feature_engineer is None:
+            raise ValueError("No feature engineer found in pipeline")
+
+        feature_names = feature_engineer.get_feature_names_out()
+
+        # Get importance scores (for tree-based models)
+        if hasattr(model, "feature_importances_"):
+            importances = model.feature_importances_
+            importance_df = pd.DataFrame(
+                {"feature": feature_names, "importance": importances}
+            ).sort_values("importance", ascending=False)
+        elif hasattr(model, "coef_"):
+            # For Ridge regression
+            importances = np.abs(model.coef_)
+            importance_df = pd.DataFrame(
+                {"feature": feature_names, "importance": importances}
+            ).sort_values("importance", ascending=False)
+        else:
+            raise ValueError("Model does not support feature importance extraction")
 
         return importance_df
-
-    def save_models(self, filepath: str):
-        """Save trained models to file"""
-        model_data = {
-            "general_model": self.general_model,
-            "general_scaler": self.general_scaler,
-            "position_models": self.position_models,
-            "label_encoder": self.label_encoder,
-            "ml_features": self.ml_features,
-            "config": {
-                "min_training_gameweeks": self.min_training_gameweeks,
-                "training_gameweeks": self.training_gameweeks,
-                "position_min_samples": self.position_min_samples,
-                "ensemble_rule_weight": self.ensemble_rule_weight,
-            },
-        }
-
-        with open(filepath, "wb") as f:
-            pickle.dump(model_data, f)
-
-    def load_models(self, filepath: str):
-        """Load trained models from file"""
-        with open(filepath, "rb") as f:
-            model_data = pickle.load(f)
-
-        self.general_model = model_data["general_model"]
-        self.general_scaler = model_data["general_scaler"]
-        self.position_models = model_data["position_models"]
-        self.label_encoder = model_data["label_encoder"]
-        self.ml_features = model_data["ml_features"]
-
-        # Update config if available
-        if "config" in model_data:
-            config_data = model_data["config"]
-            self.min_training_gameweeks = config_data.get("min_training_gameweeks", 3)
-            self.training_gameweeks = config_data.get("training_gameweeks", 5)
-            self.position_min_samples = config_data.get("position_min_samples", 30)
-            self.ensemble_rule_weight = config_data.get("ensemble_rule_weight", 0.3)

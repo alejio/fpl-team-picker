@@ -396,33 +396,47 @@ class DataOrchestrationService:
             xg_rates = xg_rates.rename(columns={"id": "player_id"})
 
         # Standardize fixtures columns
-        fixture_rename = {}
+        # Keep original names (home_team_id, away_team_id) for ML feature engineering
+        # Add aliases (team_h, team_a) for backwards compatibility with rule-based XP
         if "event" in fixtures.columns and "gameweek" not in fixtures.columns:
-            fixture_rename["event"] = "gameweek"
-        # Ensure team_h and team_a exist
+            fixtures["gameweek"] = fixtures["event"]
+
+        # Add team_h and team_a aliases WITHOUT removing original columns
         if "team_h" not in fixtures.columns:
             if "home_team_id" in fixtures.columns:  # Client's actual column name
-                fixture_rename["home_team_id"] = "team_h"
+                fixtures["team_h"] = fixtures[
+                    "home_team_id"
+                ]  # Create alias, keep original
             elif "home_team" in fixtures.columns:
-                fixture_rename["home_team"] = "team_h"
+                fixtures["team_h"] = fixtures["home_team"]
             elif "home" in fixtures.columns:
-                fixture_rename["home"] = "team_h"
+                fixtures["team_h"] = fixtures["home"]
+
         if "team_a" not in fixtures.columns:
             if "away_team_id" in fixtures.columns:  # Client's actual column name
-                fixture_rename["away_team_id"] = "team_a"
+                fixtures["team_a"] = fixtures[
+                    "away_team_id"
+                ]  # Create alias, keep original
             elif "away_team" in fixtures.columns:
-                fixture_rename["away_team"] = "team_a"
+                fixtures["team_a"] = fixtures["away_team"]
             elif "away" in fixtures.columns:
-                fixture_rename["away"] = "team_a"
-        if fixture_rename:
-            fixtures = fixtures.rename(columns=fixture_rename)
+                fixtures["team_a"] = fixtures["away"]
 
-        # GUARANTEE: fixtures must have team_h and team_a for XP calculations
+        # GUARANTEE: fixtures must have both original AND alias columns
         if not fixtures.empty:
-            if "team_h" not in fixtures.columns or "team_a" not in fixtures.columns:
+            required_cols = [
+                "event",
+                "home_team_id",
+                "away_team_id",
+                "team_h",
+                "team_a",
+            ]
+            missing_cols = [c for c in required_cols if c not in fixtures.columns]
+            if missing_cols:
                 raise ValueError(
-                    f"Fixtures missing required columns. Has: {list(fixtures.columns)}. "
-                    f"Needs: team_h, team_a, gameweek"
+                    f"Fixtures missing required columns: {missing_cols}. "
+                    f"Available columns: {list(fixtures.columns)}. "
+                    f"Need: event, home_team_id, away_team_id (for ML) and team_h, team_a (for rule-based XP)"
                 )
 
         # Standardize teams columns
@@ -600,10 +614,14 @@ class DataOrchestrationService:
 
         Args:
             target_gameweek: The gameweek to optimize for
-            form_window: Number of previous gameweeks to include for form analysis
+            form_window: Number of previous gameweeks to include for form analysis (not used - loads from GW1)
 
         Returns:
             Tuple of (players, teams, xg_rates, fixtures, target_gameweek, live_data_historical)
+
+        Note:
+            Always loads from GW1 to (target_gameweek-1) to support ML rolling window features.
+            This creates all possible 5GW training windows: GW1-5→GW6, GW2-6→GW7, etc.
         """
         from client import FPLDataClient
 
@@ -617,9 +635,17 @@ class DataOrchestrationService:
         teams_df = client.get_current_teams()
 
         # Get historical live data for form calculation using enhanced methods
+        # For ML: Load extra gameweeks to enable rolling window feature engineering
+        # Strategy: Load from GW1 to create all possible 5GW training windows
+        # - Window 1: GW1-5 → predict GW6
+        # - Window 2: GW2-6 → predict GW7
+        # - Window N: GW(N-5) to GW(N-1) → predict GW N
         historical_data = []
 
-        for gw in range(max(1, target_gameweek - form_window), target_gameweek):
+        # Load from GW1 (or earliest available) to enable complete rolling windows
+        # This ensures GW6+ training examples have full 5GW feature history
+        start_gw = 1  # Always start from GW1 for maximum ML training data
+        for gw in range(start_gw, target_gameweek):
             try:
                 # Try gameweek-specific performance data first (more detailed)
                 gw_data = client.get_gameweek_performance(gw)
@@ -807,33 +833,47 @@ class DataOrchestrationService:
             xg_rates = xg_rates.rename(columns={"id": "player_id"})
 
         # Standardize fixtures columns
-        fixture_rename = {}
+        # Keep original names (home_team_id, away_team_id) for ML feature engineering
+        # Add aliases (team_h, team_a) for backwards compatibility with rule-based XP
         if "event" in fixtures.columns and "gameweek" not in fixtures.columns:
-            fixture_rename["event"] = "gameweek"
-        # Ensure team_h and team_a exist
+            fixtures["gameweek"] = fixtures["event"]
+
+        # Add team_h and team_a aliases WITHOUT removing original columns
         if "team_h" not in fixtures.columns:
             if "home_team_id" in fixtures.columns:  # Client's actual column name
-                fixture_rename["home_team_id"] = "team_h"
+                fixtures["team_h"] = fixtures[
+                    "home_team_id"
+                ]  # Create alias, keep original
             elif "home_team" in fixtures.columns:
-                fixture_rename["home_team"] = "team_h"
+                fixtures["team_h"] = fixtures["home_team"]
             elif "home" in fixtures.columns:
-                fixture_rename["home"] = "team_h"
+                fixtures["team_h"] = fixtures["home"]
+
         if "team_a" not in fixtures.columns:
             if "away_team_id" in fixtures.columns:  # Client's actual column name
-                fixture_rename["away_team_id"] = "team_a"
+                fixtures["team_a"] = fixtures[
+                    "away_team_id"
+                ]  # Create alias, keep original
             elif "away_team" in fixtures.columns:
-                fixture_rename["away_team"] = "team_a"
+                fixtures["team_a"] = fixtures["away_team"]
             elif "away" in fixtures.columns:
-                fixture_rename["away"] = "team_a"
-        if fixture_rename:
-            fixtures = fixtures.rename(columns=fixture_rename)
+                fixtures["team_a"] = fixtures["away"]
 
-        # GUARANTEE: fixtures must have team_h and team_a for XP calculations
+        # GUARANTEE: fixtures must have both original AND alias columns
         if not fixtures.empty:
-            if "team_h" not in fixtures.columns or "team_a" not in fixtures.columns:
+            required_cols = [
+                "event",
+                "home_team_id",
+                "away_team_id",
+                "team_h",
+                "team_a",
+            ]
+            missing_cols = [c for c in required_cols if c not in fixtures.columns]
+            if missing_cols:
                 raise ValueError(
-                    f"Fixtures missing required columns. Has: {list(fixtures.columns)}. "
-                    f"Needs: team_h, team_a, gameweek"
+                    f"Fixtures missing required columns: {missing_cols}. "
+                    f"Available columns: {list(fixtures.columns)}. "
+                    f"Need: event, home_team_id, away_team_id (for ML) and team_h, team_a (for rule-based XP)"
                 )
 
         # Standardize teams columns
@@ -854,6 +894,42 @@ class DataOrchestrationService:
 
         print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
         print(f"📅 Target GW: {target_gameweek}")
+
+        # Enrich historical live data with position information (required for ML features)
+        # Position is not in gameweek performance data, so merge from current players
+        if (
+            not live_data_combined.empty
+            and "position" not in live_data_combined.columns
+        ):
+            if (
+                "position" not in players_base.columns
+                or "player_id" not in players_base.columns
+            ):
+                raise ValueError(
+                    "Cannot enrich live data with position: players_base missing required columns. "
+                    f"Available columns: {list(players_base.columns)}"
+                )
+
+            # Merge position data
+            live_data_combined = live_data_combined.merge(
+                players_base[["player_id", "position"]],
+                on="player_id",
+                how="left",
+            )
+
+            # FAIL FAST: All players must have position data
+            missing_position = live_data_combined["position"].isna().sum()
+            if missing_position > 0:
+                missing_players = live_data_combined[
+                    live_data_combined["position"].isna()
+                ]["player_id"].unique()
+                raise ValueError(
+                    f"Position data missing for {missing_position} records after merge. "
+                    f"Missing player IDs: {list(missing_players)[:20]}. "
+                    f"Data contract violation - fix dataset-builder."
+                )
+
+            print("✅ Enriched live data with position information")
 
         return players, teams, xg_rates, fixtures, target_gameweek, live_data_combined
 
