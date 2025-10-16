@@ -99,6 +99,23 @@ Marimo notebooks orchestrating domain services (zero business logic):
 
 Or: `marimo run fpl_team_picker/interfaces/{notebook}.py`
 
+## MCP Server (AI Integration)
+
+Marimo MCP (Model Context Protocol) server enables AI assistants like Claude Code to interact with notebooks programmatically.
+
+**Quick Start**: `./start-mcp-server.sh`
+
+**Manual Start**: `uv run marimo edit fpl_team_picker/interfaces/ml_xp_notebook.py --headless --no-token --port 2718 --mcp`
+
+**Configuration**:
+- MCP URL: `http://localhost:2718/mcp/server`
+- Add to Claude Code: `claude mcp add --transport http marimo http://localhost:2718/mcp/server`
+- Check status: `claude mcp list`
+
+**Requirements**: `marimo[mcp]>=0.17.0` (already in pyproject.toml)
+
+**Note**: MCP server only works with `marimo edit` (not `marimo run`), requires `--mcp` flag (hidden option)
+
 ## ML Development
 
 **Historical data**: `get_gameweek_performance(gw)`, `get_player_gameweek_history()`, `get_my_picks_history()`

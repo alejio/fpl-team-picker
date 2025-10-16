@@ -57,7 +57,6 @@ def _():
         FPLFeatureEngineer,
     )
     from fpl_team_picker.domain.services.ml_pipeline_factory import (
-        create_fpl_pipeline,
         get_team_strength_ratings,
     )
     from client import FPLDataClient
@@ -75,7 +74,6 @@ def _():
         Ridge,
         StandardScaler,
         client,
-        create_fpl_pipeline,
         cross_val_score,
         data_service,
         get_team_strength_ratings,
@@ -277,7 +275,7 @@ def _(historical_df, mo):
         historical_data_table = mo.md("_No data loaded yet_")
 
     historical_data_table
-    return (historical_data_table,)
+    return
 
 
 @app.cell
@@ -287,7 +285,7 @@ def _(mo):
 
 
 @app.cell
-def _(teams_df, mo, get_team_strength_ratings):
+def _(get_team_strength_ratings, mo, teams_df):
     # ✅ USE PRODUCTION CODE: Team strength ratings from ml_pipeline_factory
     # This ensures notebook and gameweek_manager.py use IDENTICAL logic
     team_strength = get_team_strength_ratings()
@@ -326,7 +324,13 @@ def _(mo):
 
 @app.cell
 def _(
-    fixtures_df, historical_df, mo, np, pd, team_strength, teams_df, FPLFeatureEngineer
+    FPLFeatureEngineer,
+    fixtures_df,
+    historical_df,
+    mo,
+    pd,
+    team_strength,
+    teams_df,
 ):
     # ===================================================================
     # ✅ USE PRODUCTION CODE: FPLFeatureEngineer from ml_feature_engineering.py
@@ -472,7 +476,7 @@ def _(
         feature_summary = mo.md("⚠️ **Load data first**")
 
     feature_summary
-    return (features_df, production_feature_cols)
+    return features_df, production_feature_cols
 
 
 @app.cell
@@ -523,7 +527,7 @@ def _(features_df, mo):
         features_table = mo.md("_No features engineered yet_")
 
     features_table
-    return (features_table,)
+    return
 
 
 @app.cell
@@ -548,7 +552,14 @@ def _(mo):
 
 
 @app.cell
-def _(end_gw_input, features_df, mo, n_folds_input, np, pd, production_feature_cols):
+def _(
+    end_gw_input,
+    features_df,
+    mo,
+    n_folds_input,
+    pd,
+    production_feature_cols,
+):
     # Prepare data for cross-validation
     # Strategy: Use ALL available gameweeks (GW6+) with player-based stratified k-fold
     if not features_df.empty and end_gw_input.value and n_folds_input.value:
@@ -688,16 +699,35 @@ def _(mo):
         kind="success",
     )
 
+    # CV Strategy Selection
+    cv_strategy_selector = mo.ui.dropdown(
+        options={
+            "player_based": "Player-Based GroupKFold (test on NEW players)",
+            "temporal": "Temporal Walk-Forward (test on NEXT gameweek)",
+        },
+        value="temporal",
+        label="Cross-Validation Strategy",
+    )
+
     mo.vstack(
         [
             mo.md("### 🎯 Model Selection"),
             model_selector,
             mo.md(""),
+            mo.md("### 📊 Cross-Validation Strategy"),
+            cv_strategy_selector,
+            mo.md(
+                "- **Player-Based:** Tests generalization to unseen players (mixes gameweeks)"
+            ),
+            mo.md(
+                "- **Temporal:** Tests prediction of next future gameweek (proper time-series validation) ⭐"
+            ),
+            mo.md(""),
             train_button,
             mo.md("---"),
         ]
     )
-    return model_selector, train_button
+    return cv_strategy_selector, model_selector, train_button
 
 
 @app.cell
@@ -985,7 +1015,7 @@ def _(cv_results, mo, pd, px):
         eval_display = mo.md("⚠️ **Train models first**")
 
     eval_display
-    return (eval_display,)
+    return
 
 
 @app.cell
@@ -1071,19 +1101,495 @@ def _(feature_cols, mo, pd, px, trained_models):
 
 @app.cell
 def _(mo):
+    mo.md(r"""## 8️⃣ Position-Specific Error Analysis - Where Are We Losing Points?""")
+    return
+
+
+@app.cell
+def _(X_cv, cv_data, cv_results, feature_cols, mo, np, px, trained_models):
+    # Position-specific error breakdown to identify which positions need improvement
+    if trained_models and not cv_data.empty and feature_cols:
+        # Generate predictions from best model (lowest MAE)
+        if cv_results:
+            _best_model_name = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
+                0
+            ]
+            _best_model = trained_models[_best_model_name]
+
+            # Generate predictions on all CV data
+            _y_pred = _best_model.predict(X_cv)
+
+            # Calculate errors by position
+            _position_errors = cv_data.copy()
+            _position_errors["predicted_points"] = _y_pred
+            _position_errors["actual_points"] = cv_data["total_points"]
+            _position_errors["error"] = abs(
+                _position_errors["predicted_points"] - _position_errors["actual_points"]
+            )
+            _position_errors["signed_error"] = (
+                _position_errors["predicted_points"] - _position_errors["actual_points"]
+            )
+
+            # Need position data - check if available
+            if "position" in _position_errors.columns:
+                # Aggregate by position
+                _position_stats = (
+                    _position_errors.groupby("position")
+                    .agg(
+                        {
+                            "error": ["mean", "std", "count"],
+                            "signed_error": "mean",
+                            "actual_points": "mean",
+                            "predicted_points": "mean",
+                        }
+                    )
+                    .reset_index()
+                )
+
+                # Flatten column names
+                _position_stats.columns = [
+                    "position",
+                    "MAE",
+                    "MAE_std",
+                    "count",
+                    "bias",
+                    "actual_avg",
+                    "predicted_avg",
+                ]
+
+                # Calculate RMSE by position
+                _position_rmse = (
+                    _position_errors.groupby("position")
+                    .apply(
+                        lambda x: np.sqrt(
+                            ((x["predicted_points"] - x["actual_points"]) ** 2).mean()
+                        )
+                    )
+                    .reset_index(name="RMSE")
+                )
+
+                _position_stats = _position_stats.merge(_position_rmse, on="position")
+
+                # Sort by MAE descending (worst positions first)
+                _position_stats = _position_stats.sort_values("MAE", ascending=False)
+
+                # Visualize position-specific errors
+                _fig_position_mae = px.bar(
+                    _position_stats,
+                    x="position",
+                    y="MAE",
+                    error_y="MAE_std",
+                    title=f"Position-Specific MAE ({_best_model_name.upper()} model)",
+                    labels={
+                        "MAE": "Mean Absolute Error (points)",
+                        "position": "Position",
+                    },
+                    text="MAE",
+                )
+                _fig_position_mae.update_traces(
+                    texttemplate="%{text:.2f}", textposition="outside"
+                )
+
+                # Bias analysis (systematic over/under-prediction)
+                _fig_position_bias = px.bar(
+                    _position_stats,
+                    x="position",
+                    y="bias",
+                    title=f"Position-Specific Prediction Bias ({_best_model_name.upper()} model)",
+                    labels={
+                        "bias": "Mean Signed Error (+ = over-predict, - = under-predict)",
+                        "position": "Position",
+                    },
+                    text="bias",
+                    color="bias",
+                    color_continuous_scale=["red", "white", "blue"],
+                    color_continuous_midpoint=0,
+                )
+                _fig_position_bias.update_traces(
+                    texttemplate="%{text:.2f}", textposition="outside"
+                )
+
+                position_analysis_display = mo.vstack(
+                    [
+                        mo.md("### 🎯 Position-Specific Error Breakdown"),
+                        mo.md(
+                            f"**Best Model:** {_best_model_name.upper()} (MAE: {cv_results[_best_model_name]['MAE_mean']:.2f})"
+                        ),
+                        mo.md(""),
+                        mo.ui.plotly(_fig_position_mae),
+                        mo.md("---"),
+                        mo.ui.plotly(_fig_position_bias),
+                        mo.md("---"),
+                        mo.md("### 📊 Position-Specific Metrics"),
+                        mo.ui.table(_position_stats.round(2), page_size=10),
+                        mo.md(""),
+                        mo.md("**Insights:**"),
+                        mo.md(
+                            f"- **Worst Position:** {_position_stats.iloc[0]['position']} (MAE: {_position_stats.iloc[0]['MAE']:.2f})"
+                        ),
+                        mo.md(
+                            f"- **Best Position:** {_position_stats.iloc[-1]['position']} (MAE: {_position_stats.iloc[-1]['MAE']:.2f})"
+                        ),
+                        mo.md(
+                            f"- **Most Over-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmax(), 'position']} (+{_position_stats['bias'].max():.2f} pts)"
+                        ),
+                        mo.md(
+                            f"- **Most Under-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmin(), 'position']} ({_position_stats['bias'].min():.2f} pts)"
+                        ),
+                    ]
+                )
+            else:
+                position_analysis_display = mo.md(
+                    "❌ **Position data not available in CV data**"
+                )
+        else:
+            position_analysis_display = mo.md("⚠️ **No CV results available**")
+    else:
+        position_analysis_display = mo.md("⚠️ **Train models first**")
+
+    position_analysis_display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""## 9️⃣ Prediction Bias Detection - Systematic Over/Under-Prediction""")
+    return
+
+
+@app.cell
+def _(X_cv, cv_data, cv_results, feature_cols, mo, pd, px, trained_models):
+    # Detect systematic biases in predictions (price bands, team strength, etc.)
+    if trained_models and not cv_data.empty and feature_cols and cv_results:
+        _best_model_name_bias = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
+            0
+        ]
+        _best_model_bias = trained_models[_best_model_name_bias]
+
+        # Generate predictions
+        _y_pred_bias = _best_model_bias.predict(X_cv)
+
+        _bias_data = cv_data.copy()
+        _bias_data["predicted_points"] = _y_pred_bias
+        _bias_data["actual_points"] = cv_data["total_points"]
+
+        # Scatter plot: predicted vs actual (overall)
+        _fig_scatter = px.scatter(
+            _bias_data.sample(min(1000, len(_bias_data))),  # Sample for performance
+            x="actual_points",
+            y="predicted_points",
+            color="position" if "position" in _bias_data.columns else None,
+            title=f"Predicted vs Actual Points ({_best_model_name_bias.upper()} model)",
+            labels={
+                "actual_points": "Actual Points",
+                "predicted_points": "Predicted Points",
+            },
+            trendline="ols",
+            opacity=0.6,
+        )
+        # Add perfect prediction line
+        _fig_scatter.add_scatter(
+            x=[0, _bias_data["actual_points"].max()],
+            y=[0, _bias_data["actual_points"].max()],
+            mode="lines",
+            name="Perfect Prediction",
+            line=dict(color="red", dash="dash"),
+        )
+
+        # Price band analysis (if price available)
+        if "price" in _bias_data.columns:
+            # Create price bands
+            _bias_data["price_band"] = pd.cut(
+                _bias_data["price"],
+                bins=[0, 5, 7, 9, 15],
+                labels=[
+                    "Budget (<£5M)",
+                    "Mid (£5-7M)",
+                    "Premium (£7-9M)",
+                    "Elite (£9M+)",
+                ],
+            )
+
+            _price_band_errors = (
+                _bias_data.groupby("price_band", observed=True)
+                .agg(
+                    {
+                        "predicted_points": "mean",
+                        "actual_points": "mean",
+                    }
+                )
+                .reset_index()
+            )
+            _price_band_errors["error"] = abs(
+                _price_band_errors["predicted_points"]
+                - _price_band_errors["actual_points"]
+            )
+            _price_band_errors["bias"] = (
+                _price_band_errors["predicted_points"]
+                - _price_band_errors["actual_points"]
+            )
+
+            _fig_price_bands = px.bar(
+                _price_band_errors,
+                x="price_band",
+                y=["actual_points", "predicted_points"],
+                title="Average Points by Price Band (Predicted vs Actual)",
+                labels={"value": "Average Points", "price_band": "Price Band"},
+                barmode="group",
+            )
+
+            _price_band_display = mo.vstack(
+                [
+                    mo.md("### 💰 Price Band Analysis"),
+                    mo.ui.plotly(_fig_price_bands),
+                    mo.md("---"),
+                    mo.ui.table(_price_band_errors.round(2), page_size=10),
+                ]
+            )
+        else:
+            _price_band_display = mo.md("_Price data not available_")
+
+        bias_display = mo.vstack(
+            [
+                mo.md("### 🔍 Prediction Bias Analysis"),
+                mo.md(f"**Model:** {_best_model_name_bias.upper()}"),
+                mo.md(""),
+                mo.md("#### Overall Predicted vs Actual"),
+                mo.ui.plotly(_fig_scatter),
+                mo.md(""),
+                mo.md("**Interpretation:**"),
+                mo.md("- Points above red line = over-prediction"),
+                mo.md("- Points below red line = under-prediction"),
+                mo.md("- Clustered around line = good calibration"),
+                mo.md("---"),
+                _price_band_display,
+            ]
+        )
+    else:
+        bias_display = mo.md("⚠️ **Train models first**")
+
+    bias_display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""## 🔟 Rule-Based vs ML Comparison - Is ML Actually Better?""")
+    return
+
+
+@app.cell
+def _(
+    X_cv,
+    cv_data,
+    cv_results,
+    data_service,
+    feature_cols,
+    mo,
+    np,
+    pd,
+    px,
+    trained_models,
+    xp_service,
+):
+    # Compare ML model against rule-based ExpectedPointsService
+    if trained_models and not cv_data.empty and feature_cols and cv_results:
+        _best_model_name_comp = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
+            0
+        ]
+        _best_model_comp = trained_models[_best_model_name_comp]
+
+        # Generate ML predictions
+        _ml_predictions = _best_model_comp.predict(X_cv)
+
+        # Now generate rule-based predictions for the SAME data
+        # Need to reconstruct gameweek data for each GW in cv_data
+        _unique_gws = sorted(cv_data["gameweek"].unique())
+
+        try:
+            _rule_based_predictions = []
+            _rule_based_errors = []
+
+            for _gw in _unique_gws:
+                # Get players for this gameweek from cv_data
+                _gw_mask = cv_data["gameweek"] == _gw
+                _gw_player_ids = cv_data.loc[_gw_mask, "player_id"].unique()
+
+                # Load gameweek data using data orchestration service
+                try:
+                    _gameweek_data = data_service.load_gameweek_data(
+                        target_gameweek=_gw, load_live_data_history=True
+                    )
+
+                    # Calculate rule-based xP
+                    _rule_xp = xp_service.calculate_expected_points(
+                        gameweek_data=_gameweek_data,
+                        use_ml_model=False,
+                        gameweeks_ahead=1,
+                    )
+
+                    # Extract predictions for players in CV data
+                    for _pid in _gw_player_ids:
+                        _player_rule_xp = _rule_xp[_rule_xp["player_id"] == _pid][
+                            "xP"
+                        ].values
+                        if len(_player_rule_xp) > 0:
+                            _rule_based_predictions.append(_player_rule_xp[0])
+                        else:
+                            _rule_based_predictions.append(
+                                0
+                            )  # Fallback if player not found
+
+                except Exception as e:
+                    # If rule-based calculation fails for this GW, skip comparison
+                    _rule_based_errors.append(f"GW{_gw}: {str(e)}")
+                    # Fill with zeros for this gameweek
+                    _rule_based_predictions.extend([0] * _gw_mask.sum())
+
+            if len(_rule_based_predictions) == len(_ml_predictions):
+                # Calculate errors
+                _actual_points = cv_data["total_points"].values
+                _ml_errors = np.abs(_ml_predictions - _actual_points)
+                _rule_errors = np.abs(
+                    np.array(_rule_based_predictions) - _actual_points
+                )
+
+                _ml_mae = _ml_errors.mean()
+                _rule_mae = _rule_errors.mean()
+                _ml_rmse = np.sqrt(((_ml_predictions - _actual_points) ** 2).mean())
+                _rule_rmse = np.sqrt(
+                    ((np.array(_rule_based_predictions) - _actual_points) ** 2).mean()
+                )
+
+                # Create comparison DataFrame
+                _comparison_df = pd.DataFrame(
+                    {
+                        "Model": ["ML Model", "Rule-Based"],
+                        "MAE": [_ml_mae, _rule_mae],
+                        "RMSE": [_ml_rmse, _rule_rmse],
+                        "MAE_Improvement": [0, _ml_mae - _rule_mae],
+                    }
+                )
+
+                _fig_comparison = px.bar(
+                    _comparison_df,
+                    x="Model",
+                    y=["MAE", "RMSE"],
+                    title="ML vs Rule-Based Model Comparison",
+                    barmode="group",
+                    labels={"value": "Error (points)", "variable": "Metric"},
+                    text_auto=".2f",
+                )
+
+                # Position-specific comparison if position available
+                if "position" in cv_data.columns:
+                    _position_comparison = []
+                    for _pos in cv_data["position"].unique():
+                        _pos_mask = cv_data["position"] == _pos
+                        _pos_ml_mae = _ml_errors[_pos_mask].mean()
+                        _pos_rule_mae = _rule_errors[_pos_mask].mean()
+                        _position_comparison.append(
+                            {
+                                "Position": _pos,
+                                "ML MAE": _pos_ml_mae,
+                                "Rule-Based MAE": _pos_rule_mae,
+                                "Improvement": _pos_rule_mae - _pos_ml_mae,
+                            }
+                        )
+
+                    _pos_comp_df = pd.DataFrame(_position_comparison)
+
+                    _fig_position_comp = px.bar(
+                        _pos_comp_df,
+                        x="Position",
+                        y=["ML MAE", "Rule-Based MAE"],
+                        title="Position-Specific: ML vs Rule-Based",
+                        barmode="group",
+                        labels={"value": "MAE (points)"},
+                        text_auto=".2f",
+                    )
+
+                    _position_comp_display = mo.vstack(
+                        [
+                            mo.md("### 📊 Position-Specific Comparison"),
+                            mo.ui.plotly(_fig_position_comp),
+                            mo.md("---"),
+                            mo.ui.table(_pos_comp_df.round(2), page_size=10),
+                        ]
+                    )
+                else:
+                    _position_comp_display = mo.md("_Position data not available_")
+
+                _improvement_pct = (_rule_mae - _ml_mae) / _rule_mae * 100
+
+                rule_comparison_display = mo.vstack(
+                    [
+                        mo.md("### ⚔️ ML vs Rule-Based Model"),
+                        mo.md(f"**ML Model:** {_best_model_name_comp.upper()}"),
+                        mo.md(""),
+                        mo.ui.plotly(_fig_comparison),
+                        mo.md("---"),
+                        mo.md("### 📈 Performance Summary"),
+                        mo.ui.table(_comparison_df.round(3), page_size=10),
+                        mo.md(""),
+                        mo.md("**Key Insights:**"),
+                        mo.md(f"- **ML MAE:** {_ml_mae:.2f} points"),
+                        mo.md(f"- **Rule-Based MAE:** {_rule_mae:.2f} points"),
+                        mo.md(
+                            f"- **Improvement:** {_improvement_pct:+.1f}% {'✅ ML WINS' if _improvement_pct > 0 else '❌ Rule-Based WINS'}"
+                        ),
+                        mo.md(
+                            f"- **Absolute Improvement:** {_rule_mae - _ml_mae:+.2f} points per prediction"
+                        ),
+                        mo.md("---"),
+                        _position_comp_display,
+                        mo.md("---") if _rule_based_errors else mo.md(""),
+                        mo.md(
+                            "**Errors during rule-based calculation:**\n\n"
+                            + "\n".join([f"- {e}" for e in _rule_based_errors])
+                        )
+                        if _rule_based_errors
+                        else mo.md(""),
+                    ]
+                )
+            else:
+                rule_comparison_display = mo.md(
+                    f"❌ **Prediction length mismatch:** ML={len(_ml_predictions)}, Rule={len(_rule_based_predictions)}"
+                )
+
+        except Exception as e:
+            rule_comparison_display = mo.md(
+                f"❌ **Rule-based comparison failed:** {str(e)}\n\nThis is expected if historical gameweek data is not available for all CV gameweeks."
+            )
+    else:
+        rule_comparison_display = mo.md("⚠️ **Train models first**")
+
+    rule_comparison_display
+    return
+
+
+@app.cell
+def _(mo):
     mo.md(
         r"""
-    ## 8️⃣ Summary & Next Steps
+    ## 1️⃣1️⃣ Summary & Next Steps
 
     **Cross-validation provides robust model evaluation with confidence intervals.**
 
     The CV metrics above show mean ± std across all folds, giving you confidence in model performance.
 
+    ### Diagnostic Insights:
+    1. **Position-Specific Errors** - Identify which positions need model improvements (FWD vs DEF)
+    2. **Prediction Bias** - Detect systematic over/under-prediction patterns
+    3. **ML vs Rule-Based** - Validate ML actually improves over current production model
+
     ### Next Steps:
-    1. Compare Ridge, Random Forest, and Gradient Boosting models
-    2. Select the best performer based on CV MAE scores
-    3. Export the trained model for production use
-    4. Integrate with `MLExpectedPointsService` in the main codebase
+    1. Review position-specific errors to focus improvement efforts
+    2. Check for systematic biases in price bands or team strength
+    3. Compare ML vs Rule-Based to confirm ML provides value
+    4. If ML wins: Export trained model for production use
+    5. If Rule-Based wins: Focus on improving rule-based parameters instead
+    6. Integrate best model with `MLExpectedPointsService` in gameweek_manager.py
     """
     )
     return
