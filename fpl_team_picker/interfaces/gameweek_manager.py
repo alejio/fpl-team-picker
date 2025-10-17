@@ -445,24 +445,34 @@ def _(gameweek_data, mo):
 
         if use_ml:
             # Try to use pre-trained ML model with sklearn pipeline
-            model_path = Path("models/fpl_xp_rf.joblib")
+            # Prefer LightGBM (best performer in experiments), fallback to RandomForest
+            lgbm_model_path = Path("models/fpl_xp_lgbm.joblib")
+            rf_model_path = Path("models/fpl_xp_rf.joblib")
 
-            if model_path.exists():
-                # Use pre-trained ML model (FAST!)
+            if lgbm_model_path.exists():
+                # Use pre-trained LightGBM model (FAST! 4.3% better than Ridge)
                 ml_xp_service = MLExpectedPointsService(
-                    model_path=str(model_path),
+                    model_path=str(lgbm_model_path),
+                    ensemble_rule_weight=0.0,  # Pure ML
+                    debug=False,
+                )
+                model_type_label = "ML Pipeline (Pre-trained LightGBM)"
+            elif rf_model_path.exists():
+                # Fallback to RandomForest if no LightGBM model
+                ml_xp_service = MLExpectedPointsService(
+                    model_path=str(rf_model_path),
                     ensemble_rule_weight=0.0,  # Pure ML
                     debug=False,
                 )
                 model_type_label = "ML Pipeline (Pre-trained RandomForest)"
             else:
-                # No pre-trained model, train on-the-fly (SLOWER)
+                # No pre-trained model, train LightGBM on-the-fly (SLOWER but better accuracy)
                 ml_xp_service = MLExpectedPointsService(
-                    model_type="rf",
+                    model_type="lgbm",  # Use LightGBM (4.3% better MAE than Ridge)
                     ensemble_rule_weight=0.0,
                     debug=True,
                 )
-                model_type_label = "ML Pipeline (Training on-the-fly)"
+                model_type_label = "ML Pipeline (Training LightGBM on-the-fly)"
 
             # Calculate xP using ML service (no fallback - fail explicitly)
             # Note: ML service currently only does 1GW predictions

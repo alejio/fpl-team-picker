@@ -45,6 +45,7 @@ def _():
     from sklearn.model_selection import cross_val_score, GroupKFold
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
+    from lightgbm import LGBMRegressor
 
     # FPL services
     from fpl_team_picker.domain.services import (
@@ -69,6 +70,7 @@ def _():
         FPLFeatureEngineer,
         GradientBoostingRegressor,
         GroupKFold,
+        LGBMRegressor,
         Pipeline,
         RandomForestRegressor,
         Ridge,
@@ -671,7 +673,13 @@ def _(
         cv_summary = mo.md("⚠️ **Engineer features first**")
 
     cv_summary
-    return X_cv, cv_data, cv_groups, feature_cols, y_cv
+    return (
+        X_cv,
+        cv_data,
+        cv_groups,
+        feature_cols,
+        y_cv,
+    )
 
 
 @app.cell
@@ -724,12 +732,13 @@ def _(mo):
     # Model selection
     model_selector = mo.ui.dropdown(
         options={
+            "LightGBM (Recommended)": "lgbm",
             "Ridge Regression": "ridge",
             "Random Forest": "rf",
             "Gradient Boosting": "gb",
             "Ensemble (All Models)": "ensemble",
         },
-        value="Ridge Regression",
+        value="LightGBM (Recommended)",
         label="Select ML Algorithm",
     )
 
@@ -773,6 +782,7 @@ def _(mo):
 def _(
     GradientBoostingRegressor,
     GroupKFold,
+    LGBMRegressor,
     Pipeline,
     RandomForestRegressor,
     Ridge,
@@ -907,6 +917,60 @@ def _(
                 "R²_mean": _ridge_r2_scores.mean(),
                 "R²_std": _ridge_r2_scores.std(),
                 "fold_scores": _ridge_mae_scores,
+            }
+
+        if model_selector.value == "lgbm" or model_selector.value == "ensemble":
+            # LightGBM with optimal hyperparameters from experiments
+            # See: experiments/hyperparameter_tuning_valid_folds.py
+            lgbm_model = LGBMRegressor(
+                n_estimators=50,
+                max_depth=5,
+                learning_rate=0.1,
+                min_child_samples=20,
+                subsample=0.9,
+                colsample_bytree=0.9,
+                random_state=42,
+                n_jobs=-1,
+                verbosity=-1,  # Suppress warnings
+            )
+
+            # Cross-validation scoring
+            _lgbm_mae_scores = -cross_val_score(
+                lgbm_model,
+                X_cv,
+                y_cv,
+                scoring="neg_mean_absolute_error",
+                **_cv_kwargs,
+            )
+            _lgbm_rmse_scores = np.sqrt(
+                -cross_val_score(
+                    lgbm_model,
+                    X_cv,
+                    y_cv,
+                    scoring="neg_mean_squared_error",
+                    **_cv_kwargs,
+                )
+            )
+            _lgbm_r2_scores = cross_val_score(
+                lgbm_model,
+                X_cv,
+                y_cv,
+                scoring="r2",
+                **_cv_kwargs,
+            )
+
+            # Train final model on all data
+            lgbm_model.fit(X_cv, y_cv)
+            trained_models["lgbm"] = lgbm_model
+
+            cv_results["lgbm"] = {
+                "MAE_mean": _lgbm_mae_scores.mean(),
+                "MAE_std": _lgbm_mae_scores.std(),
+                "RMSE_mean": _lgbm_rmse_scores.mean(),
+                "RMSE_std": _lgbm_rmse_scores.std(),
+                "R²_mean": _lgbm_r2_scores.mean(),
+                "R²_std": _lgbm_r2_scores.std(),
+                "fold_scores": _lgbm_mae_scores,
             }
 
         if model_selector.value == "rf" or model_selector.value == "ensemble":

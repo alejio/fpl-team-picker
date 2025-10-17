@@ -16,6 +16,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
+from lightgbm import LGBMRegressor
 
 from .ml_feature_engineering import FPLFeatureEngineer
 
@@ -31,11 +32,11 @@ def create_fpl_pipeline(
     Create a complete FPL prediction pipeline.
 
     Args:
-        model_type: 'rf' (RandomForest), 'gb' (GradientBoosting), or 'ridge'
+        model_type: 'lgbm' (LightGBM - recommended), 'rf', 'gb', or 'ridge'
         fixtures_df: Fixture data for fixture-specific features
         teams_df: Teams data for opponent context
         team_strength: Team strength ratings dict
-        **model_kwargs: Additional kwargs for the model (n_estimators, max_depth, etc.)
+        **model_kwargs: Model hyperparameters (n_estimators, max_depth, etc.)
 
     Returns:
         sklearn Pipeline with [feature_engineer -> scaler -> model]
@@ -48,7 +49,25 @@ def create_fpl_pipeline(
     )
 
     # Select model
-    if model_type == "rf":
+    if model_type == "lgbm":
+        # LightGBM with optimal hyperparameters (4.3% better MAE vs Ridge)
+        # See: experiments/hyperparameter_tuning_valid_folds.py
+        model = LGBMRegressor(
+            n_estimators=model_kwargs.get("n_estimators", 50),
+            max_depth=model_kwargs.get("max_depth", 5),
+            learning_rate=model_kwargs.get("learning_rate", 0.1),
+            min_child_samples=model_kwargs.get("min_child_samples", 20),
+            subsample=model_kwargs.get("subsample", 0.9),
+            colsample_bytree=model_kwargs.get("colsample_bytree", 0.9),
+            random_state=model_kwargs.get("random_state", 42),
+            n_jobs=-1,
+            verbosity=-1,  # Suppress warnings
+        )
+        steps = [
+            ("feature_engineer", feature_engineer),
+            ("model", model),
+        ]
+    elif model_type == "rf":
         model = RandomForestRegressor(
             n_estimators=model_kwargs.get("n_estimators", 100),
             max_depth=model_kwargs.get("max_depth", 10),
@@ -84,7 +103,7 @@ def create_fpl_pipeline(
         ]
     else:
         raise ValueError(
-            f"Unknown model_type: {model_type}. Choose 'rf', 'gb', or 'ridge'"
+            f"Unknown model_type: {model_type}. Choose 'lgbm', 'rf', 'gb', or 'ridge'"
         )
 
     pipeline = Pipeline(steps)
