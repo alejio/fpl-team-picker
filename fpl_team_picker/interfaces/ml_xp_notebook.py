@@ -675,6 +675,45 @@ def _(
 
 
 @app.cell
+def _(cv_data, mo, X_cv, y_cv):
+    # Display sample training data for inspection
+    if not cv_data.empty:
+        sample_display = mo.vstack(
+            [
+                mo.md("### 🔍 Training Data Sample (First 10 Rows)"),
+                mo.md(f"**Shape:** {X_cv.shape[0]} samples × {X_cv.shape[1]} features"),
+                mo.md(""),
+                mo.md("**Feature Values + Target:**"),
+                mo.ui.table(
+                    cv_data[
+                        [
+                            "player_id",
+                            "gameweek",
+                            "total_points",
+                            "price",
+                            "position_encoded",
+                            "rolling_5gw_points",
+                            "rolling_5gw_minutes",
+                            "fixture_difficulty",
+                        ]
+                    ].head(10)
+                ),
+                mo.md(""),
+                mo.md("**Full Feature Matrix (X_cv) - First 5 rows:**"),
+                mo.ui.table(X_cv.head(5)),
+                mo.md(""),
+                mo.md("**Target Variable (y_cv) - First 10 values:**"),
+                mo.md(f"`{y_cv.head(10).tolist()}`"),
+            ]
+        )
+    else:
+        sample_display = mo.md("")
+
+    sample_display
+    return (sample_display,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""## 5️⃣ Model Training - Multiple Algorithms""")
     return
@@ -738,9 +777,12 @@ def _(
     RandomForestRegressor,
     Ridge,
     StandardScaler,
+    TimeSeriesSplit,
     X_cv,
     cross_val_score,
+    cv_data,
     cv_groups,
+    cv_strategy_selector,
     mo,
     model_selector,
     n_folds_input,
@@ -754,8 +796,72 @@ def _(
     _final_metrics = {}
 
     if train_button.value and not X_cv.empty and cv_groups is not None:
-        # Initialize GroupKFold cross-validator
-        _gkf = GroupKFold(n_splits=n_folds_input.value)
+        # Initialize cross-validator based on selected strategy
+        _use_temporal = False  # Track which CV strategy is actually being used
+
+        # DEBUG: Print which CV strategy was selected
+        print(f"🔍 CV Strategy Selected: {cv_strategy_selector.value}")
+
+        # marimo dropdown returns the display label, not the key
+        if "temporal" in cv_strategy_selector.value.lower():
+            # Temporal walk-forward validation
+            # Train on GW6 to N-1, test on GW N (iterate forward)
+            _cv_splits = []
+            _cv_gws = sorted(cv_data["gameweek"].unique())
+
+            print(f"🔍 Available gameweeks: {_cv_gws}")
+
+            # Need at least 2 gameweeks for temporal CV (train on 1, test on 1)
+            if len(_cv_gws) < 2:
+                print(
+                    "⚠️ Need at least 2 gameweeks for temporal CV. Using player-based instead."
+                )
+                _gkf = GroupKFold(n_splits=n_folds_input.value)
+                _cv_strategy_used = "player_based (fallback)"
+                _use_temporal = False
+            else:
+                # Create temporal splits: train on all GWs up to N-1, test on GW N
+                # IMPORTANT: sklearn needs positional indices (0, 1, 2...), not DataFrame index values
+                # Reset index to ensure alignment with X_cv and y_cv
+                cv_data_reset = cv_data.reset_index(drop=True)
+
+                for i in range(len(_cv_gws) - 1):
+                    train_gws = _cv_gws[: i + 1]  # GW6 to GW(6+i)
+                    test_gw = _cv_gws[i + 1]  # GW(6+i+1)
+
+                    # Get positional indices (not DataFrame .index values)
+                    train_mask = cv_data_reset["gameweek"].isin(train_gws)
+                    test_mask = cv_data_reset["gameweek"] == test_gw
+
+                    train_idx = np.where(train_mask)[0]
+                    test_idx = np.where(test_mask)[0]
+
+                    _cv_splits.append((train_idx, test_idx))
+                    print(
+                        f"  Fold {i + 1}: Train on GW{min(train_gws)}-{max(train_gws)} ({len(train_idx)} samples) → Test on GW{test_gw} ({len(test_idx)} samples)"
+                    )
+
+                # Use custom CV splits (pass list directly to sklearn)
+                _gkf = _cv_splits
+                _cv_strategy_used = f"temporal ({len(_cv_splits)} folds)"
+                _use_temporal = True
+                print(f"✅ Temporal CV: {len(_cv_splits)} folds created")
+        else:
+            # Player-based GroupKFold
+            print(f"✅ Player-Based CV: {n_folds_input.value} folds (GroupKFold)")
+            _gkf = GroupKFold(n_splits=n_folds_input.value)
+            _cv_strategy_used = "player_based"
+            _use_temporal = False
+
+        # Prepare CV arguments
+        # For temporal CV (custom splits), groups parameter should be omitted
+        # For player-based CV (GroupKFold), groups parameter is required
+        _cv_kwargs = {
+            "cv": _gkf,
+            "n_jobs": -1,
+        }
+        if not _use_temporal:
+            _cv_kwargs["groups"] = cv_groups
 
         # Train selected model(s)
         if model_selector.value == "ridge" or model_selector.value == "ensemble":
@@ -769,30 +875,24 @@ def _(
                 ridge_pipeline,
                 X_cv,
                 y_cv,
-                groups=cv_groups,
-                cv=_gkf,
                 scoring="neg_mean_absolute_error",
-                n_jobs=-1,
+                **_cv_kwargs,
             )
             _ridge_rmse_scores = np.sqrt(
                 -cross_val_score(
                     ridge_pipeline,
                     X_cv,
                     y_cv,
-                    groups=cv_groups,
-                    cv=_gkf,
                     scoring="neg_mean_squared_error",
-                    n_jobs=-1,
+                    **_cv_kwargs,
                 )
             )
             _ridge_r2_scores = cross_val_score(
                 ridge_pipeline,
                 X_cv,
                 y_cv,
-                groups=cv_groups,
-                cv=_gkf,
                 scoring="r2",
-                n_jobs=-1,
+                **_cv_kwargs,
             )
 
             # Train final model on all data
@@ -824,30 +924,24 @@ def _(
                 rf_model,
                 X_cv,
                 y_cv,
-                groups=cv_groups,
-                cv=_gkf,
                 scoring="neg_mean_absolute_error",
-                n_jobs=-1,
+                **_cv_kwargs,
             )
             _rf_rmse_scores = np.sqrt(
                 -cross_val_score(
                     rf_model,
                     X_cv,
                     y_cv,
-                    groups=cv_groups,
-                    cv=_gkf,
                     scoring="neg_mean_squared_error",
-                    n_jobs=-1,
+                    **_cv_kwargs,
                 )
             )
             _rf_r2_scores = cross_val_score(
                 rf_model,
                 X_cv,
                 y_cv,
-                groups=cv_groups,
-                cv=_gkf,
                 scoring="r2",
-                n_jobs=-1,
+                **_cv_kwargs,
             )
 
             # Train final model on all data
@@ -878,24 +972,24 @@ def _(
                 gb_model,
                 X_cv,
                 y_cv,
-                groups=cv_groups,
-                cv=_gkf,
                 scoring="neg_mean_absolute_error",
-                n_jobs=-1,
+                **_cv_kwargs,
             )
             _gb_rmse_scores = np.sqrt(
                 -cross_val_score(
                     gb_model,
                     X_cv,
                     y_cv,
-                    groups=cv_groups,
-                    cv=_gkf,
                     scoring="neg_mean_squared_error",
-                    n_jobs=-1,
+                    **_cv_kwargs,
                 )
             )
             _gb_r2_scores = cross_val_score(
-                gb_model, X_cv, y_cv, groups=cv_groups, cv=_gkf, scoring="r2", n_jobs=-1
+                gb_model,
+                X_cv,
+                y_cv,
+                scoring="r2",
+                **_cv_kwargs,
             )
 
             # Train final model on all data
