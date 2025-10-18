@@ -677,6 +677,26 @@ class DataOrchestrationService:
         if historical_data:
             live_data_historical = pd.concat(historical_data, ignore_index=True)
             print(f"📊 Combined form data from {len(historical_data)} gameweeks")
+
+            # Enrich with position data (required for ML feature engineering)
+            # gameweek_performance doesn't include position, need to merge from current_players
+            if "position" not in live_data_historical.columns:
+                if (
+                    "position" in players_base.columns
+                    and "player_id" in players_base.columns
+                ):
+                    live_data_historical = live_data_historical.merge(
+                        players_base[["player_id", "position"]],
+                        on="player_id",
+                        how="left",
+                    )
+                    missing_position = live_data_historical["position"].isna().sum()
+                    if missing_position > 0:
+                        print(
+                            f"⚠️  Warning: {missing_position} records missing position after merge"
+                        )
+                    else:
+                        print("✅ Enriched historical data with position information")
         else:
             live_data_historical = pd.DataFrame()
             print("⚠️  No historical form data available")

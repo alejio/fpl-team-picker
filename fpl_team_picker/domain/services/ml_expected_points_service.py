@@ -124,6 +124,14 @@ class MLExpectedPointsService:
         if self.debug:
             logger.debug(f"Training new {self.model_type} pipeline...")
 
+        # Validate position column exists (should be enriched upstream by DataOrchestrationService)
+        if "position" not in historical_df.columns:
+            raise ValueError(
+                "Historical data missing 'position' column. "
+                "This should be enriched upstream by DataOrchestrationService. "
+                "Ensure live_data includes position information before calling ML service."
+            )
+
         # Get team strength ratings
         team_strength = get_team_strength_ratings()
 
