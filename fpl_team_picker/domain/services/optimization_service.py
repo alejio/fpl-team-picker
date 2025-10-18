@@ -512,11 +512,15 @@ class OptimizationService:
         players_with_xp: pd.DataFrame,
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
-    ) -> Tuple[object, pd.DataFrame, Dict]:
+    ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Comprehensive strategic transfer optimization analyzing 0-3 transfers.
 
         This is the core transfer optimization algorithm that analyzes multiple
         transfer scenarios and recommends the optimal strategy.
+
+        Dispatches to either greedy enumeration or simulated annealing based on config.
+
+        Clean architecture: Returns data structures only, no UI generation.
 
         Args:
             current_squad: Current squad DataFrame
@@ -526,14 +530,53 @@ class OptimizationService:
             must_exclude_ids: Set of player IDs that must be excluded
 
         Returns:
-            Tuple of (marimo_component, optimal_squad_df, optimization_results)
+            Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
+            where optimization_metadata contains budget_pool_info, scenarios, etc for display
         """
-        import marimo as mo
+        # Dispatch based on configuration
+        if config.optimization.transfer_optimization_method == "simulated_annealing":
+            return self._optimize_transfers_sa(
+                current_squad,
+                team_data,
+                players_with_xp,
+                must_include_ids,
+                must_exclude_ids,
+            )
+        else:
+            return self._optimize_transfers_greedy(
+                current_squad,
+                team_data,
+                players_with_xp,
+                must_include_ids,
+                must_exclude_ids,
+            )
 
+    def _optimize_transfers_greedy(
+        self,
+        current_squad: pd.DataFrame,
+        team_data: Dict,
+        players_with_xp: pd.DataFrame,
+        must_include_ids: Set[int] = None,
+        must_exclude_ids: Set[int] = None,
+    ) -> Tuple[pd.DataFrame, Dict, Dict]:
+        """Greedy transfer optimization via scenario enumeration (original method).
+
+        Clean architecture: Returns data structures only, no UI generation.
+
+        Args:
+            current_squad: Current squad DataFrame
+            team_data: Team data dictionary with bank balance etc
+            players_with_xp: All players with XP calculations
+            must_include_ids: Set of player IDs that must be included
+            must_exclude_ids: Set of player IDs that must be excluded
+
+        Returns:
+            Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
+        """
         if len(current_squad) == 0 or players_with_xp.empty or not team_data:
-            return mo.md("Load team and calculate XP first"), pd.DataFrame(), {}
+            return pd.DataFrame(), {}, {"error": "Load team and calculate XP first"}
 
-        print("🧠 Strategic Optimization: Analyzing 0-3 transfer scenarios...")
+        print("🧠 Strategic Optimization: Analyzing 0-3 transfer scenarios (greedy)...")
 
         # Process constraints
         must_include_ids = must_include_ids or set()
@@ -549,7 +592,9 @@ class OptimizationService:
         horizon_label = "1-GW" if xp_column == "xP" else "5-GW"
 
         # Update current squad with both 1-GW and 5-GW XP data
-        merge_columns = ["player_id", "xP", "xP_5gw", "fixture_outlook"]
+        merge_columns = ["player_id", "xP", "xP_5gw"]
+        if "fixture_outlook" in players_with_xp.columns:
+            merge_columns.append("fixture_outlook")
         if "expected_minutes" in players_with_xp.columns:
             merge_columns.append("expected_minutes")
 
@@ -568,9 +613,10 @@ class OptimizationService:
         # Fill any missing XP with 0
         current_squad_with_xp["xP"] = current_squad_with_xp["xP"].fillna(0)
         current_squad_with_xp["xP_5gw"] = current_squad_with_xp["xP_5gw"].fillna(0)
-        current_squad_with_xp["fixture_outlook"] = current_squad_with_xp[
-            "fixture_outlook"
-        ].fillna("🟡 Average")
+        if "fixture_outlook" in current_squad_with_xp.columns:
+            current_squad_with_xp["fixture_outlook"] = current_squad_with_xp[
+                "fixture_outlook"
+            ].fillna("🟡 Average")
 
         # Validate team data contract
         team_col = "team" if "team" in current_squad_with_xp.columns else "team_id"
@@ -641,20 +687,497 @@ class OptimizationService:
             f"✅ Best strategy: {best_scenario['transfers']} transfers, {best_scenario['net_xp']:.2f} net XP"
         )
 
-        # Create display component
-        display_component = self._create_optimization_display(
-            scenarios,
-            best_scenario,
-            budget_pool_info,
-            available_budget,
-            horizon_label,
-            xp_column,
-            mo,
-        )
-
         optimal_squad = best_scenario.get("squad", current_squad_with_xp)
 
-        return display_component, optimal_squad, best_scenario
+        # Return data structures for presentation layer to display
+        optimization_metadata = {
+            "method": "greedy",
+            "horizon_label": horizon_label,
+            "xp_column": xp_column,
+            "scenarios": scenarios,
+            "budget_pool_info": budget_pool_info,
+            "available_budget": available_budget,
+            "current_xp": current_xp,
+            "current_formation": current_formation,
+        }
+
+        return optimal_squad, best_scenario, optimization_metadata
+
+    def _optimize_transfers_sa(
+        self,
+        current_squad: pd.DataFrame,
+        team_data: Dict,
+        players_with_xp: pd.DataFrame,
+        must_include_ids: Set[int] = None,
+        must_exclude_ids: Set[int] = None,
+    ) -> Tuple[pd.DataFrame, Dict, Dict]:
+        """Transfer optimization using Simulated Annealing (exploration-based).
+
+        Reuses SA logic from optimize_initial_squad but adapted for transfer context:
+        - Start state: Current squad (not random)
+        - Budget: Bank balance + selling prices (not £100m)
+        - Objective: Maximize (squad_xp - transfer_penalties)
+        - Neighbor function: Swap 1-3 players respecting budget
+
+        Clean architecture: Returns data structures only, no UI generation.
+
+        Args:
+            current_squad: Current squad DataFrame
+            team_data: Team data dictionary with bank balance etc
+            players_with_xp: All players with XP calculations
+            must_include_ids: Set of player IDs that must be included
+            must_exclude_ids: Set of player IDs that must be excluded
+
+        Returns:
+            Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
+        """
+        if len(current_squad) == 0 or players_with_xp.empty or not team_data:
+            return pd.DataFrame(), {}, {"error": "Load team and calculate XP first"}
+
+        print(
+            f"🧠 Strategic Optimization: Simulated Annealing ({config.optimization.sa_iterations} iterations)..."
+        )
+
+        # Process constraints
+        must_include_ids = must_include_ids or set()
+        must_exclude_ids = must_exclude_ids or set()
+
+        if must_include_ids:
+            print(f"🎯 Must include {len(must_include_ids)} players")
+        if must_exclude_ids:
+            print(f"🚫 Must exclude {len(must_exclude_ids)} players")
+
+        # Get optimization column based on configuration
+        xp_column = self.get_optimization_xp_column()
+        horizon_label = "1-GW" if xp_column == "xP" else "5-GW"
+
+        # Update current squad with both 1-GW and 5-GW XP data
+        merge_columns = ["player_id", "xP", "xP_5gw"]
+        if "fixture_outlook" in players_with_xp.columns:
+            merge_columns.append("fixture_outlook")
+        if "expected_minutes" in players_with_xp.columns:
+            merge_columns.append("expected_minutes")
+
+        # Include team information in merge to maintain data contract
+        if "team" in players_with_xp.columns:
+            merge_columns.append("team")
+        elif "team_id" in players_with_xp.columns:
+            merge_columns.append("team_id")
+
+        current_squad_with_xp = current_squad.merge(
+            players_with_xp[merge_columns],
+            on="player_id",
+            how="left",
+            suffixes=("", "_from_xp"),
+        )
+        # Fill any missing XP with 0
+        current_squad_with_xp["xP"] = current_squad_with_xp["xP"].fillna(0)
+        current_squad_with_xp["xP_5gw"] = current_squad_with_xp["xP_5gw"].fillna(0)
+        if "fixture_outlook" in current_squad_with_xp.columns:
+            current_squad_with_xp["fixture_outlook"] = current_squad_with_xp[
+                "fixture_outlook"
+            ].fillna("🟡 Average")
+
+        # Validate team data contract
+        team_col = "team" if "team" in current_squad_with_xp.columns else "team_id"
+        if team_col in current_squad_with_xp.columns:
+            nan_teams = current_squad_with_xp[team_col].isna().sum()
+            if nan_teams > 0:
+                raise ValueError(
+                    f"Data contract violation: {nan_teams} players have NaN team values"
+                )
+
+        # Current squad and available budget
+        available_budget = team_data["bank"]
+        free_transfers = team_data.get("free_transfers", 1)
+
+        # Calculate total budget pool
+        budget_pool_info = self.calculate_budget_pool(
+            current_squad_with_xp, available_budget, must_include_ids
+        )
+        print(
+            f"💰 Budget: Bank £{available_budget:.1f}m | Sellable £{budget_pool_info['sellable_value']:.1f}m | Total £{budget_pool_info['total_budget']:.1f}m"
+        )
+
+        # Get all available players and filter
+        all_players = players_with_xp[players_with_xp["xP"].notna()].copy()
+
+        # Filter out unavailable players
+        if "status" in all_players.columns:
+            available_players_mask = ~all_players["status"].isin(["i", "s", "u"])
+            all_players = all_players[available_players_mask]
+
+            excluded_players = players_with_xp[
+                players_with_xp["status"].isin(["i", "s", "u"])
+                & players_with_xp["xP"].notna()
+            ]
+            if not excluded_players.empty:
+                print(f"🚫 Filtered {len(excluded_players)} unavailable players")
+
+        if must_exclude_ids:
+            all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
+
+        # Get best starting 11 from current squad
+        current_best_11, current_formation, current_xp = self.find_optimal_starting_11(
+            current_squad_with_xp, xp_column
+        )
+
+        print(
+            f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
+        )
+
+        # Run multiple SA restarts to find global optimum
+        num_restarts = config.optimization.sa_restarts
+        print(
+            f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
+        )
+
+        best_sa_result = None
+        best_net_xp = float("-inf")
+
+        for restart in range(num_restarts):
+            if num_restarts > 1:
+                print(f"  Restart {restart + 1}/{num_restarts}...")
+
+            sa_result = self._run_transfer_sa(
+                current_squad=current_squad_with_xp,
+                all_players=all_players,
+                available_budget=available_budget,
+                free_transfers=free_transfers,
+                must_include_ids=must_include_ids,
+                must_exclude_ids=must_exclude_ids,
+                xp_column=xp_column,
+                current_xp=current_xp,
+                iterations=config.optimization.sa_iterations,
+            )
+
+            # Calculate net XP for this restart (including penalty)
+            best_squad_df = pd.DataFrame(sa_result["optimal_squad"])
+            original_ids = set(current_squad_with_xp["player_id"].tolist())
+            new_ids = set(best_squad_df["player_id"].tolist())
+            num_transfers = len(original_ids - new_ids)
+            transfer_penalty = (
+                max(0, num_transfers - free_transfers)
+                * config.optimization.transfer_cost
+            )
+            net_xp = sa_result["best_xp"] - transfer_penalty
+
+            if net_xp > best_net_xp:
+                best_net_xp = net_xp
+                best_sa_result = sa_result
+                if num_restarts > 1:
+                    print(
+                        f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
+                    )
+
+        sa_result = best_sa_result
+        print(f"✅ Best result: {best_net_xp:.2f} net xP")
+
+        # Create best scenario from SA result
+        best_squad = sa_result["optimal_squad"]
+        best_squad_df = pd.DataFrame(best_squad)
+
+        # Calculate transfers made vs original squad
+        original_ids = set(current_squad_with_xp["player_id"].tolist())
+        new_ids = set(best_squad_df["player_id"].tolist())
+        transfers_out = original_ids - new_ids
+        transfers_in = new_ids - original_ids
+        num_transfers = len(transfers_out)
+
+        # Calculate transfer penalty
+        transfer_penalty = (
+            max(0, num_transfers - free_transfers) * config.optimization.transfer_cost
+        )
+        net_xp = sa_result["best_xp"] - transfer_penalty
+
+        # Create transfer description
+        if num_transfers == 0:
+            description = "Keep current squad"
+        else:
+            out_names = [
+                current_squad_with_xp[current_squad_with_xp["player_id"] == pid][
+                    "web_name"
+                ].iloc[0]
+                for pid in list(transfers_out)[:3]
+            ]
+            in_names = [
+                best_squad_df[best_squad_df["player_id"] == pid]["web_name"].iloc[0]
+                for pid in list(transfers_in)[:3]
+            ]
+            description = f"OUT: {', '.join(out_names)} → IN: {', '.join(in_names)}"
+
+        best_scenario = {
+            "id": 0,
+            "transfers": num_transfers,
+            "type": "simulated_annealing",
+            "description": description,
+            "penalty": transfer_penalty,
+            "net_xp": net_xp,
+            "formation": sa_result.get("formation", current_formation),
+            "xp_gain": net_xp - current_xp,
+            "squad": best_squad_df,
+            "iterations_improved": sa_result.get("iterations_improved", 0),
+        }
+
+        print(
+            f"✅ Best strategy: {num_transfers} transfers, {net_xp:.2f} net XP "
+            f"({sa_result['iterations_improved']} improvements in {sa_result['total_iterations']} iterations)"
+        )
+
+        # Return data structures for presentation layer to display
+        optimization_metadata = {
+            "method": "simulated_annealing",
+            "horizon_label": horizon_label,
+            "xp_column": xp_column,
+            "budget_pool_info": budget_pool_info,
+            "available_budget": available_budget,
+            "free_transfers": free_transfers,
+            "current_xp": current_xp,
+            "current_formation": current_formation,
+            "sa_iterations": sa_result["total_iterations"],
+            "sa_improvements": sa_result["iterations_improved"],
+            "transfers_out": [
+                {
+                    "web_name": current_squad_with_xp[
+                        current_squad_with_xp["player_id"] == pid
+                    ]["web_name"].iloc[0],
+                    "position": current_squad_with_xp[
+                        current_squad_with_xp["player_id"] == pid
+                    ]["position"].iloc[0],
+                    "price": current_squad_with_xp[
+                        current_squad_with_xp["player_id"] == pid
+                    ]["price"].iloc[0],
+                }
+                for pid in list(transfers_out)
+            ],
+            "transfers_in": [
+                {
+                    "web_name": best_squad_df[best_squad_df["player_id"] == pid][
+                        "web_name"
+                    ].iloc[0],
+                    "position": best_squad_df[best_squad_df["player_id"] == pid][
+                        "position"
+                    ].iloc[0],
+                    "price": best_squad_df[best_squad_df["player_id"] == pid][
+                        "price"
+                    ].iloc[0],
+                }
+                for pid in list(transfers_in)
+            ],
+        }
+
+        return best_squad_df, best_scenario, optimization_metadata
+
+    def _run_transfer_sa(
+        self,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        available_budget: float,
+        free_transfers: int,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+        current_xp: float,
+        iterations: int,
+    ) -> Dict[str, Any]:
+        """Run simulated annealing for transfer optimization.
+
+        Adapted from _simulated_annealing_squad_generation for transfer context.
+
+        Returns:
+            Dictionary with optimal_squad, best_xp, iterations_improved, etc.
+        """
+        # Convert current squad to list of dicts for SA processing
+        original_squad = current_squad.to_dict("records")
+        original_ids = {p["player_id"] for p in original_squad}
+
+        # Track the max number of transfers allowed
+        max_transfers = config.optimization.max_transfers  # Typically 0-3
+
+        # Calculate initial objective value (squad xP with no transfer penalty)
+        starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
+        current_objective = sum(p[xp_column] for p in starting_11)
+
+        best_team = [p.copy() for p in original_squad]
+        best_objective = current_objective
+        current_team = [p.copy() for p in original_squad]
+
+        improvements = 0
+
+        print(f"Initial squad: {current_objective:.2f} xP")
+
+        # SA loop
+        for iteration in range(iterations):
+            # Linear temperature decrease
+            temperature = max(0.01, 1.0 * (1 - iteration / iterations))
+
+            # Generate neighbor by swapping 1-3 players
+            new_team = self._swap_transfer_players(
+                current_team,
+                all_players,
+                available_budget,
+                must_include_ids,
+                must_exclude_ids,
+                xp_column,
+            )
+
+            if new_team is None:
+                continue
+
+            # CRITICAL: Check if new_team exceeds max_transfers from ORIGINAL squad
+            new_ids = {p["player_id"] for p in new_team}
+            num_transfers_from_original = len(original_ids - new_ids)
+
+            if num_transfers_from_original > max_transfers:
+                # Reject this move - too many transfers from original
+                continue
+
+            # Calculate new objective INCLUDING TRANSFER PENALTY
+            new_starting_11 = self._get_best_starting_11_from_squad(new_team, xp_column)
+            squad_xp = sum(p[xp_column] for p in new_starting_11)
+
+            # Calculate penalty for this number of transfers
+            transfer_penalty = (
+                max(0, num_transfers_from_original - free_transfers)
+                * config.optimization.transfer_cost
+            )
+            new_objective = squad_xp - transfer_penalty  # Net XP after penalty
+
+            # Accept if better or with probability
+            delta = new_objective - current_objective
+
+            if delta > 0 or (
+                temperature > 0 and random.random() < math.exp(delta / temperature)
+            ):
+                current_team = new_team
+                current_objective = new_objective
+
+                if current_objective > best_objective:
+                    best_team = [p.copy() for p in current_team]
+                    best_objective = current_objective
+                    improvements += 1
+
+                    if improvements % 10 == 0:
+                        print(
+                            f"Iteration {iteration}: New best {best_objective:.2f} xP ({num_transfers_from_original} transfers)"
+                        )
+
+        # Get best formation
+        best_starting_11 = self._get_best_starting_11_from_squad(best_team, xp_column)
+        _, best_formation, _ = self._enumerate_formations_for_players(
+            self._group_by_position(best_starting_11), xp_column
+        )
+
+        print(f"Final: {best_objective:.2f} xP ({improvements} improvements)")
+
+        return {
+            "optimal_squad": best_team,
+            "best_xp": best_objective,
+            "iterations_improved": improvements,
+            "total_iterations": iterations,
+            "formation": best_formation,
+        }
+
+    def _swap_transfer_players(
+        self,
+        team: List[Dict],
+        all_players: pd.DataFrame,
+        available_budget: float,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+    ) -> Optional[List[Dict]]:
+        """Swap 1-3 players in transfer context.
+
+        Respects transfer budget = bank + selling prices.
+        """
+        new_team = [p.copy() for p in team]
+
+        # Calculate current cost and budget
+        current_cost = sum(p["price"] for p in new_team)
+
+        # Determine how many players to swap (1-3)
+        num_swaps = random.randint(
+            1, min(3, config.optimization.sa_max_transfers_per_iteration)
+        )
+
+        # Get swappable players (not must-include)
+        swappable_indices = [
+            i for i, p in enumerate(new_team) if p["player_id"] not in must_include_ids
+        ]
+
+        if len(swappable_indices) < num_swaps:
+            return None
+
+        # Pick random players to swap out
+        swap_indices = random.sample(swappable_indices, num_swaps)
+
+        # Calculate budget from selling these players
+        sold_value = sum(new_team[i]["price"] for i in swap_indices)
+        swap_budget = available_budget + sold_value
+
+        # Remove swapped players
+        team_player_ids = {
+            p["player_id"] for i, p in enumerate(new_team) if i not in swap_indices
+        }
+
+        # Find replacements for each position
+        replacements = []
+        remaining_budget = swap_budget
+
+        for idx in swap_indices:
+            old_player = new_team[idx]
+            position = old_player["position"]
+
+            # Get available replacements
+            candidates = all_players[
+                (all_players["position"] == position)
+                & (~all_players["player_id"].isin(team_player_ids))
+                & (~all_players["player_id"].isin(must_exclude_ids))
+                & (all_players["price"] <= remaining_budget)
+            ]
+
+            if candidates.empty:
+                return None
+
+            # Prefer higher xP with randomness
+            topk = min(10, len(candidates))
+            candidates = candidates.nlargest(topk, xp_column)
+            replacement = candidates.sample(n=1).iloc[0].to_dict()
+
+            replacements.append(replacement)
+            team_player_ids.add(replacement["player_id"])
+            remaining_budget -= replacement["price"]
+
+        # Build new team
+        result_team = []
+        swap_idx_set = set(swap_indices)
+        replacement_iter = iter(replacements)
+
+        for i, player in enumerate(new_team):
+            if i in swap_idx_set:
+                result_team.append(next(replacement_iter))
+            else:
+                result_team.append(player)
+
+        # Validate budget
+        new_cost = sum(p["price"] for p in result_team)
+        if new_cost > current_cost + available_budget:
+            return None
+
+        # Validate 3-per-team constraint
+        team_counts = self._count_players_per_team(result_team)
+        if any(count > 3 for count in team_counts.values()):
+            return None
+
+        return result_team
+
+    def _group_by_position(self, players: List[Dict]) -> Dict[str, List[Dict]]:
+        """Group players by position for formation enumeration."""
+        by_position = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
+        for player in players:
+            by_position[player["position"]].append(player)
+        return by_position
 
     def _analyze_transfer_scenarios(
         self,
@@ -1048,65 +1571,6 @@ class OptimizationService:
                         "squad": current_squad,
                     }
                 )
-
-    def _create_optimization_display(
-        self,
-        scenarios: List[Dict],
-        best_scenario: Dict,
-        budget_pool_info: Dict,
-        available_budget: float,
-        horizon_label: str,
-        xp_column: str,
-        mo_ref,
-    ) -> object:
-        """Create marimo display component for optimization results."""
-        scenario_data = []
-        for s in scenarios[:7]:  # Top 7 scenarios
-            scenario_data.append(
-                {
-                    "Transfers": s["transfers"],
-                    "Type": s["type"],
-                    "Description": s["description"],
-                    "Penalty": -s["penalty"] if s["penalty"] > 0 else 0,
-                    "Net XP": round(s["net_xp"], 2),
-                    "Formation": s["formation"],
-                    "XP Gain": round(s["xp_gain"], 2),
-                }
-            )
-
-        scenarios_df = pd.DataFrame(scenario_data)
-
-        max_single_acquisition = min(budget_pool_info["total_budget"], 15.0)
-
-        strategic_summary = f"""
-## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal
-
-**Recommended Strategy:** {best_scenario["description"]}
-
-**Expected Net {horizon_label} XP:** {best_scenario["net_xp"]:.2f} | **Formation:** {best_scenario["formation"]}
-
-*Decisions based on {horizon_label.lower()} horizon*
-
-### 💰 Budget Pool Analysis:
-- **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info["sellable_value"]:.1f}m | **Total Pool:** £{budget_pool_info["total_budget"]:.1f}m
-- **Max Single Acquisition:** £{max_single_acquisition:.1f}m
-
-### 🔄 Transfer Analysis:
-- **{len(scenarios)} total scenarios analyzed**
-
-**All Scenarios (sorted by {horizon_label} Net XP):**
-"""
-
-        return mo_ref.vstack(
-            [
-                mo_ref.md(strategic_summary),
-                mo_ref.ui.table(
-                    scenarios_df, page_size=config.visualization.scenario_page_size
-                ),
-                mo_ref.md("---"),
-                mo_ref.md("### 🏆 Optimal Starting 11 (Strategic):"),
-            ]
-        )
 
     def optimize_initial_squad(
         self,

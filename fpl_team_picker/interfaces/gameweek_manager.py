@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.16.2"
+__generated_with = "0.17.0"
 app = marimo.App(width="medium")
 
 
@@ -908,7 +908,183 @@ def _(
         DataContractError as _DataContractError2,
     )
     from fpl_team_picker.domain.services import OptimizationService
+    from fpl_team_picker.config import config as _config
     import pandas as _pd
+
+    def _create_optimization_summary(best_scenario, optimization_metadata):
+        """Create UI display for optimization results (presentation layer)."""
+        # Defensive check: ensure we have dictionaries
+        if not isinstance(best_scenario, dict):
+            return mo.md(
+                f"❌ Error: best_scenario is {type(best_scenario).__name__}, expected dict"
+            )
+        if not isinstance(optimization_metadata, dict):
+            return mo.md(
+                f"❌ Error: optimization_metadata is {type(optimization_metadata).__name__}, expected dict"
+            )
+
+        method = optimization_metadata.get("method", "unknown")
+        horizon_label = optimization_metadata.get("horizon_label", "N/A")
+        budget_pool_info = optimization_metadata.get("budget_pool_info", {})
+        available_budget = optimization_metadata.get("available_budget", 0.0)
+
+        # Calculate max single acquisition
+        max_single_acquisition = min(budget_pool_info.get("total_budget", 0.0), 15.0)
+
+        # Build strategic summary
+        if method == "greedy":
+            scenarios = optimization_metadata.get("scenarios", [])
+            current_xp = optimization_metadata.get("current_xp", 0.0)
+
+            # Create before/after comparison
+            transfers_made = best_scenario["transfers"]
+            transfer_penalty = best_scenario["penalty"]
+            new_squad_xp = (
+                best_scenario["net_xp"] + transfer_penalty
+            )  # Gross XP before penalty
+            net_xp = best_scenario["net_xp"]
+            xp_gain = best_scenario["xp_gain"]
+
+            comparison_data = [
+                {
+                    "Option": "❌ No Transfers",
+                    "Squad XP": round(current_xp, 2),
+                    "Transfer Penalty": 0,
+                    "Net XP": round(current_xp, 2),
+                    "vs Current": 0.0,
+                },
+                {
+                    "Option": f"✅ {transfers_made} Transfer(s)",
+                    "Squad XP": round(new_squad_xp, 2),
+                    "Transfer Penalty": -round(transfer_penalty, 2)
+                    if transfer_penalty > 0
+                    else 0,
+                    "Net XP": round(net_xp, 2),
+                    "vs Current": round(xp_gain, 2),
+                },
+            ]
+            comparison_df = _pd.DataFrame(comparison_data)
+
+            # Create scenarios table
+            scenario_data = []
+            for s in scenarios[:7]:  # Top 7 scenarios
+                scenario_data.append(
+                    {
+                        "Transfers": s["transfers"],
+                        "Type": s["type"],
+                        "Description": s["description"],
+                        "Penalty": -s["penalty"] if s["penalty"] > 0 else 0,
+                        "Net XP": round(s["net_xp"], 2),
+                        "Formation": s["formation"],
+                        "XP Gain": round(s["xp_gain"], 2),
+                    }
+                )
+
+            scenarios_df = _pd.DataFrame(scenario_data)
+
+            strategic_summary = f"""
+    ## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal
+
+    **Recommended Strategy:** {best_scenario["description"]}
+
+    *Decisions based on {horizon_label.lower()} horizon using greedy scenario enumeration ({len(scenarios)} scenarios analyzed)*
+
+    ### 📊 Impact Analysis:
+    """
+
+            budget_summary = f"""
+    ### 💰 Budget Pool Analysis:
+    - **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info.get("sellable_value", 0.0):.1f}m | **Total Pool:** £{budget_pool_info.get("total_budget", 0.0):.1f}m
+    - **Max Single Acquisition:** £{max_single_acquisition:.1f}m
+    """
+
+            return mo.vstack(
+                [
+                    mo.md(strategic_summary),
+                    mo.ui.table(comparison_df, page_size=5),
+                    mo.md(budget_summary),
+                    mo.md("### 🔄 All Scenarios (sorted by Net XP):"),
+                    mo.ui.table(
+                        scenarios_df, page_size=_config.visualization.scenario_page_size
+                    ),
+                ]
+            )
+
+        elif method == "simulated_annealing":
+            sa_iterations = optimization_metadata.get("sa_iterations", 0)
+            sa_improvements = optimization_metadata.get("sa_improvements", 0)
+            free_transfers = optimization_metadata.get("free_transfers", 1)
+            transfers_out = optimization_metadata.get("transfers_out", [])
+            transfers_in = optimization_metadata.get("transfers_in", [])
+            current_xp = optimization_metadata.get("current_xp", 0.0)
+            num_transfers = len(transfers_out)
+
+            # Calculate penalty
+            transfer_penalty = (
+                max(0, num_transfers - free_transfers)
+                * _config.optimization.transfer_cost
+            )
+            new_squad_xp = best_scenario["net_xp"] + transfer_penalty
+            net_xp = best_scenario["net_xp"]
+            xp_gain = best_scenario["xp_gain"]
+
+            # Create before/after comparison
+            comparison_data = [
+                {
+                    "Option": "❌ No Transfers",
+                    "Squad XP": round(current_xp, 2),
+                    "Transfer Penalty": 0,
+                    "Net XP": round(current_xp, 2),
+                    "vs Current": 0.0,
+                },
+                {
+                    "Option": f"✅ {num_transfers} Transfer(s)",
+                    "Squad XP": round(new_squad_xp, 2),
+                    "Transfer Penalty": -round(transfer_penalty, 2)
+                    if transfer_penalty > 0
+                    else 0,
+                    "Net XP": round(net_xp, 2),
+                    "vs Current": round(xp_gain, 2),
+                },
+            ]
+            comparison_df = _pd.DataFrame(comparison_data)
+
+            strategic_summary = f"""
+    ## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal (Simulated Annealing)
+
+    **Recommended Strategy:** {best_scenario["description"]}
+
+    *Decisions based on {horizon_label.lower()} horizon using simulated annealing with {_config.optimization.sa_restarts} restart(s) × {sa_iterations:,} iterations each ({sa_improvements} improvements found in best run)*
+
+    ### 📊 Impact Analysis:
+    """
+
+            budget_summary = f"""
+    ### 💰 Budget Pool Analysis:
+    - **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info.get("sellable_value", 0.0):.1f}m | **Total Pool:** £{budget_pool_info.get("total_budget", 0.0):.1f}m
+    - **Max Single Acquisition:** £{max_single_acquisition:.1f}m
+    - **Free Transfers Available:** {free_transfers}
+    """
+
+            components = [
+                mo.md(strategic_summary),
+                mo.ui.table(comparison_df, page_size=5),
+                mo.md(budget_summary),
+            ]
+
+            # Add transfer details if applicable
+            if transfers_out and transfers_in:
+                transfer_details = "### 🔄 Recommended Transfers:\n\n"
+                for out_player, in_player in zip(transfers_out, transfers_in):
+                    transfer_details += f"- **OUT:** {out_player['web_name']} ({out_player['position']}, £{out_player['price']:.1f}m)\n"
+                    transfer_details += f"  **IN:** {in_player['web_name']} ({in_player['position']}, £{in_player['price']:.1f}m)\n\n"
+
+                components.append(mo.md(transfer_details))
+
+            return mo.vstack(components)
+
+        else:
+            return mo.md(f"⚠️ Unknown optimization method: {method}")
 
     optimal_starting_11 = []
 
@@ -931,11 +1107,16 @@ def _(
                 )
 
                 # Use domain service for optimization
-                # Note: Optimization horizon is controlled via config.optimization.optimization_horizon
+                # Update config based on UI toggle
+                _config.optimization.optimization_horizon = (
+                    optimization_horizon_toggle.value
+                    if optimization_horizon_toggle.value
+                    else "5gw"
+                )
                 _optimization_service = OptimizationService()
 
                 try:
-                    optimization_display, optimal_squad_df, best_scenario = (
+                    optimal_squad_df, best_scenario, optimization_metadata = (
                         _optimization_service.optimize_transfers(
                             players_with_xp=players_with_xp,
                             current_squad=current_squad,
@@ -943,6 +1124,12 @@ def _(
                             must_include_ids=must_include_ids,
                             must_exclude_ids=must_exclude_ids,
                         )
+                    )
+
+                    # Create optimization display in presentation layer
+                    optimization_display = _create_optimization_summary(
+                        best_scenario=best_scenario,
+                        optimization_metadata=optimization_metadata,
                     )
 
                     # Generate starting 11 using domain service
@@ -1022,12 +1209,19 @@ def _(
                                     if col in bench_df.columns
                                 ]
 
+                                # Get horizon for bench display
+                                bench_horizon = optimization_metadata.get(
+                                    "xp_column", "xP"
+                                )
+                                bench_xp_label = (
+                                    "1-GW" if bench_horizon == "xP" else "5-GW"
+                                )
+
                                 bench_components.extend(
                                     [
-                                        mo.md("---"),
-                                        mo.md("### 🪑 Bench - Current Gameweek"),
+                                        mo.md("### 🪑 Bench"),
                                         mo.md(
-                                            f"**Total Bench GW XP:** {bench_xp_total:.2f} | *Ordered by expected points*"
+                                            f"**Total Bench XP ({bench_xp_label}):** {bench_xp_total:.2f}"
                                         ),
                                         mo.ui.table(
                                             bench_df[bench_display_cols].round(2)
@@ -1038,15 +1232,19 @@ def _(
                                     ]
                                 )
 
+                            # Determine horizon for display label
+                            _horizon_label = optimization_metadata.get(
+                                "horizon_label", "Current GW"
+                            )
+
                             starting_11_display = mo.vstack(
                                 [
                                     optimization_display,
                                     mo.md("---"),
+                                    mo.md(f"## 📋 Optimized Squad ({_horizon_label})"),
+                                    mo.md(f"### 🏆 Starting 11 ({_formation})"),
                                     mo.md(
-                                        f"### 🏆 Optimal Starting 11 - Current Gameweek ({_formation})"
-                                    ),
-                                    mo.md(
-                                        f"**Total Current GW XP:** {xp_total:.2f} | *Optimized for this gameweek only*"
+                                        f"**Total {_horizon_label} XP:** {xp_total:.2f}"
                                     ),
                                     mo.ui.table(
                                         _starting_11_df[display_cols].round(2)
@@ -1074,8 +1272,11 @@ def _(
                     )
                 except (KeyError, TypeError) as e:
                     # Missing fields or type mismatches - indicates upstream data issues
+                    import traceback
+
+                    error_details = traceback.format_exc()
                     optimization_display = mo.md(
-                        f"❌ **Data structure error:** {str(e)} - Fix data loading upstream"
+                        f"❌ **Data structure error:** {str(e)}\n\n```\n{error_details}\n```"
                     )
                 except Exception as e:
                     # Unexpected errors - preserve for debugging but minimize scope

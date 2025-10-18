@@ -371,7 +371,42 @@ class OptimizationConfig(BaseModel):
             raise ValueError("optimization_horizon must be either '1gw' or '5gw'")
         return v
 
-    # Scenario analysis
+    # Transfer optimization method
+    transfer_optimization_method: str = Field(
+        default="simulated_annealing",
+        description="Transfer optimization method: 'greedy' for scenario enumeration, 'simulated_annealing' for SA exploration",
+    )
+
+    @field_validator("transfer_optimization_method")
+    @classmethod
+    def validate_transfer_method(cls, v):
+        if v not in ["greedy", "simulated_annealing"]:
+            raise ValueError(
+                "transfer_optimization_method must be either 'greedy' or 'simulated_annealing'"
+            )
+        return v
+
+    # Simulated Annealing parameters
+    sa_iterations: int = Field(
+        default=2000,
+        description="Number of SA iterations per restart for transfer optimization",
+        ge=100,
+        le=10000,
+    )
+    sa_restarts: int = Field(
+        default=3,
+        description="Number of SA restarts to run (best result is kept). More restarts = more reliable but slower.",
+        ge=1,
+        le=10,
+    )
+    sa_max_transfers_per_iteration: int = Field(
+        default=3,
+        description="Maximum number of players to swap in a single SA iteration",
+        ge=1,
+        le=5,
+    )
+
+    # Scenario analysis (greedy method)
     max_transfers: int = Field(
         default=3, description="Maximum transfers to analyze (0-3)", ge=0, le=5
     )
