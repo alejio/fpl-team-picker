@@ -57,23 +57,24 @@ This installs TPOT 1.1.0 and all required dependencies.
 uv run python scripts/tpot_pipeline_optimizer.py \
   --start-gw 1 \
   --end-gw 8 \
-  --generations 5 \
-  --max-time-mins 10
+  --max-time-mins 5
 ```
 
 **Expected output**: Best pipeline exported to `models/tpot/`
 
-### 3. Run Production Optimization (1-2 hours)
+### 3. Run Production Optimization (1 hour)
 
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
   --start-gw 1 \
   --end-gw 8 \
-  --generations 20 \
-  --population-size 100
+  --max-time-mins 60 \
+  --verbose 2
 ```
 
 **Expected output**: Thoroughly optimized pipeline with better performance
+
+**Note**: TPOT 1.1.0 uses **time-based optimization** with Dask distributed computing instead of generations/population_size. The longer it runs, the more pipelines it evaluates.
 
 ## How It Works (Technical Details)
 
@@ -111,17 +112,23 @@ Fold 3: Train on GW6-8   → Test on GW9
 - No leakage: Training only uses past data
 - Robust: Multiple test points across season
 
-### 4. TPOT Optimization
+### 4. TPOT 1.1.0 Optimization
 
-Genetic algorithm approach:
-1. **Generation 0**: Random population of pipelines
-2. **Evaluate**: Test each pipeline with temporal CV
-3. **Select**: Keep best performers
-4. **Mutate**: Modify pipelines (change algorithms, hyperparameters)
-5. **Crossover**: Combine successful pipelines
-6. **Repeat**: Generations 1, 2, 3... until convergence
+Time-based evolutionary algorithm with Dask:
+1. **Initialize**: Create Dask LocalCluster for distributed optimization
+2. **Random Pipelines**: Generate initial population of ML pipelines
+3. **Evaluate**: Test each pipeline with temporal CV (parallel via Dask)
+4. **Select**: Keep best performers
+5. **Mutate**: Modify pipelines (change algorithms, hyperparameters, preprocessing)
+6. **Crossover**: Combine successful pipelines
+7. **Repeat**: Continue until `max_time_mins` reached
 
-**Result**: Best pipeline from all generations.
+**Key Differences from Classic TPOT:**
+- Uses **time budget** instead of generation count
+- Leverages **Dask** for distributed parallel evaluation
+- Automatically stops after time limit (no manual convergence)
+
+**Result**: Best pipeline discovered within time budget.
 
 ### 5. Export & Evaluation
 
@@ -168,60 +175,51 @@ TPOT Pipeline Optimizer for FPL Expected Points
    X: 1,086 samples × 63 features
    y: 1,086 targets
 
-🤖 Initializing TPOT optimizer...
-   Generations: 10
-   Population size: 50
-   Scoring: neg_mean_absolute_error
+🤖 Initializing TPOT 1.1.0 optimizer...
+   Scorer: neg_mean_absolute_error
    CV folds: 2
-   Max time: No limit
+   Max time: 60 mins
    Max eval time: 5 mins
    Random seed: 42
    Parallel jobs: -1
+   Note: TPOT 1.1.0 uses time-based optimization with Dask
+
+🔧 Starting Dask LocalCluster...
+   Workers: auto
+   ✅ Dask cluster ready: http://127.0.0.1:8787/status
 
 🚀 Starting TPOT optimization...
 ================================================================================
-Generation 1 - Current best internal CV score: -2.3456
-Generation 2 - Current best internal CV score: -2.2987
-Generation 3 - Current best internal CV score: -2.2654
-Generation 4 - Current best internal CV score: -2.2543
-Generation 5 - Current best internal CV score: -2.2412
-Generation 6 - Current best internal CV score: -2.2389
-Generation 7 - Current best internal CV score: -2.2301
-Generation 8 - Current best internal CV score: -2.2287
-Generation 9 - Current best internal CV score: -2.2275
-Generation 10 - Current best internal CV score: -2.2263
-
-Best pipeline: Pipeline(steps=[('standardscaler', StandardScaler()),
-                ('gradientboostingregressor',
-                 GradientBoostingRegressor(learning_rate=0.05, max_depth=7,
-                                          n_estimators=200))])
+[TPOT 1.1.0 runs optimization for 60 minutes, evaluating pipelines continuously]
 ================================================================================
 
 ✅ TPOT optimization complete!
-   Duration: 12.34 minutes
-   Best CV score: -2.2263
+   Duration: 60.15 minutes
+
+🧹 Dask cluster shut down
 
 💾 Exporting best pipeline to: models/tpot/tpot_pipeline_gw1-8_20251020_143022.py
    ✅ Pipeline exported successfully
+   ✅ Joblib model saved: models/tpot/tpot_pipeline_gw1-8_20251020_143022.joblib
    ✅ Metadata saved to: models/tpot/tpot_pipeline_gw1-8_20251020_143022_metadata.txt
 
 📊 Evaluating best pipeline...
 
 📈 Overall Metrics:
-   MAE:  2.226 points
-   RMSE: 3.145 points
-   R²:   0.234
+   MAE:  0.768 points
+   RMSE: 1.643 points
+   R²:   0.508
 
 📊 Position-Specific MAE:
-   DEF: 2.123 points
-   FWD: 2.567 points
-   GKP: 1.845 points
-   MID: 2.301 points
+   DEF: 0.894 points
+   FWD: 0.832 points
+   GKP: 0.433 points
+   MID: 0.745 points
 
 📅 Gameweek-Specific MAE:
-   GW6: 2.145 points
-   GW7: 2.298 points
-   GW8: 2.234 points
+   GW6: 0.749 points
+   GW7: 0.784 points
+   GW8: 0.770 points
 
 ================================================================================
 ✅ TPOT optimization complete!
@@ -244,7 +242,7 @@ Best pipeline: Pipeline(steps=[('standardscaler', StandardScaler()),
 uv run python scripts/tpot_pipeline_optimizer.py \
   --start-gw 1 \
   --end-gw 8 \
-  --generations 20
+  --max-time-mins 60
 ```
 
 ### Step 2: Review Exported Pipeline
@@ -375,19 +373,19 @@ uv run python scripts/tpot_pipeline_optimizer.py --max-time-mins 30
 
 ### Issue: Out of memory
 
-**Solution**: Reduce population size or CV folds:
+**Solution**: Reduce CV folds or number of Dask workers:
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --population-size 20 \
-  --cv-folds 2
+  --cv-folds 2 \
+  --n-jobs 2
 ```
 
 ### Issue: TPOT finds worse pipeline than manual models
 
 **Possible causes**:
-1. Not enough generations (try `--generations 20` or more)
-2. Small population (try `--population-size 100`)
-3. Time limit too strict (remove `--max-time-mins` or increase it)
+1. Not enough optimization time (try `--max-time-mins 120` or more)
+2. Too few Dask workers (try `--n-jobs -1` for all CPUs)
+3. Time limit too strict (increase `--max-time-mins`)
 4. Unlucky random seed (try different `--random-seed`)
 
 **Solution**: Run longer optimization or try different random seeds.
@@ -399,19 +397,15 @@ uv run python scripts/tpot_pipeline_optimizer.py \
 ```bash
 # Day 1: Quick test (5 mins)
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --generations 5 \
-  --max-time-mins 10
+  --max-time-mins 5
 
 # Day 2: Medium run (30 mins)
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --generations 10 \
-  --population-size 50 \
   --max-time-mins 30
 
 # Day 3: Production run (2 hours)
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --generations 20 \
-  --population-size 100
+  --max-time-mins 120
 ```
 
 ### 2. Use Consistent Random Seeds
@@ -424,10 +418,10 @@ uv run python scripts/tpot_pipeline_optimizer.py \
 
 ### 3. Monitor Progress
 
-Use verbosity level 2 or 3:
+Use verbose level 2 or 3:
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --verbosity 3
+  --verbose 3
 ```
 
 ### 4. Try Different Scoring Metrics
@@ -435,19 +429,19 @@ uv run python scripts/tpot_pipeline_optimizer.py \
 MAE (default, focus on absolute errors):
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --scoring neg_mean_absolute_error
+  --scorer neg_mean_absolute_error
 ```
 
 MSE (penalize large errors more):
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --scoring neg_mean_squared_error
+  --scorer neg_mean_squared_error
 ```
 
 R² (focus on variance explained):
 ```bash
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --scoring r2
+  --scorer r2
 ```
 
 ### 5. Save Results
@@ -459,7 +453,7 @@ mkdir -p experiments/tpot_runs
 
 # Run with timestamp in output
 uv run python scripts/tpot_pipeline_optimizer.py \
-  --generations 20 \
+  --max-time-mins 60 \
   --output-dir experiments/tpot_runs/run_$(date +%Y%m%d_%H%M%S)
 ```
 
