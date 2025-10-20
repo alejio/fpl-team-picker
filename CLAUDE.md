@@ -40,6 +40,9 @@ fpl-team-picker/
 │       ├── season_planner.py # Season-start team building interface (2257 lines)
 │       ├── gameweek_manager.py # Weekly gameweek management interface (969 lines - clean)
 │       └── ml_xp_experiment.py # ML expected points model development (2947 lines)
+├── scripts/                  # Standalone optimization scripts
+│   ├── tpot_pipeline_optimizer.py # TPOT automated ML pipeline discovery
+│   └── README.md             # Scripts documentation
 ├── tests/                    # Comprehensive testing suite
 │   ├── domain/               # Domain layer tests
 │   │   ├── models/           # Domain model tests
@@ -124,6 +127,32 @@ Marimo MCP (Model Context Protocol) server enables AI assistants like Claude Cod
 
 **Team features rationale**: Safe with player-based GroupKFold validation - testing "can we predict NEW players on KNOWN teams?" not future outcomes. All team features use shift(1) to exclude current gameweek.
 
+## TPOT Pipeline Optimization
+
+**TPOT** (Tree-based Pipeline Optimization Tool): Automated ML pipeline discovery for xP prediction.
+
+**Script**: `scripts/tpot_pipeline_optimizer.py` - Standalone pipeline optimization with temporal CV
+
+**Quick start**: `uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --generations 10`
+
+**Key features**:
+- Same temporal cross-validation (walk-forward) as ml_xp_notebook.py
+- Production FPLFeatureEngineer integration (63 features)
+- Automatic algorithm selection and hyperparameter tuning
+- Exports sklearn pipelines for integration into MLExpectedPointsService
+- Position-specific and gameweek-specific evaluation metrics
+
+**Common workflows**:
+1. Fast test: `--generations 5 --max-time-mins 10` (quick validation)
+2. Production: `--generations 20 --population-size 100` (thorough search)
+3. Time-limited: `--max-time-mins 60` (1-hour cap for CI/CD)
+
+**Output**: Exports best pipeline to `models/tpot/` with metadata (CV scores, hyperparameters)
+
+**Integration**: Copy exported pipeline to ml_xp_notebook.py for comparison against existing models
+
+See `scripts/README.md` for full documentation.
+
 ## Expected Points Models
 
 **Rule-Based** (`ExpectedPointsService`): Form-weighted (70/30), live data, dynamic team strength, 1GW+5GW projections. Fast, works from GW1+.
@@ -157,7 +186,7 @@ Tests: `pytest tests/domain/services/test_performance_analytics_service.py -v`
 
 ## Technical Specs
 
-**Stack**: Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, pytest, ruff, fpl-dataset-builder
+**Stack**: Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
 
 **Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models (70+ player attributes), repository pattern, 29/29 tests passing
 

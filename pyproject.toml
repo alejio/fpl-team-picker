@@ -23,6 +23,8 @@ dependencies = [
     "anthropic>=0.69.0",
     "statsmodels>=0.14.5",
     "lightgbm>=4.6.0",
+    "tpot>=1.1.0",
+    "setuptools>=75.0.0",
 ]
 
 [dependency-groups]
