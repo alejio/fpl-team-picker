@@ -1235,6 +1235,17 @@ def _(feature_cols, mo, pd, px, trained_models):
             ).nlargest(15, "importance")
             importance_data.append(gb_importance)
 
+        # LightGBM feature importance
+        if "lgbm" in trained_models:
+            lgbm_importance = pd.DataFrame(
+                {
+                    "feature": feature_cols,
+                    "importance": trained_models["lgbm"].feature_importances_,
+                    "model": "LightGBM",
+                }
+            ).nlargest(15, "importance")
+            importance_data.append(lgbm_importance)
+
         if importance_data:
             all_importance = pd.concat(importance_data, ignore_index=True)
 
