@@ -67,6 +67,27 @@ wheels = [
 ]
 
 [[package]]
+name = "bokeh"
+version = "3.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "contourpy" },
+    { name = "jinja2" },
+    { name = "narwhals" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+    { name = "pillow" },
+    { name = "pyyaml" },
+    { name = "tornado", marker = "sys_platform != 'emscripten'" },
+    { name = "xyzservices" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/bd/8455ecfaa8100dbfbb2af40061c689a7a9c808f4f8c9582f0efd0c8c9a19/bokeh-3.8.0.tar.gz", hash = "sha256:bfdf5e9df910653b097f70cd38f4c2399d91af6e54a618126e2387cc33c9ec03", size = 6529746, upload-time = "2025-08-29T12:16:55.005Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/9a/8e641b5415e12036d8a206147b8229d917a767b7d939521458d90feddcf5/bokeh-3.8.0-py3-none-any.whl", hash = "sha256:117c5e559231ad39fef87891a1a1b62b3bfefbaa47d536023537338f46015841", size = 7205343, upload-time = "2025-08-29T12:16:52.77Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2025.8.3"
 source = { registry = "https://pypi.org/simple" }
@@ -541,6 +562,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
+    { name = "bokeh" },
     { name = "fpl-dataset-builder" },
     { name = "lightgbm" },
     { name = "marimo", extra = ["mcp"] },
@@ -570,6 +592,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", specifier = ">=0.69.0" },
+    { name = "bokeh", specifier = ">=3.8.0" },
     { name = "fpl-dataset-builder", editable = "../fpl-dataset-builder" },
     { name = "fpl-team-picker", editable = "." },
     { name = "lightgbm", specifier = ">=4.6.0" },
@@ -2314,6 +2337,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/d5/6c60111482f41fd680eb0e81e016498bea313cc00a6a4a41b38c8b45bd5c/xgboost-3.0.5-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:d0fe44aaca76e9c4598d3be98ae94661aa53e4c4ceb161dc7183258f0e6fc138", size = 4602832, upload-time = "2025-09-05T09:27:29.547Z" },
     { url = "https://files.pythonhosted.org/packages/64/ad/61a86228e981b15361ff963e84648b1a29ab43debd95f7c2b3ef9d94dca1/xgboost-3.0.5-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:a03210a3e54c9e543f480db9636fee57247cfcd1ae850b353aeac59eea5ca350", size = 94872848, upload-time = "2025-09-05T09:40:26.786Z" },
     { url = "https://files.pythonhosted.org/packages/00/5a/f43bad68b31269a72bdd66102732ea4473e98f421ee9f71379e35dcb56f5/xgboost-3.0.5-py3-none-win_amd64.whl", hash = "sha256:660774249d28a729ba8d22dd3d2c048c56e58f65a683b25ef3252e3383fe956f", size = 56826727, upload-time = "2025-09-05T09:23:55.462Z" },
+]
+
+[[package]]
+name = "xyzservices"
+version = "2025.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/af/c0f7f97bb320d14c089476f487b81f733238cc5603e0914f2e409f49d589/xyzservices-2025.4.0.tar.gz", hash = "sha256:6fe764713648fac53450fbc61a3c366cb6ae5335a1b2ae0c3796b495de3709d8", size = 1134722, upload-time = "2025-04-25T10:38:09.669Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d6/7d/b77455d7c7c51255b2992b429107fab811b2e36ceaf76da1e55a045dc568/xyzservices-2025.4.0-py3-none-any.whl", hash = "sha256:8d4db9a59213ccb4ce1cf70210584f30b10795bff47627cdfb862b39ff6e10c9", size = 90391, upload-time = "2025-04-25T10:38:08.468Z" },
 ]
 
 [[package]]
