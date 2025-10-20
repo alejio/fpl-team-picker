@@ -384,7 +384,8 @@ def _(
         if "team" in historical_df_sorted.columns:
             features_df["team"] = historical_df_sorted["team"].values
         if "value" in historical_df_sorted.columns:
-            features_df["price"] = historical_df_sorted["value"].values
+            # FPL API returns prices in tenths (e.g., 90 = £9.0m)
+            features_df["price"] = historical_df_sorted["value"].values / 10.0
 
         # Get feature names from production code (to be used in CV/training)
         production_feature_cols = list(feature_engineer.get_feature_names_out())
