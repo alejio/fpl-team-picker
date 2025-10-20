@@ -42,7 +42,7 @@ def _():
     # ML libraries
     from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
     from sklearn.linear_model import Ridge
-    from sklearn.model_selection import cross_val_score, GroupKFold
+    from sklearn.model_selection import cross_val_score, GroupKFold, TimeSeriesSplit
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
     from lightgbm import LGBMRegressor
@@ -75,6 +75,7 @@ def _():
         RandomForestRegressor,
         Ridge,
         StandardScaler,
+        TimeSeriesSplit,
         client,
         cross_val_score,
         data_service,
@@ -374,6 +375,16 @@ def _(
         features_df["player_id"] = historical_df_sorted["player_id"].values
         features_df["gameweek"] = historical_df_sorted["gameweek"].values
         features_df["total_points"] = historical_df_sorted["total_points"].values
+
+        # Add position and other metadata for analysis sections
+        if "position" in historical_df_sorted.columns:
+            features_df["position"] = historical_df_sorted["position"].values
+        if "web_name" in historical_df_sorted.columns:
+            features_df["web_name"] = historical_df_sorted["web_name"].values
+        if "team" in historical_df_sorted.columns:
+            features_df["team"] = historical_df_sorted["team"].values
+        if "value" in historical_df_sorted.columns:
+            features_df["price"] = historical_df_sorted["value"].values
 
         # Get feature names from production code (to be used in CV/training)
         production_feature_cols = list(feature_engineer.get_feature_names_out())
