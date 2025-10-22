@@ -707,23 +707,23 @@ def _(gameweek_input, mo):
 def _(mo):
     mo.md(
         r"""
-    ## 7️⃣ Strategic Transfer Optimization
+    ## 7️⃣ Transfer & Chip Optimization
 
-    **Smart 0-3 transfer analysis with advanced budget pool calculations.**
+    **Unified optimization for normal gameweeks and chip usage.**
 
-    ### Optimization Features:
-    - **Intelligent Transfer Count**: Auto-selects optimal 0-3 transfers based on net XP after penalties
-    - **Premium Acquisition Planning**: Multi-transfer scenarios for expensive targets
+    ### Optimization Modes:
+    - **1 Free Transfer**: Normal gameweek (analyze 0-3 transfers, -4pts per extra transfer)
+    - **2 Free Transfers**: Saved transfer from previous week (analyze 0-4 transfers)
+    - **15 Free Transfers (Wildcard)**: Rebuild entire squad, £100m budget reset, no penalties
+
+    ### Features:
+    - **Intelligent Strategy**: Auto-selects optimal transfer count based on net XP after penalties
+    - **Premium Acquisition**: Multi-transfer scenarios for expensive targets
     - **Budget Pool Analysis**: Total available funds including sellable squad value
     - **Constraint Support**: Force include/exclude specific players
     - **Configurable Horizon**: Choose between 1-GW immediate focus or 5-GW strategic planning
 
-    ### Transfer Scenarios Analyzed:
-    1. **No Transfers**: Keep current squad (baseline)
-    2. **1 Transfer**: Replace worst performer
-    3. **2 Transfers**: Target two weakest links
-    4. **3 Transfers**: Major squad overhaul
-    5. **Premium Scenarios**: Direct upgrades and funded acquisitions
+    **⚠️ Note**: For wildcard, the system analyzes the optimal squad but won't activate the chip - you must do that manually in the FPL app.
 
     ---
     """
@@ -733,14 +733,27 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    # Optimization horizon toggle
+    # Free transfer selector and optimization horizon toggle
+    free_transfer_selector = mo.ui.dropdown(
+        options=["1", "2", "15"],
+        value="1",
+        label="Free Transfers:",
+    )
+
     optimization_horizon_toggle = mo.ui.radio(
         options=["5gw", "1gw"], value="5gw", label="Optimization Horizon:"
     )
 
     mo.vstack(
         [
-            mo.md("### ⚖️ Choose Optimization Strategy"),
+            mo.md("### ⚖️ Optimization Configuration"),
+            mo.md("**Free Transfers:**"),
+            mo.md("- **1**: Normal gameweek (1 free transfer, -4pts per extra)"),
+            mo.md("- **2**: Saved transfer from previous week"),
+            mo.md("- **15**: Wildcard chip (rebuild entire squad, £100m reset)"),
+            free_transfer_selector,
+            mo.md(""),
+            mo.md("**Optimization Horizon:**"),
             optimization_horizon_toggle,
             mo.md(
                 "**5GW (Strategic)**: Optimizes for 5-gameweek fixture outlook and form trends"
@@ -749,11 +762,11 @@ def _(mo):
             mo.md("---"),
         ]
     )
-    return (optimization_horizon_toggle,)
+    return (free_transfer_selector, optimization_horizon_toggle)
 
 
 @app.cell
-def _(mo, optimization_horizon_toggle, players_with_xp):
+def _(free_transfer_selector, mo, optimization_horizon_toggle, players_with_xp):
     # Transfer Constraints UI - using PlayerAnalyticsService
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
@@ -848,10 +861,19 @@ def _(mo, optimization_horizon_toggle, players_with_xp):
             value=[],
         )
 
-        button_label = (
-            f"🚀 Run {horizon.upper()} Optimization (Auto-selects 0-3 transfers)"
-        )
-        optimize_button = mo.ui.run_button(label=button_label, kind="success")
+        # Get free transfer count and create appropriate button label
+        free_transfers_count = int(free_transfer_selector.value)
+        if free_transfers_count >= 15:
+            button_label = f"🃏 Run Wildcard Optimization ({horizon.upper()})"
+            button_kind = "warn"  # Yellow for wildcard
+            description = f"*Wildcard chip: Rebuild entire squad from scratch using {horizon.upper()} strategy. £100m budget reset, no transfer penalties.*"
+        else:
+            button_label = f"🚀 Run {horizon.upper()} Optimization ({free_transfers_count} free transfer{'s' if free_transfers_count > 1 else ''})"
+            button_kind = "success"  # Green for normal
+            max_transfers = min(free_transfers_count + 3, 15)
+            description = f"*The optimizer analyzes 0-{max_transfers} transfer scenarios using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties.*"
+
+        optimize_button = mo.ui.run_button(label=button_label, kind=button_kind)
 
         constraints_ui = mo.vstack(
             [
@@ -864,9 +886,7 @@ def _(mo, optimization_horizon_toggle, players_with_xp):
                 mo.md(""),
                 mo.md("---"),
                 mo.md("### 🚀 Run Optimization"),
-                mo.md(
-                    f"*The optimizer analyzes all transfer scenarios (0-3 transfers) using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties.*"
-                ),
+                mo.md(description),
                 mo.md(""),
                 optimize_button,
                 mo.md("---"),
@@ -894,6 +914,7 @@ def _(mo, optimization_horizon_toggle, players_with_xp):
 
 @app.cell
 def _(
+    free_transfer_selector,
     gameweek_data,
     mo,
     must_exclude_dropdown,
@@ -1116,6 +1137,12 @@ def _(
                 _optimization_service = OptimizationService()
 
                 try:
+                    # Get free transfer count from selector
+                    _free_transfers_count = int(free_transfer_selector.value)
+                    _free_transfers_override = (
+                        _free_transfers_count if _free_transfers_count != 1 else None
+                    )
+
                     optimal_squad_df, best_scenario, optimization_metadata = (
                         _optimization_service.optimize_transfers(
                             players_with_xp=players_with_xp,
@@ -1123,6 +1150,7 @@ def _(
                             team_data=team_data,
                             must_include_ids=must_include_ids,
                             must_exclude_ids=must_exclude_ids,
+                            free_transfers_override=_free_transfers_override,
                         )
                     )
 

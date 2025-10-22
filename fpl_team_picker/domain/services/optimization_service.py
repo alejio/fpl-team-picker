@@ -512,11 +512,18 @@ class OptimizationService:
         players_with_xp: pd.DataFrame,
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
+        free_transfers_override: Optional[int] = None,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
-        """Comprehensive strategic transfer optimization analyzing 0-3 transfers.
+        """Unified transfer optimization supporting normal gameweeks and chips.
 
         This is the core transfer optimization algorithm that analyzes multiple
         transfer scenarios and recommends the optimal strategy.
+
+        **Unified Chip Support:**
+        - Normal gameweek: free_transfers=1 (analyze 0-3 transfers)
+        - Saved transfer: free_transfers=2 (analyze 0-4 transfers)
+        - Wildcard chip: free_transfers=15 (rebuild entire squad, budget resets to £100m)
+        - Free Hit chip: free_transfers=15 + revert_after_gw flag (future extension)
 
         Dispatches to either greedy enumeration or simulated annealing based on config.
 
@@ -528,11 +535,29 @@ class OptimizationService:
             players_with_xp: All players with XP calculations
             must_include_ids: Set of player IDs that must be included
             must_exclude_ids: Set of player IDs that must be excluded
+            free_transfers_override: Override free transfers (for wildcard/chips)
+                - None: Use team_data['free_transfers'] (default 1)
+                - 15: Wildcard chip (rebuild entire squad)
+                - 2: Saved transfer from previous week
 
         Returns:
             Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
             where optimization_metadata contains budget_pool_info, scenarios, etc for display
         """
+        # Apply free transfers override if wildcard/chip is active
+        if free_transfers_override is not None:
+            team_data = team_data.copy()
+            team_data["free_transfers"] = free_transfers_override
+
+            # Wildcard chip: Budget resets to £100m (ignore current squad value)
+            if free_transfers_override >= 15:
+                team_data["bank"] = 100.0
+                # Note: Selling prices will be ignored since we can replace all 15 players
+                print(
+                    f"🃏 Wildcard/Chip Active: {free_transfers_override} free transfers, "
+                    f"£{team_data['bank']:.1f}m budget"
+                )
+
         # Dispatch based on configuration
         if config.optimization.transfer_optimization_method == "simulated_annealing":
             return self._optimize_transfers_sa(
@@ -792,12 +817,24 @@ class OptimizationService:
         free_transfers = team_data.get("free_transfers", 1)
 
         # Calculate total budget pool
-        budget_pool_info = self.calculate_budget_pool(
-            current_squad_with_xp, available_budget, must_include_ids
-        )
-        print(
-            f"💰 Budget: Bank £{available_budget:.1f}m | Sellable £{budget_pool_info['sellable_value']:.1f}m | Total £{budget_pool_info['total_budget']:.1f}m"
-        )
+        is_wildcard = free_transfers >= 15
+        if is_wildcard:
+            # Wildcard: budget resets to £100m, ignore current squad value
+            budget_pool_info = {
+                "total_budget": 100.0,
+                "sellable_value": 0.0,  # Not applicable for wildcard
+                "non_sellable_value": 0.0,
+                "must_include_value": 0.0,
+            }
+            print("🃏 Wildcard Budget: £100.0m (budget reset)")
+        else:
+            # Normal transfers: bank + sellable squad value
+            budget_pool_info = self.calculate_budget_pool(
+                current_squad_with_xp, available_budget, must_include_ids
+            )
+            print(
+                f"💰 Budget: Bank £{available_budget:.1f}m | Sellable £{budget_pool_info['sellable_value']:.1f}m | Total £{budget_pool_info['total_budget']:.1f}m"
+            )
 
         # Get all available players and filter
         all_players = players_with_xp[players_with_xp["xP"].notna()].copy()
@@ -826,52 +863,85 @@ class OptimizationService:
             f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
         )
 
-        # Run multiple SA restarts to find global optimum
-        num_restarts = config.optimization.sa_restarts
-        print(
-            f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
-        )
-
-        best_sa_result = None
-        best_net_xp = float("-inf")
-
-        for restart in range(num_restarts):
-            if num_restarts > 1:
-                print(f"  Restart {restart + 1}/{num_restarts}...")
-
-            sa_result = self._run_transfer_sa(
-                current_squad=current_squad_with_xp,
-                all_players=all_players,
-                available_budget=available_budget,
-                free_transfers=free_transfers,
+        # For wildcard (15 free transfers), use initial squad generation instead of transfer-based SA
+        if is_wildcard:
+            print(
+                "🃏 Wildcard mode: Building optimal squad from scratch (ignoring current squad)"
+            )
+            wildcard_result = self.optimize_initial_squad(
+                players_with_xp=all_players,
+                budget=100.0,  # Wildcard always £100m
+                formation=(2, 5, 5, 3),
+                iterations=config.optimization.sa_iterations,
                 must_include_ids=must_include_ids,
                 must_exclude_ids=must_exclude_ids,
                 xp_column=xp_column,
-                current_xp=current_xp,
-                iterations=config.optimization.sa_iterations,
             )
 
-            # Calculate net XP for this restart (including penalty)
-            best_squad_df = pd.DataFrame(sa_result["optimal_squad"])
+            # Convert initial squad result to transfer optimization format
+            optimal_squad = wildcard_result["optimal_squad"]
+            best_squad_df = pd.DataFrame(optimal_squad)
+
+            # Calculate how many players changed
             original_ids = set(current_squad_with_xp["player_id"].tolist())
             new_ids = set(best_squad_df["player_id"].tolist())
             num_transfers = len(original_ids - new_ids)
-            transfer_penalty = (
-                max(0, num_transfers - free_transfers)
-                * config.optimization.transfer_cost
+
+            sa_result = {
+                "optimal_squad": optimal_squad,
+                "best_xp": wildcard_result["total_xp"],
+                "iterations_improved": wildcard_result["iterations_improved"],
+                "total_iterations": wildcard_result["total_iterations"],
+            }
+            best_sa_result = sa_result
+
+        else:
+            # Normal transfers: Run multiple SA restarts to find global optimum
+            num_restarts = config.optimization.sa_restarts
+            print(
+                f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
             )
-            net_xp = sa_result["best_xp"] - transfer_penalty
 
-            if net_xp > best_net_xp:
-                best_net_xp = net_xp
-                best_sa_result = sa_result
+            best_sa_result = None
+            best_net_xp = float("-inf")
+
+            for restart in range(num_restarts):
                 if num_restarts > 1:
-                    print(
-                        f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
-                    )
+                    print(f"  Restart {restart + 1}/{num_restarts}...")
 
-        sa_result = best_sa_result
-        print(f"✅ Best result: {best_net_xp:.2f} net xP")
+                sa_result = self._run_transfer_sa(
+                    current_squad=current_squad_with_xp,
+                    all_players=all_players,
+                    available_budget=available_budget,
+                    free_transfers=free_transfers,
+                    must_include_ids=must_include_ids,
+                    must_exclude_ids=must_exclude_ids,
+                    xp_column=xp_column,
+                    current_xp=current_xp,
+                    iterations=config.optimization.sa_iterations,
+                )
+
+                # Calculate net XP for this restart (including penalty)
+                best_squad_df = pd.DataFrame(sa_result["optimal_squad"])
+                original_ids = set(current_squad_with_xp["player_id"].tolist())
+                new_ids = set(best_squad_df["player_id"].tolist())
+                num_transfers = len(original_ids - new_ids)
+                transfer_penalty = (
+                    max(0, num_transfers - free_transfers)
+                    * config.optimization.transfer_cost
+                )
+                net_xp = sa_result["best_xp"] - transfer_penalty
+
+                if net_xp > best_net_xp:
+                    best_net_xp = net_xp
+                    best_sa_result = sa_result
+                    if num_restarts > 1:
+                        print(
+                            f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
+                        )
+
+            sa_result = best_sa_result
+            print(f"✅ Best result: {best_net_xp:.2f} net xP")
 
         # Create best scenario from SA result
         best_squad = sa_result["optimal_squad"]
@@ -891,8 +961,13 @@ class OptimizationService:
         net_xp = sa_result["best_xp"] - transfer_penalty
 
         # Create transfer description
+        is_wildcard = free_transfers >= 15
         if num_transfers == 0:
             description = "Keep current squad"
+        elif is_wildcard:
+            description = (
+                f"Wildcard: Rebuild entire squad ({num_transfers} players changed)"
+            )
         else:
             out_names = [
                 current_squad_with_xp[current_squad_with_xp["player_id"] == pid][
@@ -906,10 +981,13 @@ class OptimizationService:
             ]
             description = f"OUT: {', '.join(out_names)} → IN: {', '.join(in_names)}"
 
+        # Determine scenario type
+        scenario_type = "wildcard" if is_wildcard else "simulated_annealing"
+
         best_scenario = {
             "id": 0,
             "transfers": num_transfers,
-            "type": "simulated_annealing",
+            "type": scenario_type,
             "description": description,
             "penalty": transfer_penalty,
             "net_xp": net_xp,
@@ -917,6 +995,7 @@ class OptimizationService:
             "xp_gain": net_xp - current_xp,
             "squad": best_squad_df,
             "iterations_improved": sa_result.get("iterations_improved", 0),
+            "is_wildcard": is_wildcard,
         }
 
         print(
@@ -924,18 +1003,28 @@ class OptimizationService:
             f"({sa_result['iterations_improved']} improvements in {sa_result['total_iterations']} iterations)"
         )
 
+        # Calculate remaining budget after squad selection
+        squad_cost = best_squad_df["price"].sum()
+        if is_wildcard:
+            remaining_budget = 100.0 - squad_cost
+        else:
+            remaining_budget = available_budget - (
+                squad_cost - budget_pool_info.get("non_sellable_value", 0)
+            )
+
         # Return data structures for presentation layer to display
         optimization_metadata = {
             "method": "simulated_annealing",
             "horizon_label": horizon_label,
             "xp_column": xp_column,
             "budget_pool_info": budget_pool_info,
-            "available_budget": available_budget,
+            "available_budget": remaining_budget,
             "free_transfers": free_transfers,
             "current_xp": current_xp,
             "current_formation": current_formation,
             "sa_iterations": sa_result["total_iterations"],
             "sa_improvements": sa_result["iterations_improved"],
+            "is_wildcard": is_wildcard,
             "transfers_out": [
                 {
                     "web_name": current_squad_with_xp[
@@ -1571,6 +1660,45 @@ class OptimizationService:
                         "squad": current_squad,
                     }
                 )
+
+    def optimize_wildcard_squad(
+        self,
+        current_squad: pd.DataFrame,
+        team_data: Dict,
+        players_with_xp: pd.DataFrame,
+        must_include_ids: Optional[Set[int]] = None,
+        must_exclude_ids: Optional[Set[int]] = None,
+    ) -> Tuple[pd.DataFrame, Dict, Dict]:
+        """
+        Optimize squad for wildcard chip usage (15 free transfers).
+
+        **UNIFIED API**: This method delegates to `optimize_transfers()` with
+        `free_transfers_override=15`. The unified approach treats wildcard as
+        15 free transfers with £100m budget reset.
+
+        **Backward Compatibility**: Maintains the same return format as before.
+
+        Args:
+            current_squad: Current squad (will be replaced entirely for wildcard)
+            team_data: Team data (bank will be overridden to £100m)
+            players_with_xp: All players with XP calculations
+            must_include_ids: Set of player IDs that must be included
+            must_exclude_ids: Set of player IDs that must be excluded
+
+        Returns:
+            Tuple of (optimal_squad_df, result_summary_dict, optimization_metadata_dict)
+        """
+        print("🃏 Wildcard Chip: Using unified optimization with 15 free transfers...")
+
+        # Delegate to unified transfer optimization with 15 free transfers
+        return self.optimize_transfers(
+            current_squad=current_squad,
+            team_data=team_data,
+            players_with_xp=players_with_xp,
+            must_include_ids=must_include_ids,
+            must_exclude_ids=must_exclude_ids,
+            free_transfers_override=15,  # Wildcard = 15 free transfers
+        )
 
     def optimize_initial_squad(
         self,

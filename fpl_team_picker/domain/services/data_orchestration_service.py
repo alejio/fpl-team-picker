@@ -263,7 +263,7 @@ class DataOrchestrationService:
         client = FPLDataClient()
 
         # 1. Load historical performance data (cumulative up to target_gameweek)
-        live_data_historical = None
+        live_data_historical = pd.DataFrame()  # Initialize as empty DataFrame, not None
         if target_gameweek > 1:
             # Get performance data for form window
             start_gw = max(1, target_gameweek - form_window)
@@ -448,7 +448,7 @@ class DataOrchestrationService:
             players = players.rename(columns={"id": "player_id"})
 
         # Standardize live_data_historical columns
-        if not live_data_historical.empty:
+        if live_data_historical is not None and not live_data_historical.empty:
             live_rename = {}
             if (
                 "event" in live_data_historical.columns
