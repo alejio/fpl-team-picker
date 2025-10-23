@@ -18,9 +18,13 @@ class XPModelConfig(BaseModel):
     use_ml_model: bool = Field(
         default=True, description="Use ML model instead of rule-based model"
     )
+    ml_model_path: str = Field(
+        default="models/tpot/tpot_pipeline_gw1-8_20251022_230910.joblib",
+        description="Path to pre-trained ML model (TPOT pipeline, LightGBM, or RandomForest)",
+    )
     ml_ensemble_rule_weight: float = Field(
-        default=0.22,
-        description="Weight for rule-based in ML ensemble (0-1) - optimized based on 0.78 MAE performance",
+        default=0.0,
+        description="Weight for rule-based in ML ensemble (0=pure ML, 1=pure rule-based). Default 0.0 for TPOT auto-optimized model.",
         ge=0.0,
         le=1.0,
     )

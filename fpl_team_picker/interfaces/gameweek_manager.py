@@ -444,35 +444,35 @@ def _(gameweek_data, mo):
         use_ml = config.xp_model.use_ml_model
 
         if use_ml:
-            # Try to use pre-trained ML model with sklearn pipeline
-            # Prefer LightGBM (best performer in experiments), fallback to RandomForest
-            lgbm_model_path = Path("models/fpl_xp_lgbm.joblib")
-            rf_model_path = Path("models/fpl_xp_rf.joblib")
+            # Use pre-trained ML model specified in config
+            # Default: TPOT auto-optimized pipeline (MAE: 0.721)
+            # Override via config.json or env var: FPL_XP_MODEL_ML_MODEL_PATH
+            model_path = Path(config.xp_model.ml_model_path)
 
-            if lgbm_model_path.exists():
-                # Use pre-trained LightGBM model (FAST! 4.3% better than Ridge)
-                ml_xp_service = MLExpectedPointsService(
-                    model_path=str(lgbm_model_path),
-                    ensemble_rule_weight=0.0,  # Pure ML
-                    debug=False,
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"❌ ML model not found: {model_path}\n"
+                    f"   Set config.xp_model.ml_model_path or train a model:\n"
+                    f"   - TPOT: uv run python scripts/tpot_pipeline_optimizer.py\n"
+                    f"   - Or use ml_xp_notebook.py to train and export a model"
                 )
-                model_type_label = "ML Pipeline (Pre-trained LightGBM)"
-            elif rf_model_path.exists():
-                # Fallback to RandomForest if no LightGBM model
-                ml_xp_service = MLExpectedPointsService(
-                    model_path=str(rf_model_path),
-                    ensemble_rule_weight=0.0,  # Pure ML
-                    debug=False,
-                )
-                model_type_label = "ML Pipeline (Pre-trained RandomForest)"
+
+            # Determine model type from path for display
+            if "tpot" in model_path.name.lower():
+                model_type_label = "ML Pipeline (TPOT Auto-Optimized)"
+            elif "lgbm" in model_path.name.lower():
+                model_type_label = "ML Pipeline (LightGBM)"
+            elif "rf" in model_path.name.lower():
+                model_type_label = "ML Pipeline (RandomForest)"
             else:
-                # No pre-trained model, train LightGBM on-the-fly (SLOWER but better accuracy)
-                ml_xp_service = MLExpectedPointsService(
-                    model_type="lgbm",  # Use LightGBM (4.3% better MAE than Ridge)
-                    ensemble_rule_weight=0.0,
-                    debug=True,
-                )
-                model_type_label = "ML Pipeline (Training LightGBM on-the-fly)"
+                model_type_label = f"ML Pipeline ({model_path.stem})"
+
+            # Initialize ML service with configured model
+            ml_xp_service = MLExpectedPointsService(
+                model_path=str(model_path),
+                ensemble_rule_weight=config.xp_model.ml_ensemble_rule_weight,
+                debug=config.xp_model.debug,
+            )
 
             # Calculate xP using ML service (no fallback - fail explicitly)
             # Note: ML service currently only does 1GW predictions
@@ -551,7 +551,7 @@ def _(gameweek_data, mo):
 
             model_info = {
                 "type": model_type_label,
-                "features": "63 features (5GW rolling, team context, fixtures)",
+                "features": "64 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures)",
                 "status": "✅ ML predictions generated",
             }
         else:
@@ -762,11 +762,16 @@ def _(mo):
             mo.md("---"),
         ]
     )
-    return (free_transfer_selector, optimization_horizon_toggle)
+    return free_transfer_selector, optimization_horizon_toggle
 
 
 @app.cell
-def _(free_transfer_selector, mo, optimization_horizon_toggle, players_with_xp):
+def _(
+    free_transfer_selector,
+    mo,
+    optimization_horizon_toggle,
+    players_with_xp,
+):
     # Transfer Constraints UI - using PlayerAnalyticsService
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])

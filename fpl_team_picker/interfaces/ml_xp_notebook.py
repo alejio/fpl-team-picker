@@ -42,7 +42,7 @@ def _():
     # ML libraries
     from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
     from sklearn.linear_model import Ridge
-    from sklearn.model_selection import cross_val_score, GroupKFold, TimeSeriesSplit
+    from sklearn.model_selection import cross_val_score, GroupKFold
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
     from lightgbm import LGBMRegressor
@@ -75,7 +75,6 @@ def _():
         RandomForestRegressor,
         Ridge,
         StandardScaler,
-        TimeSeriesSplit,
         client,
         cross_val_score,
         data_service,
@@ -685,17 +684,11 @@ def _(
         cv_summary = mo.md("⚠️ **Engineer features first**")
 
     cv_summary
-    return (
-        X_cv,
-        cv_data,
-        cv_groups,
-        feature_cols,
-        y_cv,
-    )
+    return X_cv, cv_data, cv_groups, feature_cols, y_cv
 
 
 @app.cell
-def _(cv_data, mo, X_cv, y_cv):
+def _(X_cv, cv_data, mo, y_cv):
     # Display sample training data for inspection
     if not cv_data.empty:
         sample_display = mo.vstack(
@@ -730,7 +723,7 @@ def _(cv_data, mo, X_cv, y_cv):
         sample_display = mo.md("")
 
     sample_display
-    return (sample_display,)
+    return
 
 
 @app.cell
@@ -744,13 +737,14 @@ def _(mo):
     # Model selection
     model_selector = mo.ui.dropdown(
         options={
+            "TPOT Pipeline (Auto-Optimized)": "tpot",
             "LightGBM (Recommended)": "lgbm",
             "Ridge Regression": "ridge",
             "Random Forest": "rf",
             "Gradient Boosting": "gb",
             "Ensemble (All Models)": "ensemble",
         },
-        value="LightGBM (Recommended)",
+        value="TPOT Pipeline (Auto-Optimized)",
         label="Select ML Algorithm",
     )
 
@@ -799,7 +793,6 @@ def _(
     RandomForestRegressor,
     Ridge,
     StandardScaler,
-    TimeSeriesSplit,
     X_cv,
     cross_val_score,
     cv_data,
@@ -1081,6 +1074,77 @@ def _(
                 "R²_std": _gb_r2_scores.std(),
                 "fold_scores": _gb_mae_scores,
             }
+
+        if model_selector.value == "tpot" or model_selector.value == "ensemble":
+            # TPOT Pipeline - Load pre-trained auto-optimized model
+            # NOTE: TPOT model expects 64 features from FPLFeatureEngineer
+            # Generate TPOT models via: uv run python scripts/tpot_pipeline_optimizer.py
+            import joblib
+            from pathlib import Path
+
+            # Find most recent TPOT model
+            _tpot_models_dir = Path("models/tpot")
+            if _tpot_models_dir.exists():
+                _tpot_joblib_files = sorted(
+                    _tpot_models_dir.glob("tpot_pipeline_*.joblib"), reverse=True
+                )
+
+                if _tpot_joblib_files:
+                    _tpot_model_path = _tpot_joblib_files[0]
+                    print(f"📦 Loading TPOT pipeline from: {_tpot_model_path.name}")
+
+                    # Load pre-trained TPOT pipeline
+                    tpot_pipeline = joblib.load(_tpot_model_path)
+
+                    # Cross-validation scoring (using pre-trained pipeline)
+                    _tpot_mae_scores = -cross_val_score(
+                        tpot_pipeline,
+                        X_cv,
+                        y_cv,
+                        scoring="neg_mean_absolute_error",
+                        **_cv_kwargs,
+                    )
+                    _tpot_rmse_scores = np.sqrt(
+                        -cross_val_score(
+                            tpot_pipeline,
+                            X_cv,
+                            y_cv,
+                            scoring="neg_mean_squared_error",
+                            **_cv_kwargs,
+                        )
+                    )
+                    _tpot_r2_scores = cross_val_score(
+                        tpot_pipeline,
+                        X_cv,
+                        y_cv,
+                        scoring="r2",
+                        **_cv_kwargs,
+                    )
+
+                    # Re-train on full dataset for consistency
+                    tpot_pipeline.fit(X_cv, y_cv)
+                    trained_models["tpot"] = tpot_pipeline
+
+                    cv_results["tpot"] = {
+                        "MAE_mean": _tpot_mae_scores.mean(),
+                        "MAE_std": _tpot_mae_scores.std(),
+                        "RMSE_mean": _tpot_rmse_scores.mean(),
+                        "RMSE_std": _tpot_rmse_scores.std(),
+                        "R²_mean": _tpot_r2_scores.mean(),
+                        "R²_std": _tpot_r2_scores.std(),
+                        "fold_scores": _tpot_mae_scores,
+                    }
+                    print(
+                        f"✅ TPOT pipeline loaded and validated: MAE = {_tpot_mae_scores.mean():.3f} ± {_tpot_mae_scores.std():.3f}"
+                    )
+                else:
+                    print(
+                        "⚠️ No TPOT models found in models/tpot/. Run scripts/tpot_pipeline_optimizer.py first."
+                    )
+            else:
+                print(
+                    "⚠️ models/tpot/ directory not found. Run scripts/tpot_pipeline_optimizer.py first."
+                )
 
         # Display cross-validation results
         _metrics_display = [

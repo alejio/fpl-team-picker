@@ -89,9 +89,44 @@ class MLExpectedPointsService:
             )
 
     def _load_pretrained_model(self):
-        """Load a pre-trained pipeline from disk."""
+        """
+        Load a pre-trained pipeline from disk.
+
+        For TPOT models: Wraps the bare sklearn pipeline with FPLFeatureEngineer
+        since TPOT was trained on already-engineered features.
+
+        Note: The wrapper pipeline is NOT fitted yet - it will be fitted on
+        historical data during the first call to calculate_expected_points().
+        """
         try:
-            self.pipeline, self.pipeline_metadata = load_pipeline(Path(self.model_path))
+            loaded_pipeline, self.pipeline_metadata = load_pipeline(
+                Path(self.model_path)
+            )
+
+            # Check if pipeline already has feature_engineer step
+            has_feature_engineer = (
+                hasattr(loaded_pipeline, "named_steps")
+                and "feature_engineer" in loaded_pipeline.named_steps
+            )
+
+            if not has_feature_engineer:
+                # TPOT model or bare sklearn pipeline - needs feature engineering wrapper
+                if self.debug:
+                    logger.debug(
+                        "⚙️  Bare sklearn pipeline detected (likely TPOT) - will wrap with FPLFeatureEngineer"
+                    )
+
+                # Store the loaded model - we'll create the wrapper in calculate_expected_points
+                # after we have historical data to fit the feature_engineer
+                self.pipeline = loaded_pipeline
+                self.needs_feature_wrapper = (
+                    True  # Flag to create wrapper during prediction
+                )
+            else:
+                # Standard pipeline already includes feature_engineer
+                self.pipeline = loaded_pipeline
+                self.needs_feature_wrapper = False
+
             if self.debug:
                 logger.debug(f"✅ Loaded pre-trained model from {self.model_path}")
                 if self.pipeline_metadata:
@@ -103,6 +138,7 @@ class MLExpectedPointsService:
             )
             self.pipeline = None
             self.pipeline_metadata = None
+            self.needs_feature_wrapper = False
 
     def _train_pipeline(
         self,
@@ -256,8 +292,9 @@ class MLExpectedPointsService:
             if "event" in live_data.columns and "gameweek" not in live_data.columns:
                 live_data = live_data.rename(columns={"event": "gameweek"})
 
-            # Train or use pre-trained pipeline
+            # Train or wrap pre-trained pipeline
             if self.pipeline is None:
+                # No model loaded - train on-the-fly
                 if self.debug:
                     logger.debug("No pre-trained model, training on-the-fly...")
 
@@ -266,6 +303,74 @@ class MLExpectedPointsService:
                     fixtures_df=fixtures_data,
                     teams_df=teams_data,
                 )
+            elif getattr(self, "needs_feature_wrapper", False):
+                # TPOT model needs feature engineering wrapper
+                # Create wrapper: [FPLFeatureEngineer -> TPOT Model] and fit on historical data
+                from sklearn.pipeline import Pipeline as SklearnPipeline
+                from .ml_feature_engineering import FPLFeatureEngineer
+                from .ml_pipeline_factory import get_team_strength_ratings
+
+                if self.debug:
+                    logger.debug(
+                        "🔧 Creating feature engineering wrapper for TPOT model..."
+                    )
+
+                team_strength = get_team_strength_ratings()
+                feature_engineer = FPLFeatureEngineer(
+                    fixtures_df=fixtures_data if not fixtures_data.empty else None,
+                    teams_df=teams_data if not teams_data.empty else None,
+                    team_strength=team_strength if team_strength else None,
+                )
+
+                # Create wrapper pipeline
+                tpot_model = self.pipeline  # Save reference to loaded TPOT model
+                wrapper_pipeline = SklearnPipeline(
+                    [("feature_engineer", feature_engineer), ("model", tpot_model)]
+                )
+
+                # Fit ONLY the feature_engineer step (TPOT model is already fitted)
+                # We fit on historical data so rolling features are calculated correctly
+                if self.debug:
+                    logger.debug(
+                        f"   Fitting feature_engineer on {len(live_data)} historical samples..."
+                    )
+
+                feature_engineer.fit(live_data, live_data["total_points"])
+
+                # Replace pipeline with fitted wrapper
+                self.pipeline = wrapper_pipeline
+                self.needs_feature_wrapper = False  # Don't wrap again
+
+                if self.debug:
+                    logger.debug("   ✅ Feature engineering wrapper created and fitted")
+            else:
+                # Standard pipeline with feature_engineer already included
+                # Update context if needed
+                if (
+                    hasattr(self.pipeline, "named_steps")
+                    and "feature_engineer" in self.pipeline.named_steps
+                ):
+                    feature_engineer = self.pipeline.named_steps["feature_engineer"]
+
+                    # Update context (fixtures, teams, team_strength)
+                    from .ml_pipeline_factory import get_team_strength_ratings
+
+                    team_strength = get_team_strength_ratings()
+
+                    feature_engineer.fixtures_df = (
+                        fixtures_data if not fixtures_data.empty else None
+                    )
+                    feature_engineer.teams_df = (
+                        teams_data if not teams_data.empty else None
+                    )
+                    feature_engineer.team_strength = (
+                        team_strength if team_strength else None
+                    )
+
+                    if self.debug:
+                        logger.debug(
+                            "✅ Updated FPLFeatureEngineer context (fixtures, teams, team_strength)"
+                        )
 
             # Prepare current gameweek data for prediction
             # Need to add gameweek column and ensure all required columns exist

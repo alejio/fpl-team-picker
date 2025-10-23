@@ -6,7 +6,6 @@ using simulated annealing with £100m budget reset and horizon configuration sup
 
 import pytest
 import pandas as pd
-from unittest.mock import patch
 from fpl_team_picker.domain.services.optimization_service import OptimizationService
 from fpl_team_picker.config import config
 
