@@ -5,17 +5,21 @@ Algorithm Comparison Experiment for ML Expected Points (xP) Prediction
 Tests multiple regression algorithms with proper temporal cross-validation to identify
 the best performer for FPL expected points prediction.
 
-Algorithms tested:
-1. Ridge Regression (baseline)
-2. ElasticNet (L1+L2 regularization)
-3. Random Forest
-4. Gradient Boosting
-5. XGBoost
-6. LightGBM
+Algorithms tested (Tier 1 recommendations):
+1. LightGBM ⭐⭐⭐⭐⭐ (best for categorical/ordinal features like price_band)
+2. XGBoost ⭐⭐⭐⭐⭐ (proven track record for structured data)
+3. CatBoost ⭐⭐⭐⭐ (best categorical handling, overfitting protection)
+4. HistGradientBoosting ⭐⭐⭐⭐ (native sklearn, fast, categorical support)
+5. Random Forest ⭐⭐⭐⭐ (solid baseline)
+6. Gradient Boosting ⭐⭐⭐ (traditional sklearn baseline)
+7. Ridge Regression ⭐⭐ (linear baseline for comparison)
 
 Cross-validation strategy:
-- Temporal walk-forward CV: Train on GW6 → Test on GW7 (realistic)
+- Temporal walk-forward CV: Train on GW1-N → Test on GW N+1 (realistic)
 - Player-based GroupKFold: 5 folds (optimistic, for comparison)
+
+Training data: GW1-8 (matches TPOT pipeline optimizer setup)
+Feature set: 65 features including new price_band ordinal feature
 """
 
 import numpy as np
@@ -23,13 +27,21 @@ import pandas as pd
 from sklearn.model_selection import GroupKFold, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Ridge, ElasticNet
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import (
+    RandomForestRegressor,
+    GradientBoostingRegressor,
+    HistGradientBoostingRegressor,
+)
 from xgboost import XGBRegressor
 from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor
 
 from client import FPLDataClient
 from fpl_team_picker.domain.services.ml_feature_engineering import FPLFeatureEngineer
+from fpl_team_picker.domain.services.ml_pipeline_factory import (
+    get_team_strength_ratings,
+)
 
 print("=" * 80)
 print("🤖 ALGORITHM COMPARISON EXPERIMENT")
@@ -38,40 +50,74 @@ print("=" * 80)
 # Initialize data client
 client = FPLDataClient()
 
-# Load data for GW6 and GW7
-print("\n📊 Loading training data...")
-gw6_data = client.get_gameweek_performance(6)
-gw7_data = client.get_gameweek_performance(7)
+# Load data for GW1-8 (matching TPOT setup)
+print("\n📊 Loading training data (GW1-8)...")
+historical_data = []
+start_gw = 1
+end_gw = 8
+
+for gw in range(start_gw, end_gw + 1):
+    gw_performance = client.get_gameweek_performance(gw)
+    if not gw_performance.empty:
+        gw_performance["gameweek"] = gw
+        historical_data.append(gw_performance)
+        print(f"   ✅ GW{gw}: {len(gw_performance):,} players")
+    else:
+        print(f"   ⚠️  GW{gw}: No data available")
+
+if not historical_data:
+    raise ValueError("No historical data loaded. Check gameweek range.")
 
 # Combine into training dataset
-cv_data = pd.concat([gw6_data, gw7_data], ignore_index=True)
-print(f"   Total samples: {len(cv_data):,}")
+cv_data = pd.concat(historical_data, ignore_index=True)
+print(f"\n   📊 Total samples: {len(cv_data):,}")
+print(f"   📅 Gameweeks: GW{start_gw}-GW{end_gw}")
+
+# Load fixtures and teams data for feature engineering
+print("\n🔧 Loading context data for feature engineering...")
+fixtures_df = client.get_fixtures_normalized()
+teams_df = client.get_current_teams()
+players_data = client.get_current_players()
+
+print(f"   ✅ Fixtures: {len(fixtures_df):,}")
+print(f"   ✅ Teams: {len(teams_df):,}")
+print(f"   ✅ Players: {len(players_data):,}")
 
 # Enrich with position data (required by FPLFeatureEngineer)
-print("   Enriching with player position data...")
-players_data = client.get_current_players()
 cv_data = cv_data.merge(
     players_data[["player_id", "position"]],
     on="player_id",
     how="left",
 )
 
+# Convert value to price (gameweek_performance has 'value', we need 'price' for analysis)
+# value is in tenths (45 = £4.5M), price is in pounds
+if "value" in cv_data.columns and "price" not in cv_data.columns:
+    cv_data["price"] = cv_data["value"] / 10.0
+
 # Preserve target and metadata before feature engineering
 target = cv_data["total_points"].copy()
 player_ids = cv_data["player_id"].copy()
 gameweeks = cv_data["gameweek"].copy()
+prices = cv_data["price"].copy()
 
-# Feature engineering
+# Feature engineering (with fixtures and teams context)
 print("\n🔧 Engineering features...")
-feature_engineer = FPLFeatureEngineer()
-cv_data_enriched = feature_engineer.fit_transform(cv_data)
+team_strength = get_team_strength_ratings()
+feature_engineer = FPLFeatureEngineer(
+    fixtures_df=fixtures_df,
+    teams_df=teams_df,
+    team_strength=team_strength,
+)
+cv_data_enriched = feature_engineer.fit_transform(cv_data, target)
 
-# Add back target, gameweek, and player_id
-cv_data_enriched["total_points"] = target
-cv_data_enriched["player_id"] = player_ids
-cv_data_enriched["gameweek"] = gameweeks
+# Add back target, gameweek, player_id, and price
+cv_data_enriched["total_points"] = target.values
+cv_data_enriched["player_id"] = player_ids.values
+cv_data_enriched["gameweek"] = gameweeks.values
+cv_data_enriched["price"] = prices.values
 
-# Get feature columns
+# Get feature columns (price is already in features as engineered feature)
 exclude_cols = {
     "player_id",
     "player_name",
@@ -84,7 +130,7 @@ exclude_cols = {
     "opponent_team_id",
 }
 feature_cols = [col for col in cv_data_enriched.columns if col not in exclude_cols]
-print(f"   Features: {len(feature_cols)}")
+print(f"   ✅ Features: {len(feature_cols)} (including new price_band feature)")
 
 # Prepare data
 X = cv_data_enriched[feature_cols].fillna(0)
@@ -148,23 +194,98 @@ print("🤖 MODEL DEFINITIONS")
 print("=" * 80)
 
 models = {
+    # Baseline
     "Ridge": Pipeline([("scaler", StandardScaler()), ("model", Ridge(alpha=1.0))]),
-    "ElasticNet": Pipeline(
+    # Tier 1 - Top Recommendations (Gradient Boosting variants)
+    "LightGBM": Pipeline(
         [
             ("scaler", StandardScaler()),
-            ("model", ElasticNet(alpha=1.0, l1_ratio=0.5, max_iter=2000)),
+            (
+                "model",
+                LGBMRegressor(
+                    n_estimators=200,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    num_leaves=31,
+                    min_child_samples=20,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                    random_state=42,
+                    n_jobs=-1,
+                    verbose=-1,
+                ),
+            ),
         ]
     ),
+    "XGBoost": Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                XGBRegressor(
+                    n_estimators=200,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    min_child_weight=3,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    gamma=0.1,
+                    reg_alpha=0.1,
+                    reg_lambda=0.1,
+                    random_state=42,
+                    n_jobs=-1,
+                    verbosity=0,
+                ),
+            ),
+        ]
+    ),
+    "CatBoost": Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                CatBoostRegressor(
+                    iterations=200,
+                    depth=6,
+                    learning_rate=0.05,
+                    l2_leaf_reg=3,
+                    random_seed=42,
+                    verbose=0,
+                    thread_count=-1,
+                ),
+            ),
+        ]
+    ),
+    "HistGradientBoosting": Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "model",
+                HistGradientBoostingRegressor(
+                    max_iter=200,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    min_samples_leaf=20,
+                    l2_regularization=0.1,
+                    random_state=42,
+                ),
+            ),
+        ]
+    ),
+    # Tier 2 - Solid alternatives
     "Random Forest": Pipeline(
         [
             ("scaler", StandardScaler()),
             (
                 "model",
                 RandomForestRegressor(
-                    n_estimators=100,
-                    max_depth=10,
+                    n_estimators=200,
+                    max_depth=12,
                     min_samples_split=10,
                     min_samples_leaf=5,
+                    max_features="sqrt",
                     random_state=42,
                     n_jobs=-1,
                 ),
@@ -177,49 +298,13 @@ models = {
             (
                 "model",
                 GradientBoostingRegressor(
-                    n_estimators=100,
+                    n_estimators=200,
                     max_depth=5,
-                    learning_rate=0.1,
+                    learning_rate=0.05,
                     min_samples_split=10,
                     min_samples_leaf=5,
-                    random_state=42,
-                ),
-            ),
-        ]
-    ),
-    "XGBoost": Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            (
-                "model",
-                XGBRegressor(
-                    n_estimators=100,
-                    max_depth=5,
-                    learning_rate=0.1,
-                    min_child_weight=5,
                     subsample=0.8,
-                    colsample_bytree=0.8,
                     random_state=42,
-                    n_jobs=-1,
-                ),
-            ),
-        ]
-    ),
-    "LightGBM": Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            (
-                "model",
-                LGBMRegressor(
-                    n_estimators=100,
-                    max_depth=5,
-                    learning_rate=0.1,
-                    min_child_samples=10,
-                    subsample=0.8,
-                    colsample_bytree=0.8,
-                    random_state=42,
-                    n_jobs=-1,
-                    verbose=-1,
                 ),
             ),
         ]
@@ -376,5 +461,65 @@ else:
         f"2. MAE: {best_player['Player-Based MAE']:.3f} ± {best_player['Player-Based Std']:.3f}"
     )
     print("3. ⚠️ Need more gameweeks for realistic temporal CV validation")
+
+# ============================================================================
+# Elite Player Performance Analysis (addressing underestimation issue)
+# ============================================================================
+
+print("\n" + "=" * 80)
+print("💎 ELITE PLAYER PERFORMANCE ANALYSIS")
+print("=" * 80)
+print("\nAnalyzing prediction accuracy by price band...")
+print("(Testing if gradient boosting fixes elite player underestimation)\n")
+
+# Train best models on full dataset and analyze predictions by price band
+if temporal_splits:
+    best_model_name = best_temporal["Model"]
+    best_model = models[best_model_name]
+
+    # Train on full dataset
+    best_model.fit(X, y)
+    predictions = best_model.predict(X)
+
+    # Add predictions to enriched data
+    cv_data_enriched["predicted_points"] = predictions
+
+    # Define price bands
+    cv_data_enriched["price_band_label"] = pd.cut(
+        cv_data_enriched["price"],
+        bins=[0, 5.0, 7.0, 9.0, float("inf")],
+        labels=["Budget (<£5M)", "Mid (£5-7M)", "Premium (£7-9M)", "Elite (£9M+)"],
+    )
+
+    # Calculate MAE by price band
+    print(f"🏆 Best Model: {best_model_name}")
+    print("-" * 80)
+    print(
+        f"{'Price Band':<20} {'Count':>8} {'Avg Actual':>12} {'Avg Predicted':>15} {'MAE':>10} {'Bias':>10}"
+    )
+    print("-" * 80)
+
+    for band in ["Budget (<£5M)", "Mid (£5-7M)", "Premium (£7-9M)", "Elite (£9M+)"]:
+        band_data = cv_data_enriched[cv_data_enriched["price_band_label"] == band]
+        if len(band_data) > 0:
+            count = len(band_data)
+            avg_actual = band_data["total_points"].mean()
+            avg_predicted = band_data["predicted_points"].mean()
+            mae = np.abs(
+                band_data["total_points"] - band_data["predicted_points"]
+            ).mean()
+            bias = avg_predicted - avg_actual  # Negative = underestimation
+
+            bias_indicator = "⚠️ " if bias < -0.5 else "✅ "
+            print(
+                f"{band:<20} {count:>8,} {avg_actual:>12.2f} {avg_predicted:>15.2f} {mae:>10.3f} {bias_indicator}{bias:>9.2f}"
+            )
+
+    print("-" * 80)
+    print("\n💡 Interpretation:")
+    print("   - Bias close to 0: Model is well-calibrated for that price band")
+    print("   - Negative bias: Model underestimates (your original problem)")
+    print("   - Positive bias: Model overestimates")
+    print("\n   ✅ Goal: All bias values close to 0, especially for Elite players")
 
 print("\n" + "=" * 80)

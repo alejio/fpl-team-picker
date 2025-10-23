@@ -26,6 +26,7 @@ dependencies = [
     "tpot>=1.1.0",
     "setuptools>=75.0.0",
     "bokeh>=3.8.0",
+    "catboost>=1.2.8",
 ]
 
 [dependency-groups]
