@@ -21,6 +21,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - Per-90 efficiency metrics
     - Team context features
     - Fixture-specific features
+    - Price band categorization (ordinal)
 
     All features are leak-free (only use past data).
     """
@@ -70,7 +71,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                minutes, goals_scored, assists, total_points, etc.]
 
         Returns:
-            DataFrame with 63 engineered features per player-gameweek
+            DataFrame with 65 engineered features per player-gameweek
         """
         if X.empty:
             return X
@@ -149,6 +150,15 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         position_map = {"GKP": 0, "DEF": 1, "MID": 2, "FWD": 3}
         df["position_encoded"] = df["position"].map(position_map).fillna(-1).astype(int)
         df["games_played"] = grouped.cumcount()
+
+        # Price band feature (ordinal: 0=Budget, 1=Mid, 2=Premium, 3=Elite)
+        # Bins: [0, 5) = Budget, [5, 7) = Mid, [7, 9) = Premium, [9, inf) = Elite
+        df["price_band"] = pd.cut(
+            df["price"],
+            bins=[0, 5.0, 7.0, 9.0, float("inf")],
+            labels=[0, 1, 2, 3],
+            right=False,
+        ).astype(int)
 
         # ===== CUMULATIVE SEASON STATISTICS =====
         df["cumulative_minutes"] = grouped["minutes"].transform(
@@ -696,12 +706,13 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         return df
 
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (63 features)."""
+        """Get list of all feature columns (65 features)."""
         return [
-            # Static (3)
+            # Static (4)
             "price",
             "position_encoded",
             "games_played",
+            "price_band",
             # Cumulative season stats (11)
             "cumulative_minutes",
             "cumulative_goals",
@@ -750,7 +761,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "rolling_5gw_minutes_std",
             "minutes_played_rate",
             "form_trend",
-            # Team features (14)
+            # Team features (13)
             "team_encoded",
             "team_rolling_5gw_goals_scored",
             "team_rolling_5gw_goals_conceded",

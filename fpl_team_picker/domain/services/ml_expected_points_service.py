@@ -6,7 +6,7 @@ Designed to replace or complement the rule-based XP model with improved accuracy
 
 Key Features:
 - Scikit-learn pipelines for production-ready models
-- Rich 63-feature set: 5GW rolling windows, team context, fixture difficulty
+- Rich 65-feature set: 5GW rolling windows, team context, fixture difficulty, price bands
 - Position-specific models (optional) for GKP/DEF/MID/FWD
 - Leak-free temporal features (all features use past data only)
 - Save/load capability for pre-trained models
@@ -39,10 +39,11 @@ class MLExpectedPointsService:
     """
     Machine Learning Expected Points Service using Sklearn Pipelines
 
-    Uses comprehensive 63-feature set with:
+    Uses comprehensive 65-feature set with:
     - 5GW rolling form windows (cumulative & per-90 stats)
     - Team context features (rolling team performance)
     - Fixture-specific features (opponent strength, home/away, opponent defense)
+    - Price band categorization (ordinal: Budget/Mid/Premium/Elite)
     - Leak-free temporal features (all use past data only)
 
     Maintains same public interface as old service for drop-in replacement in gameweek_manager.py
