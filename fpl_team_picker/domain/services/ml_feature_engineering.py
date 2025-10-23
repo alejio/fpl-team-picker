@@ -703,7 +703,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         ].fillna(0)
         df["opponent_rolling_5gw_xgc"] = df["opponent_rolling_5gw_xgc"].fillna(0)
 
-        return df
+        # Return ONLY the 65 feature columns (not metadata like player_id, gameweek, etc.)
+        # This is critical for sklearn pipeline compatibility - downstream models expect
+        # exactly the features they were trained on, not extra metadata columns
+        feature_cols = self._get_feature_columns()
+        return df[feature_cols]
 
     def _get_feature_columns(self) -> list:
         """Get list of all feature columns (65 features)."""
