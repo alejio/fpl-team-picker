@@ -324,12 +324,25 @@ class TestOptimizeInitialSquadDataValidation:
     def test_must_include_exceeds_budget(self, optimization_service, sample_players):
         """Test fails when must-include players exceed budget."""
         # Select expensive players with correct formation distribution
-        expensive_gkp = sample_players[sample_players["position"] == "GKP"].nlargest(2, "price")["player_id"]
-        expensive_def = sample_players[sample_players["position"] == "DEF"].nlargest(5, "price")["player_id"]
-        expensive_mid = sample_players[sample_players["position"] == "MID"].nlargest(5, "price")["player_id"]
-        expensive_fwd = sample_players[sample_players["position"] == "FWD"].nlargest(3, "price")["player_id"]
+        expensive_gkp = sample_players[sample_players["position"] == "GKP"].nlargest(
+            2, "price"
+        )["player_id"]
+        expensive_def = sample_players[sample_players["position"] == "DEF"].nlargest(
+            5, "price"
+        )["player_id"]
+        expensive_mid = sample_players[sample_players["position"] == "MID"].nlargest(
+            5, "price"
+        )["player_id"]
+        expensive_fwd = sample_players[sample_players["position"] == "FWD"].nlargest(
+            3, "price"
+        )["player_id"]
 
-        expensive_ids = set(expensive_gkp) | set(expensive_def) | set(expensive_mid) | set(expensive_fwd)
+        expensive_ids = (
+            set(expensive_gkp)
+            | set(expensive_def)
+            | set(expensive_mid)
+            | set(expensive_fwd)
+        )
 
         with pytest.raises(ValueError, match="exceeding budget"):
             optimization_service.optimize_initial_squad(
@@ -340,12 +353,14 @@ class TestOptimizeInitialSquadDataValidation:
                 must_include_ids=expensive_ids,
             )
 
-    def test_must_include_violates_3_per_team(self, optimization_service, sample_players):
+    def test_must_include_violates_3_per_team(
+        self, optimization_service, sample_players
+    ):
         """Test fails when must-include players violate 3-per-team rule."""
         # Select 4 players from same team
-        team_a_ids = sample_players[sample_players["team"] == "Team A"]["player_id"].iloc[
-            :4
-        ]
+        team_a_ids = sample_players[sample_players["team"] == "Team A"][
+            "player_id"
+        ].iloc[:4]
 
         with pytest.raises(ValueError, match="violate 3-per-team rule"):
             optimization_service.optimize_initial_squad(
@@ -464,59 +479,69 @@ class TestEdgeCases:
 
         # Create players with exact prices
         for i in range(2):  # 2 GKP at 5.0 each
-            players.append({
-                "player_id": player_id,
-                "web_name": f"GKP{i}",
-                "position": "GKP",
-                "price": 5.0,
-                "xP": 3.0,
-                "team": f"Team{player_id % 5}",
-            })
+            players.append(
+                {
+                    "player_id": player_id,
+                    "web_name": f"GKP{i}",
+                    "position": "GKP",
+                    "price": 5.0,
+                    "xP": 3.0,
+                    "team": f"Team{player_id % 5}",
+                }
+            )
             player_id += 1
 
         for i in range(5):  # 5 DEF at 6.0 each
-            players.append({
-                "player_id": player_id,
-                "web_name": f"DEF{i}",
-                "position": "DEF",
-                "price": 6.0,
-                "xP": 4.0,
-                "team": f"Team{player_id % 5}",
-            })
+            players.append(
+                {
+                    "player_id": player_id,
+                    "web_name": f"DEF{i}",
+                    "position": "DEF",
+                    "price": 6.0,
+                    "xP": 4.0,
+                    "team": f"Team{player_id % 5}",
+                }
+            )
             player_id += 1
 
         for i in range(5):  # 5 MID at 8.0 each
-            players.append({
-                "player_id": player_id,
-                "web_name": f"MID{i}",
-                "position": "MID",
-                "price": 8.0,
-                "xP": 5.0,
-                "team": f"Team{player_id % 5}",
-            })
+            players.append(
+                {
+                    "player_id": player_id,
+                    "web_name": f"MID{i}",
+                    "position": "MID",
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "team": f"Team{player_id % 5}",
+                }
+            )
             player_id += 1
 
         for i in range(3):  # 3 FWD at 10.0 each
-            players.append({
-                "player_id": player_id,
-                "web_name": f"FWD{i}",
-                "position": "FWD",
-                "price": 10.0,
-                "xP": 6.0,
-                "team": f"Team{player_id % 5}",
-            })
+            players.append(
+                {
+                    "player_id": player_id,
+                    "web_name": f"FWD{i}",
+                    "position": "FWD",
+                    "price": 10.0,
+                    "xP": 6.0,
+                    "team": f"Team{player_id % 5}",
+                }
+            )
             player_id += 1
 
         # Add some cheaper alternatives
         for i in range(10):
-            players.append({
-                "player_id": player_id,
-                "web_name": f"Bench{i}",
-                "position": ["DEF", "MID", "FWD"][i % 3],
-                "price": 4.5,
-                "xP": 1.0,
-                "team": f"Team{player_id % 5}",
-            })
+            players.append(
+                {
+                    "player_id": player_id,
+                    "web_name": f"Bench{i}",
+                    "position": ["DEF", "MID", "FWD"][i % 3],
+                    "price": 4.5,
+                    "xP": 1.0,
+                    "team": f"Team{player_id % 5}",
+                }
+            )
             player_id += 1
 
         df = pd.DataFrame(players)

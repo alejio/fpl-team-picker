@@ -13,38 +13,40 @@ class TestCaptainRecommendationStructure:
         service = OptimizationService()
 
         # Create sample players
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Salah",
-                "position": "MID",
-                "xP": 8.5,
-                "price": 13.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-            {
-                "player_id": 2,
-                "web_name": "Haaland",
-                "position": "FWD",
-                "xP": 9.2,
-                "price": 14.0,
-                "expected_minutes": 85,
-                "fixture_outlook": "🟡 Average",
-                "status": "a",
-            },
-            {
-                "player_id": 3,
-                "web_name": "De Bruyne",
-                "position": "MID",
-                "xP": 7.8,
-                "price": 12.5,
-                "expected_minutes": 80,
-                "fixture_outlook": "🔴 Hard",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Salah",
+                    "position": "MID",
+                    "xP": 8.5,
+                    "price": 13.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Haaland",
+                    "position": "FWD",
+                    "xP": 9.2,
+                    "price": 14.0,
+                    "expected_minutes": 85,
+                    "fixture_outlook": "🟡 Average",
+                    "status": "a",
+                },
+                {
+                    "player_id": 3,
+                    "web_name": "De Bruyne",
+                    "position": "MID",
+                    "xP": 7.8,
+                    "price": 12.5,
+                    "expected_minutes": 80,
+                    "fixture_outlook": "🔴 Hard",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=3)
 
@@ -81,18 +83,20 @@ class TestCaptainRecommendationStructure:
         """Test that each candidate has all required fields."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Player1",
-                "position": "FWD",
-                "xP": 8.0,
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Player1",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["top_candidates"][0]
@@ -120,18 +124,20 @@ class TestCaptainRiskAnalysis:
         """Test that injured players are marked as high risk."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Injured",
-                "position": "FWD",
-                "xP": 8.0,
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "i",  # Injured
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Injured",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "i",  # Injured
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -143,18 +149,20 @@ class TestCaptainRiskAnalysis:
         """Test that suspended players are marked as high risk."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Suspended",
-                "position": "DEF",
-                "xP": 7.0,
-                "price": 6.0,
-                "expected_minutes": 0,
-                "fixture_outlook": "🟢 Easy",
-                "status": "s",  # Suspended
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Suspended",
+                    "position": "DEF",
+                    "xP": 7.0,
+                    "price": 6.0,
+                    "expected_minutes": 0,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "s",  # Suspended
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -166,18 +174,20 @@ class TestCaptainRiskAnalysis:
         """Test that hard fixtures increase risk level."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Player1",
-                "position": "MID",
-                "xP": 6.0,
-                "price": 8.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🔴 Hard",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Player1",
+                    "position": "MID",
+                    "xP": 6.0,
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🔴 Hard",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -189,18 +199,20 @@ class TestCaptainRiskAnalysis:
         """Test that low expected minutes increase risk."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Rotated",
-                "position": "FWD",
-                "xP": 5.0,
-                "price": 9.0,
-                "expected_minutes": 45,  # Low minutes
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Rotated",
+                    "position": "FWD",
+                    "xP": 5.0,
+                    "price": 9.0,
+                    "expected_minutes": 45,  # Low minutes
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -212,18 +224,20 @@ class TestCaptainRiskAnalysis:
         """Test that a player with no risk factors is marked as low risk."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Perfect",
-                "position": "FWD",
-                "xP": 8.0,
-                "price": 12.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Perfect",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -240,19 +254,21 @@ class TestCaptainTopCandidates:
         service = OptimizationService()
 
         # Create 10 players
-        players_df = pd.DataFrame([
-            {
-                "player_id": i,
-                "web_name": f"Player{i}",
-                "position": "MID",
-                "xP": 10.0 - i * 0.5,  # Descending xP
-                "price": 8.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            }
-            for i in range(10)
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": i,
+                    "web_name": f"Player{i}",
+                    "position": "MID",
+                    "xP": 10.0 - i * 0.5,  # Descending xP
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                }
+                for i in range(10)
+            ]
+        )
 
         # Test top_n=3
         result = service.get_captain_recommendation(players_df, top_n=3)
@@ -270,38 +286,40 @@ class TestCaptainTopCandidates:
         """Test that candidates are sorted by xP descending."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Player1",
-                "position": "MID",
-                "xP": 5.0,
-                "price": 8.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-            {
-                "player_id": 2,
-                "web_name": "Player2",
-                "position": "FWD",
-                "xP": 9.0,
-                "price": 12.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-            {
-                "player_id": 3,
-                "web_name": "Player3",
-                "position": "MID",
-                "xP": 7.0,
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Player1",
+                    "position": "MID",
+                    "xP": 5.0,
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Player2",
+                    "position": "FWD",
+                    "xP": 9.0,
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+                {
+                    "player_id": 3,
+                    "web_name": "Player3",
+                    "position": "MID",
+                    "xP": 7.0,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=3)
         candidates = result["top_candidates"]
@@ -320,18 +338,20 @@ class TestCaptainTopCandidates:
         """Test that captain points are correctly calculated as xP * 2."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Player1",
-                "position": "FWD",
-                "xP": 7.5,
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Player1",
+                    "position": "FWD",
+                    "xP": 7.5,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -355,13 +375,15 @@ class TestCaptainDataValidation:
         service = OptimizationService()
 
         # Missing 'web_name'
-        incomplete_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "position": "FWD",
-                "xP": 8.0,
-            }
-        ])
+        incomplete_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "position": "FWD",
+                    "xP": 8.0,
+                }
+            ]
+        )
 
         with pytest.raises(ValueError, match="Missing required columns"):
             service.get_captain_recommendation(incomplete_df)
@@ -370,20 +392,24 @@ class TestCaptainDataValidation:
         """Test that custom xP column works."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Player1",
-                "position": "MID",
-                "xP_custom": 8.0,  # Custom column
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Player1",
+                    "position": "MID",
+                    "xP_custom": 8.0,  # Custom column
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
-        result = service.get_captain_recommendation(players_df, top_n=1, xp_column="xP_custom")
+        result = service.get_captain_recommendation(
+            players_df, top_n=1, xp_column="xP_custom"
+        )
 
         assert result["captain"]["xP"] == 8.0
         assert result["captain"]["captain_points"] == 16.0
@@ -393,13 +419,15 @@ class TestCaptainDataValidation:
         service = OptimizationService()
 
         # Minimal player data
-        players_df = pd.DataFrame([
-            {
-                "web_name": "Minimal",
-                "position": "FWD",
-                "xP": 7.0,
-            }
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "web_name": "Minimal",
+                    "position": "FWD",
+                    "xP": 7.0,
+                }
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["captain"]
@@ -418,28 +446,30 @@ class TestCaptainMetrics:
         """Test that differential is correctly calculated."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Captain",
-                "position": "FWD",
-                "xP": 9.0,
-                "price": 13.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-            {
-                "player_id": 2,
-                "web_name": "Vice",
-                "position": "MID",
-                "xP": 7.0,
-                "price": 11.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Captain",
+                    "position": "FWD",
+                    "xP": 9.0,
+                    "price": 13.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Vice",
+                    "position": "MID",
+                    "xP": 7.0,
+                    "price": 11.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=2)
 
@@ -454,18 +484,20 @@ class TestCaptainMetrics:
         """Test that with only one player, captain and vice are the same."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Only",
-                "position": "FWD",
-                "xP": 8.0,
-                "price": 10.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Only",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=5)
 
@@ -481,19 +513,21 @@ class TestCaptainEdgeCases:
         """Test that requesting more candidates than available works."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": i,
-                "web_name": f"Player{i}",
-                "position": "MID",
-                "xP": 5.0,
-                "price": 8.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            }
-            for i in range(3)  # Only 3 players
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": i,
+                    "web_name": f"Player{i}",
+                    "position": "MID",
+                    "xP": 5.0,
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                }
+                for i in range(3)  # Only 3 players
+            ]
+        )
 
         # Request top 10 but only have 3
         result = service.get_captain_recommendation(players_df, top_n=10)
@@ -504,19 +538,21 @@ class TestCaptainEdgeCases:
         """Test behavior with players having identical xP."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": i,
-                "web_name": f"Player{i}",
-                "position": "MID",
-                "xP": 7.0,  # All same
-                "price": 8.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            }
-            for i in range(5)
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": i,
+                    "web_name": f"Player{i}",
+                    "position": "MID",
+                    "xP": 7.0,  # All same
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                }
+                for i in range(5)
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=3)
 
@@ -528,18 +564,20 @@ class TestCaptainEdgeCases:
         """Test that players with 0 xP can still be captains."""
         service = OptimizationService()
 
-        players_df = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Zero",
-                "position": "DEF",
-                "xP": 0.0,
-                "price": 4.0,
-                "expected_minutes": 90,
-                "fixture_outlook": "🟢 Easy",
-                "status": "a",
-            },
-        ])
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Zero",
+                    "position": "DEF",
+                    "xP": 0.0,
+                    "price": 4.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
 
         result = service.get_captain_recommendation(players_df, top_n=1)
 

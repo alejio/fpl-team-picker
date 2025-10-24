@@ -15,13 +15,23 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Handles all temporal feature creation:
+    Generates 80 features (65 base + 15 enhanced):
+
+    Base features (65):
     - Cumulative season statistics (up to GW N-1)
     - Rolling 5GW form features
     - Per-90 efficiency metrics
     - Team context features
     - Fixture-specific features
     - Price band categorization (ordinal)
+
+    Enhanced features (15) - Issue #37:
+    - Ownership trends (7): selected_by_percent, ownership_tier, transfer_momentum,
+      net_transfers, bandwagon_score, ownership_velocity
+    - Value analysis (5): points_per_pound, value_vs_position, predicted_price_change,
+      price_volatility, price_risk
+    - Enhanced fixture difficulty (3): congestion_difficulty, form_adjusted_difficulty,
+      clean_sheet_probability_enhanced
 
     All features are leak-free (only use past data).
     """
@@ -31,6 +41,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         fixtures_df: Optional[pd.DataFrame] = None,
         teams_df: Optional[pd.DataFrame] = None,
         team_strength: Optional[Dict[str, float]] = None,
+        ownership_trends_df: Optional[pd.DataFrame] = None,
+        value_analysis_df: Optional[pd.DataFrame] = None,
+        fixture_difficulty_df: Optional[pd.DataFrame] = None,
     ):
         """
         Initialize feature engineer.
@@ -39,10 +52,26 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             fixtures_df: Fixture data with [event, home_team_id, away_team_id]
             teams_df: Teams data with [team_id, name]
             team_strength: Dict mapping team name to strength rating [0.65, 1.30]
+            ownership_trends_df: Ownership trends from get_derived_ownership_trends() (NEW - Issue #37)
+            value_analysis_df: Value analysis from get_derived_value_analysis() (NEW - Issue #37)
+            fixture_difficulty_df: Enhanced fixture difficulty from get_derived_fixture_difficulty() (NEW - Issue #37)
         """
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
         self.team_strength = team_strength if team_strength is not None else {}
+
+        # NEW: Enhanced data sources for differential strategy (Issue #37)
+        self.ownership_trends_df = (
+            ownership_trends_df if ownership_trends_df is not None else pd.DataFrame()
+        )
+        self.value_analysis_df = (
+            value_analysis_df if value_analysis_df is not None else pd.DataFrame()
+        )
+        self.fixture_difficulty_df = (
+            fixture_difficulty_df
+            if fixture_difficulty_df is not None
+            else pd.DataFrame()
+        )
 
         # Store feature names for reference
         self.feature_names_ = None
@@ -71,7 +100,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                minutes, goals_scored, assists, total_points, etc.]
 
         Returns:
-            DataFrame with 65 engineered features per player-gameweek
+            DataFrame with 80 engineered features per player-gameweek
+            (65 base + 15 enhanced: ownership, value, fixture difficulty)
         """
         if X.empty:
             return X
@@ -380,6 +410,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         # ===== FIXTURE-SPECIFIC FEATURES =====
         df = self._add_fixture_features(df)
+
+        # ===== ENHANCED FEATURES (Issue #37) =====
+        df = self._add_ownership_features(df)
+        df = self._add_value_features(df)
+        df = self._add_enhanced_fixture_features(df)
 
         # Fill missing values
         df = df.fillna(0)
@@ -703,14 +738,166 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         ].fillna(0)
         df["opponent_rolling_5gw_xgc"] = df["opponent_rolling_5gw_xgc"].fillna(0)
 
-        # Return ONLY the 65 feature columns (not metadata like player_id, gameweek, etc.)
-        # This is critical for sklearn pipeline compatibility - downstream models expect
-        # exactly the features they were trained on, not extra metadata columns
-        feature_cols = self._get_feature_columns()
-        return df[feature_cols]
+        return df
+
+    def _add_ownership_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add ownership and transfer momentum features (Issue #37)."""
+        if self.ownership_trends_df.empty:
+            raise ValueError(
+                "Ownership trends data is required but was not provided. "
+                "Pass ownership_trends_df=client.get_derived_ownership_trends() to constructor."
+            )
+
+        # Merge ownership data by player_id and gameweek
+        ownership_cols = [
+            "player_id",
+            "gameweek",
+            "selected_by_percent",
+            "net_transfers_gw",
+            "avg_net_transfers_5gw",
+            "transfer_momentum",
+            "ownership_velocity",
+            "ownership_tier",
+            "bandwagon_score",
+        ]
+
+        available_cols = [
+            col for col in ownership_cols if col in self.ownership_trends_df.columns
+        ]
+        ownership_df = self.ownership_trends_df[available_cols].copy()
+
+        df = df.merge(ownership_df, on=["player_id", "gameweek"], how="left")
+
+        # Validate no missing data after merge
+        if df["selected_by_percent"].isna().any():
+            missing_count = df["selected_by_percent"].isna().sum()
+            raise ValueError(
+                f"Missing ownership data for {missing_count} player-gameweeks after merge. "
+                f"Ownership trends data may be incomplete."
+            )
+
+        # Encode categorical ownership_tier
+        ownership_tier_map = {"punt": 0, "budget": 1, "popular": 2, "template": 3}
+        df["ownership_tier_encoded"] = (
+            df["ownership_tier"].map(ownership_tier_map).fillna(1)
+        )
+
+        # Encode transfer_momentum
+        momentum_map = {
+            "neutral": 0,
+            "slow_in": 1,
+            "accelerating_in": 2,
+            "slow_out": -1,
+            "accelerating_out": -2,
+        }
+        df["transfer_momentum_encoded"] = (
+            df["transfer_momentum"].map(momentum_map).fillna(0)
+        )
+
+        return df
+
+    def _add_value_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add value and price change features (Issue #37)."""
+        if self.value_analysis_df.empty:
+            raise ValueError(
+                "Value analysis data is required but was not provided. "
+                "Pass value_analysis_df=client.get_derived_value_analysis() to constructor."
+            )
+
+        # Merge value data
+        value_cols = [
+            "player_id",
+            "gameweek",
+            "points_per_pound",
+            "value_vs_position",
+            "predicted_price_change_1gw",
+            "price_volatility",
+            "price_risk",
+        ]
+
+        available_cols = [
+            col for col in value_cols if col in self.value_analysis_df.columns
+        ]
+        value_df = self.value_analysis_df[available_cols].copy()
+
+        df = df.merge(value_df, on=["player_id", "gameweek"], how="left")
+
+        # Validate no missing data after merge
+        if df["points_per_pound"].isna().any():
+            missing_count = df["points_per_pound"].isna().sum()
+            raise ValueError(
+                f"Missing value analysis data for {missing_count} player-gameweeks after merge. "
+                f"Value analysis data may be incomplete."
+            )
+
+        return df
+
+    def _add_enhanced_fixture_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add enhanced fixture difficulty features (Issue #37)."""
+        if self.fixture_difficulty_df.empty:
+            raise ValueError(
+                "Enhanced fixture difficulty data is required but was not provided. "
+                "Pass fixture_difficulty_df=client.get_derived_fixture_difficulty() to constructor."
+            )
+
+        if "team_id" not in df.columns:
+            raise ValueError(
+                "team_id column is required in data to merge fixture difficulty features."
+            )
+
+        # Start with required columns, add optional ones if they exist
+        required_cols = ["team_id", "gameweek"]
+        optional_cols = {
+            "congestion_difficulty": "congestion_difficulty",
+            "form_difficulty": "form_adjusted_difficulty",
+            "clean_sheet_probability": "clean_sheet_probability_enhanced",
+        }
+
+        # Get columns that exist in fixture_difficulty_df
+        cols_to_merge = required_cols + [
+            col
+            for col in optional_cols.keys()
+            if col in self.fixture_difficulty_df.columns
+        ]
+
+        if len(cols_to_merge) == len(required_cols):
+            raise ValueError(
+                f"No optional fixture difficulty columns found. "
+                f"Expected at least one of: {list(optional_cols.keys())}"
+            )
+
+        fixture_df = self.fixture_difficulty_df[cols_to_merge].copy()
+
+        # Rename columns
+        rename_map = {
+            old: new for old, new in optional_cols.items() if old in fixture_df.columns
+        }
+        if rename_map:
+            fixture_df = fixture_df.rename(columns=rename_map)
+
+        df = df.merge(fixture_df, on=["team_id", "gameweek"], how="left")
+
+        # Validate at least one feature was added
+        added_features = [new_name for new_name in rename_map.values()]
+        if added_features and df[added_features[0]].isna().all():
+            raise ValueError(
+                "All fixture difficulty data is missing after merge. "
+                "Check that team_id and gameweek values match between datasets."
+            )
+
+        # Ensure all expected features exist (fill with 0 if column doesn't exist from optional merge)
+        for expected_feature in [
+            "congestion_difficulty",
+            "form_adjusted_difficulty",
+            "clean_sheet_probability_enhanced",
+        ]:
+            if expected_feature not in df.columns:
+                df[expected_feature] = 0
+
+        return df
 
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (65 features)."""
+        """Get list of all feature columns (80 features: 65 base + 15 enhanced)."""
         return [
             # Static (4)
             "price",
@@ -786,6 +973,24 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "opponent_rolling_5gw_goals_conceded",
             "opponent_rolling_5gw_clean_sheets",
             "opponent_rolling_5gw_xgc",
+            # Enhanced ownership features (7) - Issue #37
+            "selected_by_percent",
+            "ownership_tier_encoded",
+            "transfer_momentum_encoded",
+            "net_transfers_gw",
+            "avg_net_transfers_5gw",
+            "bandwagon_score",
+            "ownership_velocity",
+            # Enhanced value features (5) - Issue #37
+            "points_per_pound",
+            "value_vs_position",
+            "predicted_price_change_1gw",
+            "price_volatility",
+            "price_risk",
+            # Enhanced fixture features (3) - Issue #37
+            "congestion_difficulty",
+            "form_adjusted_difficulty",
+            "clean_sheet_probability_enhanced",
         ]
 
     def _get_team_feature_columns(self) -> list:

@@ -90,10 +90,12 @@ class TestWildcardBasicFunctionality:
         self, optimization_service, current_squad, team_data, sample_players
     ):
         """Test wildcard returns same structure as transfer optimization."""
-        squad_df, result_summary, metadata = optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+        squad_df, result_summary, metadata = (
+            optimization_service.optimize_wildcard_squad(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
+            )
         )
 
         # Verify return types
@@ -107,7 +109,9 @@ class TestWildcardBasicFunctionality:
         # Verify result summary structure (matches transfer optimization format)
         assert "transfers" in result_summary
         # Wildcard reports actual number of players changed (not 0)
-        assert result_summary["transfers"] >= 0, "Should report number of players changed"
+        assert result_summary["transfers"] >= 0, (
+            "Should report number of players changed"
+        )
         assert "penalty" in result_summary
         assert result_summary["penalty"] == 0.0, "Wildcard has no penalty"
         assert "net_xp" in result_summary
@@ -124,7 +128,9 @@ class TestWildcardBasicFunctionality:
         assert "budget_pool_info" in metadata
         assert metadata["budget_pool_info"]["total_budget"] == 100.0
 
-    def test_wildcard_builds_valid_squad(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_builds_valid_squad(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard builds a valid FPL squad."""
         squad_df, _, _ = optimization_service.optimize_wildcard_squad(
             current_squad=current_squad,
@@ -146,11 +152,13 @@ class TestWildcardBasicFunctionality:
         # Check 3-per-team constraint
         team_counts = squad_df["team"].value_counts()
         max_per_team = team_counts.max()
-        assert (
-            max_per_team <= 3
-        ), f"Team constraint violated: {max_per_team} players from one team"
+        assert max_per_team <= 3, (
+            f"Team constraint violated: {max_per_team} players from one team"
+        )
 
-    def test_wildcard_uses_100m_budget(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_uses_100m_budget(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard always uses £100m budget regardless of current team value."""
         _, _, metadata = optimization_service.optimize_wildcard_squad(
             current_squad=current_squad,
@@ -160,15 +168,17 @@ class TestWildcardBasicFunctionality:
 
         # Wildcard always starts with £100m
         assert metadata["budget_pool_info"]["total_budget"] == 100.0
-        assert (
-            metadata["budget_pool_info"]["sellable_value"] == 0.0
-        ), "Sellable value not applicable for wildcard"
+        assert metadata["budget_pool_info"]["sellable_value"] == 0.0, (
+            "Sellable value not applicable for wildcard"
+        )
 
 
 class TestWildcardHorizonConfiguration:
     """Test wildcard respects optimization horizon configuration."""
 
-    def test_wildcard_uses_1gw_horizon(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_uses_1gw_horizon(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard uses 1GW xP when configured."""
         # Set config to 1GW
         original_horizon = config.optimization.optimization_horizon
@@ -177,9 +187,9 @@ class TestWildcardHorizonConfiguration:
 
             squad_df, result_summary, metadata = (
                 optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+                    current_squad=current_squad,
+                    team_data=team_data,
+                    players_with_xp=sample_players,
                 )
             )
 
@@ -187,7 +197,9 @@ class TestWildcardHorizonConfiguration:
             assert metadata["xp_column"] == "xP", "Should use 1GW xP column"
             assert metadata["horizon_label"] == "1-GW", "Should show 1-GW label"
             # Description shows "Wildcard: Rebuild entire squad (N players changed)"
-            assert "Wildcard" in result_summary["description"], "Description should mention Wildcard"
+            assert "Wildcard" in result_summary["description"], (
+                "Description should mention Wildcard"
+            )
 
             # Verify optimization used correct column
             assert result_summary["net_xp"] > 0, "Should have valid xP total"
@@ -195,7 +207,9 @@ class TestWildcardHorizonConfiguration:
         finally:
             config.optimization.optimization_horizon = original_horizon
 
-    def test_wildcard_uses_5gw_horizon(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_uses_5gw_horizon(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard uses 5GW xP when configured."""
         # Set config to 5GW
         original_horizon = config.optimization.optimization_horizon
@@ -204,9 +218,9 @@ class TestWildcardHorizonConfiguration:
 
             squad_df, result_summary, metadata = (
                 optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+                    current_squad=current_squad,
+                    team_data=team_data,
+                    players_with_xp=sample_players,
                 )
             )
 
@@ -214,7 +228,9 @@ class TestWildcardHorizonConfiguration:
             assert metadata["xp_column"] == "xP_5gw", "Should use 5GW xP column"
             assert metadata["horizon_label"] == "5-GW", "Should show 5-GW label"
             # Description shows "Wildcard: Rebuild entire squad (N players changed)"
-            assert "Wildcard" in result_summary["description"], "Description should mention Wildcard"
+            assert "Wildcard" in result_summary["description"], (
+                "Description should mention Wildcard"
+            )
 
             # 5GW total should be significantly higher than 1GW
             assert result_summary["net_xp"] > 100, "5-GW total should be substantial"
@@ -232,17 +248,17 @@ class TestWildcardHorizonConfiguration:
             # Get 1GW squad
             config.optimization.optimization_horizon = "1gw"
             squad_1gw, summary_1gw, _ = optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Get 5GW squad
             config.optimization.optimization_horizon = "5gw"
             squad_5gw, summary_5gw, _ = optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # XP totals should be different (5GW should be much higher)
@@ -258,12 +274,20 @@ class TestWildcardHorizonConfiguration:
 class TestWildcardConstraints:
     """Test wildcard optimization with constraints."""
 
-    def test_wildcard_respects_must_include(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_respects_must_include(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard includes specified players."""
         # Select specific players to include (ensuring valid formation)
-        gkp_id = sample_players[sample_players["position"] == "GKP"]["player_id"].iloc[0]
-        def_id = sample_players[sample_players["position"] == "DEF"]["player_id"].iloc[0]
-        mid_id = sample_players[sample_players["position"] == "MID"]["player_id"].iloc[0]
+        gkp_id = sample_players[sample_players["position"] == "GKP"]["player_id"].iloc[
+            0
+        ]
+        def_id = sample_players[sample_players["position"] == "DEF"]["player_id"].iloc[
+            0
+        ]
+        mid_id = sample_players[sample_players["position"] == "MID"]["player_id"].iloc[
+            0
+        ]
 
         must_include_ids = {gkp_id, def_id, mid_id}
 
@@ -275,11 +299,13 @@ class TestWildcardConstraints:
         )
 
         squad_ids = set(squad_df["player_id"])
-        assert must_include_ids.issubset(
-            squad_ids
-        ), "Must-include players should be in wildcard squad"
+        assert must_include_ids.issubset(squad_ids), (
+            "Must-include players should be in wildcard squad"
+        )
 
-    def test_wildcard_respects_must_exclude(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_respects_must_exclude(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard excludes specified players."""
         # Exclude some high-value players
         expensive_players = sample_players.nlargest(5, "price")
@@ -293,11 +319,13 @@ class TestWildcardConstraints:
         )
 
         squad_ids = set(squad_df["player_id"])
-        assert squad_ids.isdisjoint(
-            must_exclude_ids
-        ), "Excluded players should not be in wildcard squad"
+        assert squad_ids.isdisjoint(must_exclude_ids), (
+            "Excluded players should not be in wildcard squad"
+        )
 
-    def test_wildcard_with_both_constraints(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_with_both_constraints(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard with both include and exclude constraints."""
         # Include some budget players
         budget_gkp = (
@@ -331,7 +359,9 @@ class TestWildcardConstraints:
 class TestWildcardVsTransferOptimization:
     """Test differences between wildcard and transfer optimization."""
 
-    def test_wildcard_ignores_current_squad(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_ignores_current_squad(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard builds from scratch, not from current squad."""
         _, result_summary, metadata = optimization_service.optimize_wildcard_squad(
             current_squad=current_squad,
@@ -347,7 +377,9 @@ class TestWildcardVsTransferOptimization:
         # Should have full £100m budget
         assert metadata["budget_pool_info"]["total_budget"] == 100.0
 
-    def test_wildcard_no_transfer_penalty(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_no_transfer_penalty(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard has no transfer penalties."""
         _, result_summary, _ = optimization_service.optimize_wildcard_squad(
             current_squad=current_squad,
@@ -382,12 +414,12 @@ class TestWildcardOptimizationQuality:
 
         # Should use most of the budget (at least 80% for test data)
         assert total_cost >= 80.0, f"Should use at least £80m, used £{total_cost:.1f}m"
-        assert (
-            remaining_budget < 20.0
-        ), f"Should have <£20m remaining, has £{remaining_budget:.1f}m"
-        assert (
-            total_cost + remaining_budget
-        ) == pytest.approx(100.0, abs=0.1), "Total should equal £100m"
+        assert remaining_budget < 20.0, (
+            f"Should have <£20m remaining, has £{remaining_budget:.1f}m"
+        )
+        assert (total_cost + remaining_budget) == pytest.approx(100.0, abs=0.1), (
+            "Total should equal £100m"
+        )
 
     def test_wildcard_selects_high_xp_players(
         self, optimization_service, current_squad, team_data, sample_players
@@ -403,9 +435,9 @@ class TestWildcardOptimizationQuality:
         squad_avg_xp = squad_df["xP"].mean()
         all_avg_xp = sample_players["xP"].median()
 
-        assert (
-            squad_avg_xp > all_avg_xp
-        ), "Wildcard squad should have above-median xP players"
+        assert squad_avg_xp > all_avg_xp, (
+            "Wildcard squad should have above-median xP players"
+        )
 
     def test_wildcard_optimization_improves(
         self, optimization_service, current_squad, team_data, sample_players
@@ -419,9 +451,9 @@ class TestWildcardOptimizationQuality:
 
         # Simulated annealing should find improvements
         assert "sa_improvements" in metadata
-        assert (
-            metadata["sa_improvements"] > 0
-        ), "Optimization should find at least some improvements"
+        assert metadata["sa_improvements"] > 0, (
+            "Optimization should find at least some improvements"
+        )
 
         # Should complete configured iterations
         assert "sa_iterations" in metadata
@@ -431,7 +463,9 @@ class TestWildcardOptimizationQuality:
 class TestWildcardErrorHandling:
     """Test wildcard error handling and validation."""
 
-    def test_wildcard_with_empty_dataframe(self, optimization_service, current_squad, team_data):
+    def test_wildcard_with_empty_dataframe(
+        self, optimization_service, current_squad, team_data
+    ):
         """Test wildcard handles empty player data gracefully."""
         empty_df = pd.DataFrame()
 
@@ -448,15 +482,17 @@ class TestWildcardErrorHandling:
             # Expected - empty data causes validation error
             pass
 
-    def test_wildcard_with_missing_columns(self, optimization_service, current_squad, team_data, sample_players):
+    def test_wildcard_with_missing_columns(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
         """Test wildcard fails with missing required columns."""
         incomplete_df = sample_players.drop(columns=["price"])
 
         with pytest.raises(ValueError, match="missing required columns"):
             optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=incomplete_df,
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=incomplete_df,
             )
 
     def test_wildcard_with_invalid_must_include(
@@ -465,9 +501,9 @@ class TestWildcardErrorHandling:
         """Test wildcard fails with non-existent must-include player IDs."""
         with pytest.raises(ValueError, match="not found in dataset"):
             optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
                 must_include_ids={9999, 10000},  # Non-existent IDs
             )
 
@@ -518,24 +554,22 @@ class TestWildcardIntegration:
         )
 
         # Simulate excluding injured/suspended players (but not the premium captain)
-        exclude_candidates = sample_players[
-            sample_players["player_id"] != premium_mid
-        ]
+        exclude_candidates = sample_players[sample_players["player_id"] != premium_mid]
         exclude_players = exclude_candidates.sample(n=3)["player_id"].tolist()
 
-        squad_df, result_summary, metadata = optimization_service.optimize_wildcard_squad(
-            current_squad=current_squad,
-            team_data=team_data,
-            players_with_xp=sample_players,
-            must_include_ids={premium_mid},
-            must_exclude_ids=set(exclude_players),
+        squad_df, result_summary, metadata = (
+            optimization_service.optimize_wildcard_squad(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
+                must_include_ids={premium_mid},
+                must_exclude_ids=set(exclude_players),
+            )
         )
 
         # Verify constraints respected
         assert premium_mid in squad_df["player_id"].values
-        assert not any(
-            pid in squad_df["player_id"].values for pid in exclude_players
-        )
+        assert not any(pid in squad_df["player_id"].values for pid in exclude_players)
 
         # Should still build valid squad
         assert len(squad_df) == 15

@@ -70,7 +70,7 @@ Clean Architecture with domain/infrastructure/presentation separation. All busin
 
 - **DataOrchestrationService**: Boundary validation, guaranteed clean data
 - **ExpectedPointsService**: Rule-based XP (1GW + 5GW projections)
-- **MLExpectedPointsService**: Ridge regression ML predictions
+- **MLExpectedPointsService**: Pre-trained ML predictions (requires .joblib artifact, no on-the-fly training)
 - **TeamAnalyticsService**: Dynamic team strength ratings
 - **OptimizationService**: Transfer optimization, starting XI, captain selection, squad generation
 - **ChipAssessmentService**: Traffic light chip recommendations
@@ -123,7 +123,18 @@ Marimo MCP (Model Context Protocol) server enables AI assistants like Claude Cod
 
 **Historical data**: `get_gameweek_performance(gw)`, `get_player_gameweek_history()`, `get_my_picks_history()`
 
-**Leak-free features**: Historical per-90 metrics, position-specific models (GKP/DEF/MID/FWD), temporal validation, team context features (rolling 5GW team form, cumulative team stats)
+**Feature Engineering (80 features - Issue #37)**:
+- **Base features (65)**: Historical per-90 metrics, position-specific models (GKP/DEF/MID/FWD), temporal validation, team context features (rolling 5GW team form, cumulative team stats)
+- **Enhanced features (15)**:
+  - Ownership trends (7): `selected_by_percent`, `ownership_tier`, `transfer_momentum`, `net_transfers`, `bandwagon_score`, `ownership_velocity`
+  - Value analysis (5): `points_per_pound`, `value_vs_position`, `predicted_price_change`, `price_volatility`, `price_risk`
+  - Enhanced fixture difficulty (3): `congestion_difficulty`, `form_adjusted_difficulty`, `clean_sheet_probability_enhanced`
+
+**Data sources**:
+- Base: `get_current_players()`, `get_gameweek_performance(gw)`, `get_fixtures_normalized()`
+- Enhanced: `get_derived_ownership_trends()`, `get_derived_value_analysis()`, `get_derived_fixture_difficulty()`
+
+**Leak-free guarantee**: All features use shift(1) or historical lookback to exclude current gameweek data
 
 **Team features rationale**: Safe with player-based GroupKFold validation - testing "can we predict NEW players on KNOWN teams?" not future outcomes. All team features use shift(1) to exclude current gameweek.
 
@@ -137,7 +148,8 @@ Marimo MCP (Model Context Protocol) server enables AI assistants like Claude Cod
 
 **Key features**:
 - Same temporal cross-validation (walk-forward) as ml_xp_notebook.py
-- Production FPLFeatureEngineer integration (63 features)
+- Production FPLFeatureEngineer integration (80 features: 65 base + 15 enhanced)
+- Enhanced features (Issue #37): ownership trends, value analysis, fixture difficulty
 - Automatic algorithm selection and hyperparameter tuning
 - Exports sklearn pipelines for integration into MLExpectedPointsService
 - Position-specific and gameweek-specific evaluation metrics
@@ -157,7 +169,7 @@ See `scripts/README.md` for full documentation.
 
 **Rule-Based** (`ExpectedPointsService`): Form-weighted (70/30), live data, dynamic team strength, 1GW+5GW projections. Fast, works from GW1+.
 
-**ML-Based** (`MLExpectedPointsService`): Ridge regression, position-specific models, temporal validation, optional ensemble. Requires 3+ GWs.
+**ML-Based** (`MLExpectedPointsService`): Pre-trained sklearn pipelines (80 features), position-specific models, temporal validation, optional ensemble. **Requires pre-trained .joblib artifact** (no on-the-fly training). Train using TPOT (`scripts/tpot_pipeline_optimizer.py`) or `ml_xp_experiment.py`.
 
 ## Historical xP Recomputation
 

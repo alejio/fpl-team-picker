@@ -465,9 +465,10 @@ def _(gameweek_data, mo):
             if not model_path.exists():
                 raise FileNotFoundError(
                     f"❌ ML model not found: {model_path}\n"
-                    f"   Set config.xp_model.ml_model_path or train a model:\n"
-                    f"   - TPOT: uv run python scripts/tpot_pipeline_optimizer.py\n"
-                    f"   - Or use ml_xp_notebook.py to train and export a model"
+                    f"   Train a model first using:\n"
+                    f"   - TPOT (recommended): uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
+                    f"   - Or: Use ml_xp_experiment.py to train and export a model\n"
+                    f"   Then set config.xp_model.ml_model_path to the trained .joblib file"
                 )
 
             # Determine model type from path for display

@@ -1,16 +1,20 @@
 """
 FPL Machine Learning Expected Points (ML-XP) Service
 
-Advanced ML-based XP predictions using sklearn pipelines with comprehensive features.
-Designed to replace or complement the rule-based XP model with improved accuracy.
+Advanced ML-based XP predictions using pre-trained sklearn pipelines.
+REQUIRES pre-trained model artifacts (no on-the-fly training).
 
 Key Features:
-- Scikit-learn pipelines for production-ready models
-- Rich 65-feature set: 5GW rolling windows, team context, fixture difficulty, price bands
+- Pre-trained sklearn pipelines for production deployment
+- Rich 80-feature set: 5GW rolling windows, team context, ownership trends, value analysis
 - Position-specific models (optional) for GKP/DEF/MID/FWD
 - Leak-free temporal features (all features use past data only)
-- Save/load capability for pre-trained models
+- Loads .joblib model artifacts trained via TPOT or ml_xp_experiment.py
 - Drop-in replacement for old MLExpectedPointsService (same interface)
+
+Train models using:
+  - TPOT: scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8
+  - Manual: ml_xp_experiment.py interface
 """
 
 import pandas as pd
@@ -37,13 +41,16 @@ logger = logging.getLogger(__name__)
 
 class MLExpectedPointsService:
     """
-    Machine Learning Expected Points Service using Sklearn Pipelines
+    Machine Learning Expected Points Service using Pre-trained Sklearn Pipelines
 
-    Uses comprehensive 65-feature set with:
-    - 5GW rolling form windows (cumulative & per-90 stats)
-    - Team context features (rolling team performance)
-    - Fixture-specific features (opponent strength, home/away, opponent defense)
-    - Price band categorization (ordinal: Budget/Mid/Premium/Elite)
+    REQUIRES pre-trained model artifact (no on-the-fly training).
+    Train models using:
+      - TPOT: scripts/tpot_pipeline_optimizer.py
+      - Or: ml_xp_experiment.py
+
+    Uses comprehensive 80-feature set with:
+    - Base features (65): 5GW rolling form windows, team context, fixtures, price bands
+    - Enhanced features (15): Ownership trends, value analysis, fixture difficulty
     - Leak-free temporal features (all use past data only)
 
     Maintains same public interface as old service for drop-in replacement in gameweek_manager.py
@@ -61,9 +68,9 @@ class MLExpectedPointsService:
         Initialize ML XP Service
 
         Args:
-            model_type: Model type ('rf' for RandomForest, 'gb' for GradientBoosting, 'ridge')
-            model_path: Path to pre-trained model (if None, trains on-the-fly each time)
-            min_training_gameweeks: Minimum gameweeks needed for training (5+ for rolling 5GW features)
+            model_type: Model type ('rf' for RandomForest, 'gb' for GradientBoosting, 'ridge') - DEPRECATED, not used
+            model_path: Path to pre-trained model artifact (REQUIRED - no on-the-fly training)
+            min_training_gameweeks: DEPRECATED - not used (models are pre-trained)
             ensemble_rule_weight: Weight for rule-based predictions in ensemble (0=pure ML, 1=pure rule-based)
             debug: Enable debug logging
         """
@@ -134,12 +141,13 @@ class MLExpectedPointsService:
                     mae = self.pipeline_metadata.get("cv_mae_mean", "N/A")
                     logger.debug(f"   Model CV MAE: {mae}")
         except Exception as e:
-            logger.warning(
-                f"Failed to load pre-trained model: {e}. Will train on-the-fly."
+            raise ValueError(
+                f"Failed to load pre-trained model from {self.model_path}: {e}\n"
+                "MLExpectedPointsService requires a valid pre-trained model artifact.\n"
+                "Train a model using:\n"
+                "  - TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
+                "  - Or: Use ml_xp_experiment.py to train and export a model"
             )
-            self.pipeline = None
-            self.pipeline_metadata = None
-            self.needs_feature_wrapper = False
 
     def _train_pipeline(
         self,
@@ -293,16 +301,14 @@ class MLExpectedPointsService:
             if "event" in live_data.columns and "gameweek" not in live_data.columns:
                 live_data = live_data.rename(columns={"event": "gameweek"})
 
-            # Train or wrap pre-trained pipeline
+            # Require pre-trained pipeline - no on-the-fly training
             if self.pipeline is None:
-                # No model loaded - train on-the-fly
-                if self.debug:
-                    logger.debug("No pre-trained model, training on-the-fly...")
-
-                self.pipeline = self._train_pipeline(
-                    historical_df=live_data,
-                    fixtures_df=fixtures_data,
-                    teams_df=teams_data,
+                raise ValueError(
+                    "No pre-trained model loaded. MLExpectedPointsService requires a pre-trained model artifact.\n"
+                    "Train a model using:\n"
+                    "  - TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
+                    "  - Or: Use ml_xp_experiment.py to train and export a model\n"
+                    "Then set config.xp_model.ml_model_path to the trained model file."
                 )
             elif getattr(self, "needs_feature_wrapper", False):
                 # TPOT model needs feature engineering wrapper

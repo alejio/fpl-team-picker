@@ -138,16 +138,18 @@ def parse_args():
 
 def load_historical_data(
     start_gw: int, end_gw: int
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+) -> tuple[
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
+]:
     """
-    Load historical gameweek performance data.
+    Load historical gameweek performance data and enhanced data sources.
 
     Args:
         start_gw: Starting gameweek
         end_gw: Ending gameweek (inclusive)
 
     Returns:
-        Tuple of (historical_df, fixtures_df, teams_df)
+        Tuple of (historical_df, fixtures_df, teams_df, ownership_trends_df, value_analysis_df, fixture_difficulty_df)
     """
     client = FPLDataClient()
     historical_data = []
@@ -194,16 +196,37 @@ def load_historical_data(
     teams_df = client.get_current_teams()
 
     print(f"   ✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}")
+
+    # Load enhanced data sources (Issue #37)
+    print("\n📊 Loading enhanced data sources...")
+    ownership_trends_df = client.get_derived_ownership_trends()
+    value_analysis_df = client.get_derived_value_analysis()
+    fixture_difficulty_df = client.get_derived_fixture_difficulty()
+
+    print(f"   ✅ Ownership trends: {len(ownership_trends_df)} records")
+    print(f"   ✅ Value analysis: {len(value_analysis_df)} records")
+    print(f"   ✅ Fixture difficulty: {len(fixture_difficulty_df)} records")
+
     print(f"\n✅ Total records: {len(historical_df):,}")
     print(f"   Unique players: {historical_df['player_id'].nunique():,}")
 
-    return historical_df, fixtures_df, teams_df
+    return (
+        historical_df,
+        fixtures_df,
+        teams_df,
+        ownership_trends_df,
+        value_analysis_df,
+        fixture_difficulty_df,
+    )
 
 
 def engineer_features(
     historical_df: pd.DataFrame,
     fixtures_df: pd.DataFrame,
     teams_df: pd.DataFrame,
+    ownership_trends_df: pd.DataFrame,
+    value_analysis_df: pd.DataFrame,
+    fixture_difficulty_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[str]]:
     """
     Engineer features using production FPLFeatureEngineer.
@@ -212,20 +235,32 @@ def engineer_features(
         historical_df: Historical gameweek performance
         fixtures_df: Fixture data
         teams_df: Team data
+        ownership_trends_df: Ownership trends data (Issue #37)
+        value_analysis_df: Value analysis data (Issue #37)
+        fixture_difficulty_df: Enhanced fixture difficulty data (Issue #37)
 
     Returns:
         Tuple of (features_df, feature_column_names)
     """
-    print("\n🔧 Engineering features (production FPLFeatureEngineer)...")
+    print(
+        "\n🔧 Engineering features (production FPLFeatureEngineer with 80 features)..."
+    )
 
     # Get team strength ratings
     team_strength = get_team_strength_ratings()
 
-    # Initialize production feature engineer
+    # Initialize production feature engineer with enhanced data sources
     feature_engineer = FPLFeatureEngineer(
         fixtures_df=fixtures_df if not fixtures_df.empty else None,
         teams_df=teams_df if not teams_df.empty else None,
         team_strength=team_strength if team_strength else None,
+        ownership_trends_df=ownership_trends_df
+        if not ownership_trends_df.empty
+        else None,
+        value_analysis_df=value_analysis_df if not value_analysis_df.empty else None,
+        fixture_difficulty_df=fixture_difficulty_df
+        if not fixture_difficulty_df.empty
+        else None,
     )
 
     # Transform historical data
@@ -544,14 +579,24 @@ def main():
     print("=" * 80)
 
     try:
-        # 1. Load historical data
-        historical_df, fixtures_df, teams_df = load_historical_data(
-            args.start_gw, args.end_gw
-        )
+        # 1. Load historical data (includes enhanced data sources)
+        (
+            historical_df,
+            fixtures_df,
+            teams_df,
+            ownership_trends_df,
+            value_analysis_df,
+            fixture_difficulty_df,
+        ) = load_historical_data(args.start_gw, args.end_gw)
 
-        # 2. Engineer features
+        # 2. Engineer features (80 features: 65 base + 15 enhanced)
         features_df, feature_cols = engineer_features(
-            historical_df, fixtures_df, teams_df
+            historical_df,
+            fixtures_df,
+            teams_df,
+            ownership_trends_df,
+            value_analysis_df,
+            fixture_difficulty_df,
         )
 
         # 3. Create temporal CV splits

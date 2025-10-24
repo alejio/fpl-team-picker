@@ -106,7 +106,9 @@ class TestDomainServicesIntegration:
         assert not players_with_xp.empty
 
         # Test optimal team selection from full database (for testing/analysis)
-        starting_11 = optimization_service.get_optimal_team_from_database(players_with_xp)
+        starting_11 = optimization_service.get_optimal_team_from_database(
+            players_with_xp
+        )
         assert isinstance(starting_11, list)
         assert len(starting_11) == 11
 
