@@ -2206,31 +2206,83 @@ def create_gameweek_points_timeseries(mo_ref) -> object:
         # Calculate average points
         avg_points = points_df["points"].mean()
 
+        # Fetch top FPL player's gameweek history for comparison
+        top_player_points = None
+        top_player_name = None
+        try:
+            import requests
+
+            # Get current overall leader
+            response = requests.get(
+                "https://fantasy.premierleague.com/api/leagues-classic/314/standings/",
+                timeout=5,
+            )
+            if response.status_code == 200:
+                standings = response.json()
+                if standings.get("standings", {}).get("results"):
+                    top_entry = standings["standings"]["results"][0]
+                    entry_id = top_entry["entry"]
+                    top_player_name = top_entry["entry_name"]
+
+                    # Get their gameweek history
+                    history_response = requests.get(
+                        f"https://fantasy.premierleague.com/api/entry/{entry_id}/history/",
+                        timeout=5,
+                    )
+                    if history_response.status_code == 200:
+                        history = history_response.json()
+                        if history.get("current"):
+                            top_player_points = pd.DataFrame(
+                                [
+                                    {
+                                        "gameweek": gw["event"],
+                                        "points": gw["points"],
+                                    }
+                                    for gw in history["current"]
+                                ]
+                            )
+        except Exception as e:
+            print(f"⚠️ Could not fetch top player data: {e}")
+
         # Create the plotly figure
         fig = go.Figure()
 
-        # Add gameweek points line
+        # Add your gameweek points line
         fig.add_trace(
             go.Scatter(
                 x=points_df["gameweek"],
                 y=points_df["points"],
                 mode="lines+markers",
-                name="Gameweek Points",
+                name="Your Points",
                 line=dict(color="#3b82f6", width=3),
                 marker=dict(size=8, symbol="circle"),
-                hovertemplate="<b>GW%{x}</b><br>Points: %{y}<extra></extra>",
+                hovertemplate="<b>GW%{x}</b><br>Your Points: %{y}<extra></extra>",
             )
         )
 
-        # Add average line
+        # Add top player's points if available
+        if top_player_points is not None and not top_player_points.empty:
+            fig.add_trace(
+                go.Scatter(
+                    x=top_player_points["gameweek"],
+                    y=top_player_points["points"],
+                    mode="lines+markers",
+                    name=f"FPL #1 ({top_player_name})",
+                    line=dict(color="#10b981", width=2, dash="dot"),
+                    marker=dict(size=6, symbol="diamond"),
+                    hovertemplate=f"<b>GW%{{x}}</b><br>{top_player_name}: %{{y}}<extra></extra>",
+                )
+            )
+
+        # Add your average line
         fig.add_trace(
             go.Scatter(
                 x=points_df["gameweek"],
                 y=[avg_points] * len(points_df),
                 mode="lines",
-                name="Season Average",
+                name="Your Average",
                 line=dict(color="#ef4444", width=2, dash="dash"),
-                hovertemplate=f"<b>Average: {avg_points:.1f} pts</b><extra></extra>",
+                hovertemplate=f"<b>Your Average: {avg_points:.1f} pts</b><extra></extra>",
             )
         )
 
@@ -2259,11 +2311,22 @@ def create_gameweek_points_timeseries(mo_ref) -> object:
         summary = f"""
 ### 📈 Gameweek Points Timeline
 
-**Season Summary:**
+**Your Season Summary:**
 - **Total Points:** {total_points} across {gameweeks_played} gameweeks
 - **Average per GW:** {avg_points:.1f} points
 - **Best Gameweek:** GW{max_gw} with {max_points} points
 - **Worst Gameweek:** GW{min_gw} with {min_points} points
+"""
+
+        # Add comparison with top player if available
+        if top_player_points is not None and not top_player_points.empty:
+            top_total = int(top_player_points["points"].sum())
+            top_avg = top_player_points["points"].mean()
+            points_behind = top_total - total_points
+            summary += f"""
+**Comparison with FPL #1 ({top_player_name}):**
+- **Their Total:** {top_total} points ({points_behind:+d} difference)
+- **Their Average:** {top_avg:.1f} points per GW
 
 """
 
