@@ -17,6 +17,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.linear_model import Ridge
 from lightgbm import LGBMRegressor
+from catboost import CatBoostRegressor
 
 from .ml_feature_engineering import FPLFeatureEngineer
 
@@ -32,11 +33,11 @@ def create_fpl_pipeline(
     Create a complete FPL prediction pipeline.
 
     Args:
-        model_type: 'lgbm' (LightGBM - recommended), 'rf', 'gb', or 'ridge'
+        model_type: 'catboost' (CatBoost - best), 'lgbm', 'rf', 'gb', or 'ridge'
         fixtures_df: Fixture data for fixture-specific features
         teams_df: Teams data for opponent context
         team_strength: Team strength ratings dict
-        **model_kwargs: Model hyperparameters (n_estimators, max_depth, etc.)
+        **model_kwargs: Model hyperparameters (iterations, depth, learning_rate, etc.)
 
     Returns:
         sklearn Pipeline with [feature_engineer -> scaler -> model]
@@ -49,7 +50,29 @@ def create_fpl_pipeline(
     )
 
     # Select model
-    if model_type == "lgbm":
+    if model_type == "catboost":
+        # CatBoost with optimal hyperparameters (24.2% better MAE vs Ridge, ~1.06 MAE)
+        # See: experiments/hyperparameter_tuning_valid_folds.py
+        # Optimal config: iterations=200, depth=4, lr=0.1, l2=5, bagging_temp=1.0, random_strength=0
+        model = CatBoostRegressor(
+            iterations=model_kwargs.get("iterations", 200),
+            depth=model_kwargs.get("depth", 4),
+            learning_rate=model_kwargs.get("learning_rate", 0.1),
+            l2_leaf_reg=model_kwargs.get("l2_leaf_reg", 5),
+            bagging_temperature=model_kwargs.get("bagging_temperature", 1.0),
+            random_strength=model_kwargs.get("random_strength", 0),
+            loss_function=model_kwargs.get(
+                "loss_function", "MAE"
+            ),  # Optimize MAE directly
+            random_seed=model_kwargs.get("random_seed", 42),
+            verbose=0,  # Suppress training output
+            thread_count=-1,  # Use all CPU cores
+        )
+        steps = [
+            ("feature_engineer", feature_engineer),
+            ("model", model),
+        ]
+    elif model_type == "lgbm":
         # LightGBM with optimal hyperparameters (4.3% better MAE vs Ridge)
         # See: experiments/hyperparameter_tuning_valid_folds.py
         model = LGBMRegressor(
@@ -103,7 +126,7 @@ def create_fpl_pipeline(
         ]
     else:
         raise ValueError(
-            f"Unknown model_type: {model_type}. Choose 'lgbm', 'rf', 'gb', or 'ridge'"
+            f"Unknown model_type: {model_type}. Choose 'catboost', 'lgbm', 'rf', 'gb', or 'ridge'"
         )
 
     pipeline = Pipeline(steps)
@@ -248,7 +271,7 @@ def train_and_save_model(
     Returns:
         Tuple of (trained_pipeline, training_metrics)
     """
-    from sklearn.model_selection import GroupKFold, cross_val_score
+    from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     import numpy as np
 
     # Get team strength ratings
@@ -264,40 +287,58 @@ def train_and_save_model(
     )
 
     # Prepare data (GW6+ for complete rolling features)
-    train_data = historical_df[historical_df["gameweek"] >= 6].copy()
+    train_data = (
+        historical_df[historical_df["gameweek"] >= 6].copy().reset_index(drop=True)
+    )
 
-    X = train_data
-    y = train_data["total_points"]
-    groups = train_data["player_id"].values
+    # Temporal walk-forward cross-validation (matches hyperparameter tuning)
+    # Only use folds where test GW has ≥5 GW history (test GW ≥ 6)
+    gws = sorted(train_data["gameweek"].unique())
+    temporal_splits = []
 
-    # Cross-validation
-    gkf = GroupKFold(n_splits=5)
-    mae_scores = -cross_val_score(
-        pipeline,
-        X,
-        y,
-        groups=groups,
-        cv=gkf,
-        scoring="neg_mean_absolute_error",
-        n_jobs=-1,
-    )
-    rmse_scores = np.sqrt(
-        -cross_val_score(
-            pipeline,
-            X,
-            y,
-            groups=groups,
-            cv=gkf,
-            scoring="neg_mean_squared_error",
-            n_jobs=-1,
-        )
-    )
-    r2_scores = cross_val_score(
-        pipeline, X, y, groups=groups, cv=gkf, scoring="r2", n_jobs=-1
-    )
+    for i in range(len(gws) - 1):
+        train_gws = gws[: i + 1]
+        test_gw = gws[i + 1]
+
+        # Only include folds where test GW ≥ 6 (has proper 5GW history)
+        if test_gw >= 6:
+            train_mask = train_data["gameweek"].isin(train_gws)
+            test_mask = train_data["gameweek"] == test_gw
+
+            train_idx = np.where(train_mask)[0]
+            test_idx = np.where(test_mask)[0]
+
+            temporal_splits.append((train_idx, test_idx))
+
+    # Cross-validation with temporal splits
+    mae_scores = []
+    rmse_scores = []
+    r2_scores = []
+
+    for train_idx, test_idx in temporal_splits:
+        X_train = train_data.iloc[train_idx]
+        X_test = train_data.iloc[test_idx]
+        y_train = train_data.iloc[train_idx]["total_points"]
+        y_test = train_data.iloc[test_idx]["total_points"]
+
+        # Clone and fit pipeline
+        from sklearn.base import clone
+
+        fold_pipeline = clone(pipeline)
+        fold_pipeline.fit(X_train, y_train)
+
+        # Predict and score
+        y_pred = fold_pipeline.predict(X_test)
+        mae_scores.append(mean_absolute_error(y_test, y_pred))
+        rmse_scores.append(np.sqrt(mean_squared_error(y_test, y_pred)))
+        r2_scores.append(r2_score(y_test, y_pred))
+
+    mae_scores = np.array(mae_scores)
+    rmse_scores = np.array(rmse_scores)
+    r2_scores = np.array(r2_scores)
 
     # Train on full data
-    pipeline.fit(X, y)
+    pipeline.fit(train_data, train_data["total_points"])
 
     # Prepare metadata
     import datetime
@@ -305,14 +346,15 @@ def train_and_save_model(
     metadata = {
         "model_type": model_type,
         "training_date": datetime.datetime.now().isoformat(),
+        "cv_strategy": "temporal_walkforward",
         "cv_mae_mean": float(mae_scores.mean()),
         "cv_mae_std": float(mae_scores.std()),
         "cv_rmse_mean": float(rmse_scores.mean()),
         "cv_rmse_std": float(rmse_scores.std()),
         "cv_r2_mean": float(r2_scores.mean()),
         "cv_r2_std": float(r2_scores.std()),
-        "n_folds": 5,
-        "n_features": 63,
+        "n_folds": len(temporal_splits),
+        "n_features": 65,  # Updated to match FPLFeatureEngineer output
         "training_samples": len(train_data),
         "training_players": int(train_data["player_id"].nunique()),
         "gameweek_range": f"GW{train_data['gameweek'].min()}-{train_data['gameweek'].max()}",

@@ -1,0 +1,22 @@
+{
+  "model_type": "catboost",
+  "training_date": "2025-10-24T07:58:20.336367",
+  "cv_strategy": "temporal_walkforward",
+  "cv_mae_mean": 1.1227809210384634,
+  "cv_mae_std": 0.0406654372943247,
+  "cv_rmse_mean": 2.4314843528497945,
+  "cv_rmse_std": 0.1900530416816948,
+  "cv_r2_mean": -0.048272226124559,
+  "cv_r2_std": 0.10497924916293216,
+  "n_folds": 2,
+  "n_features": 65,
+  "training_samples": 2230,
+  "training_players": 745,
+  "gameweek_range": "GW6-8",
+  "iterations": 200,
+  "depth": 4,
+  "learning_rate": 0.1,
+  "l2_leaf_reg": 5,
+  "bagging_temperature": 1.0,
+  "random_strength": 0
+}
