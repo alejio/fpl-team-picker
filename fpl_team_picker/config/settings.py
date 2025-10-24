@@ -19,8 +19,8 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/catboost/catboost_optimal_gw1-8.joblib",
-        description="Path to pre-trained ML model (CatBoost - best, TPOT, LightGBM, or RandomForest)",
+        default="models/tpot/tpot_pipeline_gw1-8_20251023_215554.joblib",
+        description="Path to pre-trained ML model (TPOT auto-optimized, CatBoost, LightGBM, or RandomForest)",
     )
     ml_ensemble_rule_weight: float = Field(
         default=0.0,

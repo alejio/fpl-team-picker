@@ -62,8 +62,8 @@ def create_fpl_pipeline(
             bagging_temperature=model_kwargs.get("bagging_temperature", 1.0),
             random_strength=model_kwargs.get("random_strength", 0),
             loss_function=model_kwargs.get(
-                "loss_function", "MAE"
-            ),  # Optimize MAE directly
+                "loss_function", "RMSE"
+            ),  # RMSE works better than MAE
             random_seed=model_kwargs.get("random_seed", 42),
             verbose=0,  # Suppress training output
             thread_count=-1,  # Use all CPU cores

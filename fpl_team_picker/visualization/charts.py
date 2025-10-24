@@ -2115,3 +2115,165 @@ def create_captain_selection_display(captain_data: Dict, mo_ref) -> object:
 
     except Exception as e:
         return mo_ref.md(f"❌ Error creating captain selection display: {e}")
+
+
+def create_gameweek_points_timeseries(mo_ref) -> object:
+    """Create a timeseries visualization showing points earned in each gameweek.
+
+    Args:
+        mo_ref: Marimo reference for UI components
+
+    Returns:
+        Marimo UI component with gameweek points timeseries chart
+    """
+    try:
+        from client import FPLDataClient
+        import plotly.graph_objects as go
+
+        client = FPLDataClient()
+
+        # Get historical picks
+        picks_history = client.get_my_picks_history()
+
+        if picks_history.empty:
+            return mo_ref.md("""
+### 📈 Gameweek Points Timeline
+
+⚠️ **No historical picks data available**
+
+*Historical picks data will appear here once you have data for multiple gameweeks.*
+""")
+
+        # Calculate points per gameweek
+        gameweek_points = []
+        gameweeks = sorted(picks_history["event"].unique())
+
+        for gw in gameweeks:
+            # Get picks for this gameweek
+            gw_picks = picks_history[picks_history["event"] == gw]
+
+            # Get performance data for this gameweek
+            try:
+                performance = client.get_gameweek_performance(int(gw))
+
+                if performance.empty:
+                    print(f"⚠️ Empty performance data for GW{gw}")
+                    continue
+
+                # Join picks with performance
+                gw_picks_with_perf = gw_picks.merge(
+                    performance[["player_id", "total_points"]],
+                    on="player_id",
+                    how="left",
+                )
+
+                # Calculate total points (including captain multiplier)
+                total_points = 0
+                for _, pick in gw_picks_with_perf.iterrows():
+                    player_points = pick.get("total_points", 0)
+                    if pd.isna(player_points):
+                        player_points = 0
+                    multiplier = pick.get("multiplier", 1)
+                    total_points += player_points * multiplier
+
+                gameweek_points.append(
+                    {"gameweek": int(gw), "points": int(total_points)}
+                )
+
+            except Exception as e:
+                import traceback
+
+                print(
+                    f"⚠️ Could not get performance data for GW{gw}: {e}\n{traceback.format_exc()}"
+                )
+                continue
+
+        if not gameweek_points:
+            return mo_ref.md("""
+### 📈 Gameweek Points Timeline
+
+⚠️ **No gameweek performance data available**
+
+*Points timeline will appear here once gameweek performance data is available.*
+""")
+
+        # Create DataFrame for easier manipulation
+        points_df = pd.DataFrame(gameweek_points)
+
+        # Calculate cumulative points
+        points_df["cumulative_points"] = points_df["points"].cumsum()
+
+        # Calculate average points
+        avg_points = points_df["points"].mean()
+
+        # Create the plotly figure
+        fig = go.Figure()
+
+        # Add gameweek points line
+        fig.add_trace(
+            go.Scatter(
+                x=points_df["gameweek"],
+                y=points_df["points"],
+                mode="lines+markers",
+                name="Gameweek Points",
+                line=dict(color="#3b82f6", width=3),
+                marker=dict(size=8, symbol="circle"),
+                hovertemplate="<b>GW%{x}</b><br>Points: %{y}<extra></extra>",
+            )
+        )
+
+        # Add average line
+        fig.add_trace(
+            go.Scatter(
+                x=points_df["gameweek"],
+                y=[avg_points] * len(points_df),
+                mode="lines",
+                name="Season Average",
+                line=dict(color="#ef4444", width=2, dash="dash"),
+                hovertemplate=f"<b>Average: {avg_points:.1f} pts</b><extra></extra>",
+            )
+        )
+
+        # Update layout
+        fig.update_layout(
+            title="Gameweek Points Timeline",
+            xaxis_title="Gameweek",
+            yaxis_title="Points",
+            hovermode="x unified",
+            height=400,
+            showlegend=True,
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+        )
+
+        # Calculate stats
+        total_points = int(points_df["cumulative_points"].iloc[-1])
+        max_points = int(points_df["points"].max())
+        max_gw = int(points_df.loc[points_df["points"].idxmax(), "gameweek"])
+        min_points = int(points_df["points"].min())
+        min_gw = int(points_df.loc[points_df["points"].idxmin(), "gameweek"])
+        gameweeks_played = len(points_df)
+
+        # Build summary
+        summary = f"""
+### 📈 Gameweek Points Timeline
+
+**Season Summary:**
+- **Total Points:** {total_points} across {gameweeks_played} gameweeks
+- **Average per GW:** {avg_points:.1f} points
+- **Best Gameweek:** GW{max_gw} with {max_points} points
+- **Worst Gameweek:** GW{min_gw} with {min_points} points
+
+"""
+
+        return mo_ref.vstack([mo_ref.md(summary), mo_ref.ui.plotly(fig)])
+
+    except Exception as e:
+        return mo_ref.md(f"""
+### 📈 Gameweek Points Timeline
+
+❌ **Error loading gameweek points timeline:** {str(e)}
+
+*Make sure historical picks and performance data is available in the database.*
+""")

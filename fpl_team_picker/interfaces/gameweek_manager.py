@@ -183,6 +183,16 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    # Gameweek Points Timeseries
+    from fpl_team_picker.visualization.charts import create_gameweek_points_timeseries
+
+    points_timeline = create_gameweek_points_timeseries(mo)
+    points_timeline
+    return
+
+
+@app.cell
+def _(mo):
     mo.md(
         r"""
     ## 1️⃣ Configure Gameweek
@@ -354,12 +364,15 @@ def _(gameweek_data, gameweek_input, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 🎯 Last Gameweek Performance Review
+    mo.md(
+        r"""
+    ## 🎯 Last Gameweek Performance Review
 
     **Compare actual player performance vs predicted xP from the previous gameweek**
 
     This section analyzes how well the expected points model predicted actual results, including your specific team's performance.
-    """)
+    """
+    )
     return
 
 
