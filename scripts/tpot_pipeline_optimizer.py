@@ -248,6 +248,8 @@ def engineer_features(
 
     # Get team strength ratings
     # TODO: Team strength hardcoded. Should be dynamically calculated each gw
+    # There is an entire team_analytics_service - this hardcoded version
+    # should be replaced and deleted
     team_strength = get_team_strength_ratings()
 
     # Initialize production feature engineer with enhanced data sources

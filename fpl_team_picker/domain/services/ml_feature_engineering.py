@@ -11,6 +11,7 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from typing import Dict, Optional
 
 
+# TODO: do we have penalty taker as a feature?
 class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.

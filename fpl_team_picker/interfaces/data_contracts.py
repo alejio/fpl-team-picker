@@ -5,6 +5,8 @@ Leverages existing Pydantic domain models and validation patterns to enforce
 data contracts at the presentation layer using fail-fast principles.
 """
 
+# TODO: what does this even do?
+
 import pandas as pd
 from typing import List, Optional, Union, Any
 from pydantic import BaseModel, Field, ValidationError, model_validator

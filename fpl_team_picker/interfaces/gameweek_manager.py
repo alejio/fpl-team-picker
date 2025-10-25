@@ -3,7 +3,7 @@
 import marimo
 
 __generated_with = "0.17.0"
-app = marimo.App(width="medium")
+app = marimo.App(width="full")
 
 
 @app.cell
@@ -186,6 +186,7 @@ def _(mo):
     # Gameweek Points Timeseries
     from fpl_team_picker.visualization.charts import create_gameweek_points_timeseries
 
+    # TODO: would be nice to overlay average points per week across FPL
     points_timeline = create_gameweek_points_timeseries(mo)
     points_timeline
     return
@@ -280,7 +281,11 @@ def _(gameweek_input, mo):
 
 @app.cell
 def _(gameweek_data, gameweek_input, mo):
+    # TODO: where are these XP coming from? I don't remember storing them
     # Squad Performance Review - Simple Implementation
+    # TODO: This is the last gw retro. We need to improve visuals. We should
+    # particularly evaluate the quality of the transfers we did
+    # it should be moved after the XP calculation
     if not gameweek_data or not gameweek_input.value:
         performance_review = mo.md(
             "📊 Select gameweek and load data to see performance analysis"
@@ -306,7 +311,9 @@ def _(gameweek_data, gameweek_input, mo):
                 prev_data = _data_svc.load_gameweek_data(
                     target_gameweek=previous_gw, form_window=5
                 )
-
+                # TODO: this on-the-fly prediction is definitely false
+                # we should implement xp storing and manually trigger when
+                #  we have finalised our team selection in FPL site
                 _xp_svc = _XPServicePerf()
                 prev_predictions = _xp_svc.calculate_combined_results(
                     prev_data, use_ml_model=False
@@ -364,57 +371,14 @@ def _(gameweek_data, gameweek_input, mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-    ## 🎯 Last Gameweek Performance Review
-
-    **Compare actual player performance vs predicted xP from the previous gameweek**
-
-    This section analyzes how well the expected points model predicted actual results, including your specific team's performance.
-    """
-    )
-    return
-
-
-@app.cell
-def _(mo):
-    # Simple test to ensure this cell always shows
-    test_display = mo.md("""
-    🔄 **Performance Review Section**
-    """)
-    test_display
-    return
-
-
-@app.cell
-def _(mo):
-    # Performance review cell with minimal dependencies
-    performance_review_status = mo.md("""
-    📊 **Ready for Performance Analysis**
-
-    To see performance review:
-    1. Select a gameweek (GW2 or higher)
-    2. Load gameweek data in the section above
-    3. The analysis will appear here automatically
-
-    *Features:*
-    - Model accuracy metrics
-    - Your team's specific performance
-    - Best/worst predictions
-    - Detailed player comparisons
-    """)
-    performance_review_status
-    return
-
-
-@app.cell
-def _(mo):
     mo.md(r"""## 2️⃣ Team Strength Analysis""")
     return
 
 
 @app.cell
 def _(gameweek_input, mo):
+    # TODO: I think this section is out of place. It should be moved to the
+    # fixture difficulty section
     # Team strength analysis using visualization service
     from fpl_team_picker.visualization.charts import create_team_strength_visualization
 
@@ -442,6 +406,8 @@ def _(mo):
 
 @app.cell
 def _(gameweek_data, mo):
+    # TODO: we should move this further up in the notebook
+    # so downstream analyses can benefit
     # Calculate expected points using ML pipeline (NEW!)
     if gameweek_data:
         from fpl_team_picker.domain.services import (
@@ -458,7 +424,7 @@ def _(gameweek_data, mo):
 
         if use_ml:
             # Use pre-trained ML model specified in config
-            # Default: TPOT auto-optimized pipeline with 80 features (MAE: 0.757)
+            # Default: TPOT auto-optimized pipeline with 80 features
             # Override via config.json or env var: FPL_XP_MODEL_ML_MODEL_PATH
             model_path = Path(config.xp_model.ml_model_path)
 
@@ -472,6 +438,7 @@ def _(gameweek_data, mo):
                 )
 
             # Determine model type from path for display
+            # TODO: I don't like this if/elif/else but can live with it
             if "tpot" in model_path.name.lower():
                 model_type_label = "ML Pipeline (TPOT Auto-Optimized)"
             elif "lgbm" in model_path.name.lower():
@@ -490,7 +457,6 @@ def _(gameweek_data, mo):
 
             # Calculate xP using ML service (no fallback - fail explicitly)
             # Note: ML service currently only does 1GW predictions
-            # TODO: Implement proper 5GW lookahead with fixture-specific predictions
             players_with_xp = ml_xp_service.calculate_expected_points(
                 players_data=gameweek_data.get("players", _pd.DataFrame()),
                 teams_data=gameweek_data.get("teams", _pd.DataFrame()),
@@ -499,7 +465,6 @@ def _(gameweek_data, mo):
                 target_gameweek=gameweek_data["target_gameweek"],
                 live_data=gameweek_data.get("live_data_historical", _pd.DataFrame()),
                 gameweeks_ahead=1,
-                # Enhanced data sources for 80-feature model (Issue #37)
                 ownership_trends_df=gameweek_data.get("ownership_trends"),
                 value_analysis_df=gameweek_data.get("value_analysis"),
                 fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
@@ -511,6 +476,8 @@ def _(gameweek_data, mo):
                 players_with_xp
             )
 
+            # TODO: Implement proper 5GW lookahead with fixture-specific predictions
+            # At the moment this is too naïve.
             # Create 5GW approximation and derived metrics (simple: 1GW * 5)
             # This is a placeholder until proper multi-gameweek ML predictions are implemented
             players_with_xp["xP_5gw"] = players_with_xp["xP"] * 5
@@ -529,6 +496,7 @@ def _(gameweek_data, mo):
 
             # Add form analytics columns
             # Calculate form multiplier from recent performance (use form_season if available)
+            # TODO: we have clear data models so i don't understand the if/else
             if "form_season" in players_with_xp.columns:
                 players_with_xp["form_multiplier"] = (
                     1.0 + (players_with_xp["form_season"].astype(float) - 3.0) / 10.0
@@ -540,6 +508,9 @@ def _(gameweek_data, mo):
                 players_with_xp["form_multiplier"] = 1.0
 
             # Calculate recent points per game
+            # TODO: we have clear data models so i don't understand the if/else
+            # TODO: I also don't understand the "recent" condition. It seems like
+            # we are just using the full season for ppg
             if "points_per_game_season" in players_with_xp.columns:
                 players_with_xp["recent_points_per_game"] = players_with_xp[
                     "points_per_game_season"
@@ -569,11 +540,13 @@ def _(gameweek_data, mo):
 
             model_info = {
                 "type": model_type_label,
+                # TODO: these features are hardcoded. Should be a variable count
                 "features": "64 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures)",
                 "status": "✅ ML predictions generated",
             }
         else:
             # Use rule-based model
+            # TODO: We need a clear log here that explains we are using rules-based
             xp_service = ExpectedPointsService()
             players_with_xp = xp_service.calculate_combined_results(
                 gameweek_data, use_ml_model=False
@@ -615,6 +588,9 @@ def _(mo):
 @app.cell
 def _(mo, players_with_xp):
     # Form Analytics Dashboard using visualization function
+    # TODO: I think this section should have analytics related to all players across FPL
+    # TODO: I don't understand this form multiplier. It doesn't seem useful from first
+    # glance
     if not players_with_xp.empty:
         from fpl_team_picker.visualization.charts import create_form_analytics_display
 
@@ -660,6 +636,7 @@ def _(mo):
 
 @app.cell
 def _(gameweek_data, mo, players_with_xp):
+    # TODO: this section should probably be merged with 4
     # Player Performance Trends using visualization function
     if not players_with_xp.empty and gameweek_data:
         from fpl_team_picker.visualization.charts import (
@@ -703,6 +680,7 @@ def _(mo):
 
 @app.cell
 def _(gameweek_input, mo):
+    # TODO: we can include the team strength visualisation in this section
     # Fixture Difficulty Analysis using visualization function
     if gameweek_input.value:
         from fpl_team_picker.visualization.charts import (
@@ -734,15 +712,6 @@ def _(mo):
     - **2 Free Transfers**: Saved transfer from previous week (analyze 0-4 transfers)
     - **15 Free Transfers (Wildcard)**: Rebuild entire squad, £100m budget reset, no penalties
 
-    ### Features:
-    - **Intelligent Strategy**: Auto-selects optimal transfer count based on net XP after penalties
-    - **Premium Acquisition**: Multi-transfer scenarios for expensive targets
-    - **Budget Pool Analysis**: Total available funds including sellable squad value
-    - **Constraint Support**: Force include/exclude specific players
-    - **Configurable Horizon**: Choose between 1-GW immediate focus or 5-GW strategic planning
-
-    **⚠️ Note**: For wildcard, the system analyzes the optimal squad but won't activate the chip - you must do that manually in the FPL app.
-
     ---
     """
     )
@@ -751,6 +720,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
+    # TODO: I want to always show at the top the "ideal team" for the target gw
     # Free transfer selector and optimization horizon toggle
     free_transfer_selector = mo.ui.dropdown(
         options=["1", "2", "15"],
@@ -808,6 +778,8 @@ def _(
             _analytics_service = PlayerAnalyticsService(_player_repo)
 
             # Get all enriched players with 70+ validated attributes
+            # TODO: Validate: does this include all features,
+            # including feature engineered ones?
             enriched_players = _analytics_service.get_all_players_enriched()
 
             # Determine horizon for display
@@ -828,6 +800,7 @@ def _(
             # Generate UI options from domain models with type safety
             player_options = []
             for player in enriched_players:
+                # TODO: this might need an update below, looks obsolete.
                 # Get xP from lookup (bridge until xP is in domain model)
                 xp_value = xp_lookup.get(player.player_id, 0.0)
 
@@ -860,17 +833,7 @@ def _(
             )
 
         except Exception as e:
-            # Fallback to basic player list if domain service fails
             print(f"⚠️ PlayerAnalyticsService failed: {e}")
-            horizon = (
-                optimization_horizon_toggle.value
-                if optimization_horizon_toggle.value
-                else "5gw"
-            )
-            player_options = []
-            for _, player in players_with_xp.head(10).iterrows():
-                label = f"{player['web_name']} ({player['position']}) - £{player['price']:.1f}m"
-                player_options.append({"label": label, "value": player["player_id"]})
 
         must_include_dropdown = mo.ui.multiselect(
             options=player_options,
@@ -946,7 +909,9 @@ def _(
     optimize_button,
     players_with_xp,
 ):
+    # before we do the transfer optimisation analysis, so we have a visual comparison.
     # Transfer optimization using interactive optimization engine
+    # TODO: shouldn't these DataContract models be moved to models/?
     from fpl_team_picker.interfaces.data_contracts import (
         resolve_team_names_pydantic,
         DataContractError as _DataContractError2,
@@ -958,6 +923,7 @@ def _(
     def _create_optimization_summary(best_scenario, optimization_metadata):
         """Create UI display for optimization results (presentation layer)."""
         # Defensive check: ensure we have dictionaries
+        # TODO: remove defensive check
         if not isinstance(best_scenario, dict):
             return mo.md(
                 f"❌ Error: best_scenario is {type(best_scenario).__name__}, expected dict"
@@ -967,6 +933,7 @@ def _(
                 f"❌ Error: optimization_metadata is {type(optimization_metadata).__name__}, expected dict"
             )
 
+        # TODO: validate what is optimization_metadata
         method = optimization_metadata.get("method", "unknown")
         horizon_label = optimization_metadata.get("horizon_label", "N/A")
         budget_pool_info = optimization_metadata.get("budget_pool_info", {})
@@ -975,6 +942,7 @@ def _(
         # Calculate max single acquisition
         max_single_acquisition = min(budget_pool_info.get("total_budget", 0.0), 15.0)
 
+        # TODO: Only keep simulated annealing
         # Build strategic summary
         if method == "greedy":
             scenarios = optimization_metadata.get("scenarios", [])
@@ -1183,6 +1151,7 @@ def _(
                         optimization_metadata=optimization_metadata,
                     )
 
+                    # TODO: There is lots of business logic here that we should put elsewhere
                     # Generate starting 11 using domain service
                     if optimal_squad_df is not None and not optimal_squad_df.empty:
                         starting_11_list, _formation, xp_total = (
@@ -1400,15 +1369,6 @@ def _(mo):
         r"""
     ## 9️⃣ Chip Assessment
 
-    **Smart chip timing recommendations with traffic light system.**
-
-    ### Chip Assessment Features:
-    - **Wildcard Analysis**: Transfer opportunity analysis and fixture run quality evaluation
-    - **Free Hit Evaluation**: Double gameweek detection and temporary squad improvement potential
-    - **Bench Boost Assessment**: Bench strength calculation and rotation risk assessment
-    - **Triple Captain Identification**: Premium captain candidate analysis and fixture quality review
-    - **Traffic Light System**: 🟢 RECOMMENDED, 🟡 CONSIDER, 🔴 HOLD status indicators
-
     ---
     """
     )
@@ -1417,6 +1377,9 @@ def _(mo):
 
 @app.cell
 def _(gameweek_data, gameweek_input, mo, players_with_xp):
+    # TODO: Wildcard and free hit assessment should be included
+    # right after we run optimization leveraging the yet-to-be-created
+    # best squad analysis.
     # Chip Assessment using domain service - clean architecture
     def _format_chip_metrics(metrics: dict) -> str:
         """Format chip metrics for display"""

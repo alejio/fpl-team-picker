@@ -47,6 +47,7 @@ class ExpectedPointsService:
         self._team_strength_cache = {}
         self._player_form_cache = {}
 
+        # TODO: clarify print below only relevant for rules-based
         if self.debug:
             print(
                 f"🧠 ExpectedPointsService initialized - Form weight: {self.form_weight}, Window: {self.form_window} GWs"
