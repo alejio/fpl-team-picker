@@ -11,3 +11,4 @@ wheels/
 .ruff_cache/
 .pytest_cache/
 __marimo__/
+launch.json
