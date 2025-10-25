@@ -12,7 +12,7 @@
 - **Team limit**: Maximum 3 players from any single Premier League team
 - **Formation requirements**: Must field at least:
   - 1 Goalkeeper
-  - 3 Defenders  
+  - 3 Defenders
   - 2 Midfielders
   - 1 Forward
 
@@ -25,7 +25,7 @@
 - **Appearance**: 1 point (playing at least 1 minute), 2 points (playing 60+ minutes)
 - **Goals**:
   - Goalkeeper/Defender: 6 points
-  - Midfielder: 5 points  
+  - Midfielder: 5 points
   - Forward: 4 points
 - **Assists**: 3 points (last player on same team to touch ball before goalscorer, excluding deflections)
 

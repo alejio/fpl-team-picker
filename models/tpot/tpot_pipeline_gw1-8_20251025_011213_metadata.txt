@@ -1,0 +1,36 @@
+TPOT 1.1.0 Pipeline Optimization Results
+================================================================================
+
+Date: 2025-10-25 01:12:13
+Gameweek range: GW1 to GW8
+Max time: 5 mins
+Max eval time: 5 mins
+Scoring metric: neg_mean_squared_error
+CV folds: auto (all available)
+Random seed: 42
+Note: TPOT 1.1.0 uses time-based optimization
+
+Best pipeline:
+Pipeline(steps=[('maxabsscaler', MaxAbsScaler()),
+                ('selectpercentile',
+                 SelectPercentile(percentile=46.7871970402223)),
+                ('featureunion-1',
+                 FeatureUnion(transformer_list=[('skiptransformer',
+                                                 SkipTransformer()),
+                                                ('passthrough',
+                                                 Passthrough())])),
+                ('featureunion-2',
+                 FeatureUnion(transformer_list=[('featureunion',
+                                                 FeatureUnion(transformer_list=[('estimatortransfor...
+                                                                                 EstimatorTransformer(cross_val_predict_cv=KFold(n_splits=5, random_state=42, shuffle=True),
+                                                                                                      estimator=ARDRegression(alpha_1=8.3113e-09,
+                                                                                                                              alpha_2=3.5188402e-06,
+                                                                                                                              lambda_1=8.6491314e-06,
+                                                                                                                              lambda_2=1.237363e-07,
+                                                                                                                              threshold_lambda=54282)))])),
+                                                ('passthrough',
+                                                 Passthrough())])),
+                ('adaboostregressor',
+                 AdaBoostRegressor(learning_rate=0.1821056054096,
+                                   loss=np.str_('linear'), n_estimators=76,
+                                   random_state=42))])

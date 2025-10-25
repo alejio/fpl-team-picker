@@ -761,20 +761,88 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "bandwagon_score",
         ]
 
+        # Validate required columns exist
+        missing_cols = [
+            col
+            for col in ownership_cols
+            if col not in self.ownership_trends_df.columns
+            and col not in ["player_id", "gameweek"]
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"Ownership trends data missing required columns: {missing_cols}. "
+                f"Available columns: {list(self.ownership_trends_df.columns)}"
+            )
+
         available_cols = [
             col for col in ownership_cols if col in self.ownership_trends_df.columns
         ]
         ownership_df = self.ownership_trends_df[available_cols].copy()
 
-        df = df.merge(ownership_df, on=["player_id", "gameweek"], how="left")
+        # Debug: Check merge keys exist in both dataframes
+        if "player_id" not in df.columns:
+            raise ValueError("player_id column missing from main dataframe")
+        if "gameweek" not in df.columns:
+            raise ValueError("gameweek column missing from main dataframe")
 
-        # Validate no missing data after merge
-        if df["selected_by_percent"].isna().any():
-            missing_count = df["selected_by_percent"].isna().sum()
+        # Drop any existing ownership columns to avoid _x _y suffixes during merge
+        ownership_feature_cols = [
+            col
+            for col in ownership_cols
+            if col not in ["player_id", "gameweek"] and col in df.columns
+        ]
+        if ownership_feature_cols:
+            df = df.drop(columns=ownership_feature_cols)
+
+        # Shift ownership by 1 gameweek (consistent with .shift(1) on performance features)
+        # This means: Use GW7 ownership to predict GW8, GW8 ownership to predict GW9, etc.
+        ownership_df_shifted = ownership_df.copy()
+        ownership_df_shifted["gameweek"] = ownership_df_shifted["gameweek"] + 1
+
+        df = df.merge(ownership_df_shifted, on=["player_id", "gameweek"], how="left")
+
+        # Debug: Check if merge succeeded
+        if "selected_by_percent" not in df.columns:
             raise ValueError(
-                f"Missing ownership data for {missing_count} player-gameweeks after merge. "
-                f"Ownership trends data may be incomplete."
+                f"Merge failed - selected_by_percent not in result. "
+                f"Main df had {len(df)} rows with gameweeks {df['gameweek'].unique() if 'gameweek' in df.columns else 'N/A'}. "
+                f"Ownership df had {len(ownership_df)} rows with gameweeks {ownership_df['gameweek'].unique() if 'gameweek' in ownership_df.columns else 'N/A'}. "
+                f"Result columns: {list(df.columns)}"
             )
+
+        # Validate no missing data (except GW1 which naturally has no prior ownership)
+        if (
+            "selected_by_percent" in df.columns
+            and df["selected_by_percent"].isna().any()
+        ):
+            missing_gws = sorted(
+                df[df["selected_by_percent"].isna()]["gameweek"].unique()
+            )
+            max_ownership_gw = (
+                ownership_df["gameweek"].max()
+                if "gameweek" in ownership_df.columns
+                else "unknown"
+            )
+
+            # GW1 naturally has no ownership (no GW0), fill with neutral values
+            if 1 in missing_gws:
+                gw1_mask = (df["gameweek"] == 1) & df["selected_by_percent"].isna()
+                df.loc[gw1_mask, "selected_by_percent"] = 5.0  # Median ownership
+                df.loc[gw1_mask, "net_transfers_gw"] = 0
+                df.loc[gw1_mask, "avg_net_transfers_5gw"] = 0
+                df.loc[gw1_mask, "bandwagon_score"] = 0
+                df.loc[gw1_mask, "ownership_velocity"] = 0
+                missing_gws = [gw for gw in missing_gws if gw != 1]
+
+            # Check if there are still missing gameweeks (beyond GW1)
+            if missing_gws:
+                raise ValueError(
+                    f"Missing ownership data for gameweeks {missing_gws}. "
+                    f"Ownership trends data available through GW{max_ownership_gw}. "
+                    f"With shift(1), can predict up to GW{max_ownership_gw + 1}. "
+                    f"\n\nCannot predict GW{missing_gws[0]} - need GW{missing_gws[0] - 1} ownership data. "
+                    f"\n\nSolution: Wait for GW{missing_gws[0] - 1} to complete, then regenerate ownership trends."
+                )
 
         # Encode categorical ownership_tier
         ownership_tier_map = {"punt": 0, "budget": 1, "popular": 2, "template": 3}
@@ -820,15 +888,48 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         ]
         value_df = self.value_analysis_df[available_cols].copy()
 
-        df = df.merge(value_df, on=["player_id", "gameweek"], how="left")
+        # Drop any existing value columns to avoid _x _y suffixes during merge
+        value_feature_cols = [
+            col
+            for col in value_cols
+            if col not in ["player_id", "gameweek"] and col in df.columns
+        ]
+        if value_feature_cols:
+            df = df.drop(columns=value_feature_cols)
 
-        # Validate no missing data after merge
+        # Shift value by 1 gameweek (consistent with .shift(1) on performance features)
+        value_df_shifted = value_df.copy()
+        value_df_shifted["gameweek"] = value_df_shifted["gameweek"] + 1
+
+        df = df.merge(value_df_shifted, on=["player_id", "gameweek"], how="left")
+
+        # Validate no missing data (except GW1 which naturally has no prior value)
         if df["points_per_pound"].isna().any():
-            missing_count = df["points_per_pound"].isna().sum()
-            raise ValueError(
-                f"Missing value analysis data for {missing_count} player-gameweeks after merge. "
-                f"Value analysis data may be incomplete."
+            missing_gws = sorted(df[df["points_per_pound"].isna()]["gameweek"].unique())
+            max_value_gw = (
+                value_df["gameweek"].max()
+                if "gameweek" in value_df.columns
+                else "unknown"
             )
+
+            # GW1 naturally has no value (no GW0), fill with neutral values
+            if 1 in missing_gws:
+                gw1_mask = (df["gameweek"] == 1) & df["points_per_pound"].isna()
+                df.loc[gw1_mask, "points_per_pound"] = 0.5  # Neutral value
+                df.loc[gw1_mask, "value_vs_position"] = 1.0  # Average
+                df.loc[gw1_mask, "predicted_price_change_1gw"] = 0
+                df.loc[gw1_mask, "price_volatility"] = 0
+                df.loc[gw1_mask, "price_risk"] = 0
+                missing_gws = [gw for gw in missing_gws if gw != 1]
+
+            # Check if there are still missing gameweeks (beyond GW1)
+            if missing_gws:
+                raise ValueError(
+                    f"Missing value analysis data for gameweeks {missing_gws}. "
+                    f"Value analysis data available through GW{max_value_gw}. "
+                    f"With shift(1), can predict up to GW{max_value_gw + 1}. "
+                    f"\n\nSolution: Wait for GW{missing_gws[0] - 1} to complete, then regenerate value analysis."
+                )
 
         return df
 

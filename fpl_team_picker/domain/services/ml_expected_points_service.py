@@ -257,6 +257,9 @@ class MLExpectedPointsService:
         live_data: pd.DataFrame,
         gameweeks_ahead: int = 1,
         rule_based_model=None,
+        ownership_trends_df: Optional[pd.DataFrame] = None,
+        value_analysis_df: Optional[pd.DataFrame] = None,
+        fixture_difficulty_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Main interface method compatible with existing XP calculations.
@@ -272,6 +275,9 @@ class MLExpectedPointsService:
             live_data: Historical live gameweek data for training
             gameweeks_ahead: Number of gameweeks ahead (1 or 5) - not yet implemented
             rule_based_model: Optional rule-based model for ensemble predictions
+            ownership_trends_df: Enhanced ownership trends data (Issue #37)
+            value_analysis_df: Enhanced value analysis data (Issue #37)
+            fixture_difficulty_df: Enhanced fixture difficulty data (Issue #37)
 
         Returns:
             DataFrame with ML-based expected points in 'xP' column
@@ -323,10 +329,31 @@ class MLExpectedPointsService:
                     )
 
                 team_strength = get_team_strength_ratings()
+
+                # Validate enhanced data sources for 80-feature model
+                if ownership_trends_df is None or ownership_trends_df.empty:
+                    raise ValueError(
+                        "Enhanced ownership trends data required for 80-feature TPOT model. "
+                        "DataOrchestrationService should provide this in gameweek_data."
+                    )
+                if value_analysis_df is None or value_analysis_df.empty:
+                    raise ValueError(
+                        "Enhanced value analysis data required for 80-feature TPOT model. "
+                        "DataOrchestrationService should provide this in gameweek_data."
+                    )
+                if fixture_difficulty_df is None or fixture_difficulty_df.empty:
+                    raise ValueError(
+                        "Enhanced fixture difficulty data required for 80-feature TPOT model. "
+                        "DataOrchestrationService should provide this in gameweek_data."
+                    )
+
                 feature_engineer = FPLFeatureEngineer(
-                    fixtures_df=fixtures_data if not fixtures_data.empty else None,
-                    teams_df=teams_data if not teams_data.empty else None,
-                    team_strength=team_strength if team_strength else None,
+                    fixtures_df=fixtures_data,
+                    teams_df=teams_data,
+                    team_strength=team_strength,
+                    ownership_trends_df=ownership_trends_df,
+                    value_analysis_df=value_analysis_df,
+                    fixture_difficulty_df=fixture_difficulty_df,
                 )
 
                 # Create wrapper pipeline

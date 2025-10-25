@@ -55,6 +55,9 @@ class DataOrchestrationService:
             fixtures,
             actual_target_gameweek,
             live_data_historical,
+            ownership_trends,
+            value_analysis,
+            fixture_difficulty,
         ) = fpl_data
 
         # Validate core data contracts
@@ -93,6 +96,10 @@ class DataOrchestrationService:
             "current_squad": current_squad,
             "target_gameweek": target_gameweek,
             "form_window": form_window,
+            # Enhanced data sources (Issue #37)
+            "ownership_trends": ownership_trends,
+            "value_analysis": value_analysis,
+            "fixture_difficulty": fixture_difficulty,
         }
 
     def get_current_gameweek_info(self) -> Dict[str, Any]:
@@ -607,7 +614,15 @@ class DataOrchestrationService:
     def _fetch_fpl_data_internal(
         self, target_gameweek: int, form_window: int = 5
     ) -> Tuple[
-        pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, int, pd.DataFrame
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        int,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
     ]:
         """
         Fetch FPL data from database for specified gameweek with historical form data
@@ -617,7 +632,8 @@ class DataOrchestrationService:
             form_window: Number of previous gameweeks to include for form analysis (not used - loads from GW1)
 
         Returns:
-            Tuple of (players, teams, xg_rates, fixtures, target_gameweek, live_data_historical)
+            Tuple of (players, teams, xg_rates, fixtures, target_gameweek, live_data_historical,
+                     ownership_trends, value_analysis, fixture_difficulty)
 
         Note:
             Always loads from GW1 to (target_gameweek-1) to support ML rolling window features.
@@ -951,7 +967,28 @@ class DataOrchestrationService:
 
             print("✅ Enriched live data with position information")
 
-        return players, teams, xg_rates, fixtures, target_gameweek, live_data_combined
+        # Load enhanced data sources for ML feature engineering (Issue #37)
+        print("📊 Loading enhanced data sources...")
+        ownership_trends = client.get_derived_ownership_trends()
+        value_analysis = client.get_derived_value_analysis()
+        fixture_difficulty = client.get_derived_fixture_difficulty()
+        print(
+            f"   ✅ Ownership trends: {len(ownership_trends)} | "
+            f"Value analysis: {len(value_analysis)} | "
+            f"Fixture difficulty: {len(fixture_difficulty)}"
+        )
+
+        return (
+            players,
+            teams,
+            xg_rates,
+            fixtures,
+            target_gameweek,
+            live_data_combined,
+            ownership_trends,
+            value_analysis,
+            fixture_difficulty,
+        )
 
     def _fetch_manager_team_internal(self, previous_gameweek: int) -> Optional[Dict]:
         """
