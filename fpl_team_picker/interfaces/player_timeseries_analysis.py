@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.16.2"
+__generated_with = "0.17.0"
 app = marimo.App(width="medium")
 
 
@@ -15,16 +15,16 @@ def _():
 def _(mo):
     mo.md(
         """
-        # 📈 Player Stats Timeseries Analysis
+    # 📈 Player Stats Timeseries Analysis
 
-        This notebook allows you to analyze individual player performance over time with:
-        - **Player selector** with search functionality
-        - **Multiple stat tracking** across gameweeks
-        - **Interactive timeseries charts** for trend analysis
-        - **Position-specific metrics** comparison
+    This notebook allows you to analyze individual player performance over time with:
+    - **Player selector** with search functionality
+    - **Multiple stat tracking** across gameweeks
+    - **Interactive timeseries charts** for trend analysis
+    - **Position-specific metrics** comparison
 
-        **Use this for:** Player research, form analysis, and transfer decisions
-        """
+    **Use this for:** Player research, form analysis, and transfer decisions
+    """
     )
     return
 
@@ -45,7 +45,7 @@ def _():
 
 @app.cell
 def _(mo):
-    mo.md("## ⚙️ Configuration")
+    mo.md("""## ⚙️ Configuration""")
     return
 
 
@@ -73,7 +73,7 @@ def _(mo):
 
 
 @app.cell
-def _(client, mo, pd):
+def _(client, mo):
     # Load players using PlayerAnalyticsService with domain models
     try:
         from fpl_team_picker.domain.services import PlayerAnalyticsService
@@ -130,6 +130,7 @@ def _(client, mo, pd):
                 options=player_options,
                 value=[],
                 label="Select Players (💎=Premium ⚽=PK taker 🔥=Differential 🤕=Injury):",
+                full_width=True,
             )
 
             status_message = mo.md(
@@ -144,9 +145,7 @@ def _(client, mo, pd):
             f"❌ **Error loading players:** {str(e)}\n\n```\n{error_details}\n```"
         )
         player_selector = mo.ui.multiselect(
-            options=[],
-            value=[],
-            label="Select Players:",
+            options=[], value=[], label="Select Players:", full_width=True
         )
 
     mo.vstack([status_message, player_selector])
@@ -164,7 +163,7 @@ def _(mo, player_selector):
 
 @app.cell
 def _(mo):
-    mo.md("## 📊 Stat Selection")
+    mo.md("""## 📊 Stat Selection""")
     return
 
 
@@ -385,20 +384,21 @@ def _(mo):
         options=available_stats,
         value=["total_points", "goals_scored", "assists", "ict_index"],
         label="Select Stats to Display:",
+        full_width=True,
     )
 
     # Display stat categories
     category_info = []
     for category, stats in stat_categories.items():
-        category_info.append(f"**{category}:** {', '.join(stats)}")
+        category_info.append(f"**{category}:** {', '.join(stats)}\n\n")
 
-    mo.vstack([stat_selector, mo.md("\n".join(category_info))])
+    mo.vstack([stat_selector, mo.md("".join(category_info))])
     return (stat_selector,)
 
 
 @app.cell
 def _(mo):
-    mo.md("## 📈 Player Performance Timeseries")
+    mo.md("""## 📈 Player Performance Timeseries""")
     return
 
 
@@ -574,7 +574,7 @@ def _(
 
 @app.cell
 def _(mo):
-    mo.md("## 📋 Player Summary")
+    mo.md("""## 📋 Player Summary""")
     return
 
 

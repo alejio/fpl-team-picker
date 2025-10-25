@@ -1,3 +1,5 @@
+# TODO: we should remove the season_planner. It is obsolete.
+
 import marimo
 
 __generated_with = "0.10.8"

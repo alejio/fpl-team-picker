@@ -31,6 +31,7 @@ def _(mo):
     return
 
 
+# TODO: this notebook is now obsolete with the new algos.
 @app.cell
 def _():
     # Core imports

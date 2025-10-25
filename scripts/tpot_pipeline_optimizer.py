@@ -247,6 +247,7 @@ def engineer_features(
     )
 
     # Get team strength ratings
+    # TODO: Team strength hardcoded. Should be dynamically calculated each gw
     team_strength = get_team_strength_ratings()
 
     # Initialize production feature engineer with enhanced data sources
@@ -277,6 +278,7 @@ def engineer_features(
     features_df["total_points"] = historical_df_sorted["total_points"].values
 
     # Add position metadata
+    # TODO: is this fallback required?
     if "position" in historical_df_sorted.columns:
         features_df["position"] = historical_df_sorted["position"].values
 
@@ -605,6 +607,7 @@ def main():
         )
 
         # 4. Prepare X and y
+        # TODO: why are we doing fillna? What values are missing?
         X = cv_data[feature_cols].fillna(0)
         y = cv_data["total_points"]
 
