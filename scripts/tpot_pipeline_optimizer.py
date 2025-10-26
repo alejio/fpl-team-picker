@@ -32,8 +32,8 @@ from client import FPLDataClient  # noqa: E402
 from fpl_team_picker.domain.services.ml_feature_engineering import (  # noqa: E402
     FPLFeatureEngineer,
 )
-from fpl_team_picker.domain.services.ml_pipeline_factory import (  # noqa: E402
-    get_team_strength_ratings,
+from fpl_team_picker.domain.services.team_analytics_service import (  # noqa: E402
+    TeamAnalyticsService,
 )
 
 
@@ -246,11 +246,21 @@ def engineer_features(
         "\n🔧 Engineering features (production FPLFeatureEngineer with 80 features)..."
     )
 
-    # Get team strength ratings
-    # TODO: Team strength hardcoded. Should be dynamically calculated each gw
-    # There is an entire team_analytics_service - this hardcoded version
-    # should be replaced and deleted
-    team_strength = get_team_strength_ratings()
+    # Calculate dynamic team strength ratings using TeamAnalyticsService
+    # TODO: Ideally calculate per-gameweek team strength during feature engineering
+    # (GW6 uses GW1-5 strength, GW7 uses GW1-6 strength, etc.)
+    # For now, use latest GW as best approximation of current team quality
+    target_gw = historical_df["gameweek"].max()
+    print(
+        f"   📊 Calculating team strength for GW{target_gw} (most recent in training data)"
+    )
+
+    team_analytics = TeamAnalyticsService(debug=False)
+    team_strength = team_analytics.get_team_strength(
+        target_gameweek=target_gw,
+        teams_data=teams_df,
+        current_season_data=None,
+    )
 
     # Initialize production feature engineer with enhanced data sources
     feature_engineer = FPLFeatureEngineer(
@@ -279,10 +289,23 @@ def engineer_features(
     features_df["gameweek"] = historical_df_sorted["gameweek"].values
     features_df["total_points"] = historical_df_sorted["total_points"].values
 
-    # Add position metadata
-    # TODO: is this fallback required?
-    if "position" in historical_df_sorted.columns:
-        features_df["position"] = historical_df_sorted["position"].values
+    # Add position metadata (required for position-specific evaluation)
+    # Fail fast if position data is missing - aligns with "NO FALLBACKS" principle
+    if "position" not in historical_df_sorted.columns:
+        raise ValueError(
+            "Position column missing from historical data after merge. "
+            "Check that get_current_players() returns position data."
+        )
+
+    if historical_df_sorted["position"].isna().any():
+        missing_count = historical_df_sorted["position"].isna().sum()
+        raise ValueError(
+            f"Position data missing for {missing_count} records. "
+            "Cannot proceed with incomplete position data. "
+            "Check data quality in get_current_players()."
+        )
+
+    features_df["position"] = historical_df_sorted["position"].values
 
     # Get production feature names
     production_feature_cols = list(feature_engineer.get_feature_names_out())
@@ -609,8 +632,18 @@ def main():
         )
 
         # 4. Prepare X and y
-        # TODO: why are we doing fillna? What values are missing?
-        X = cv_data[feature_cols].fillna(0)
+        # Fail fast if features contain NaN - indicates upstream data quality issues
+        X = cv_data[feature_cols]
+        nan_counts = X.isna().sum()
+        if nan_counts.any():
+            nan_features = nan_counts[nan_counts > 0]
+            raise ValueError(
+                f"Features contain NaN values. Cannot proceed with incomplete data.\n"
+                f"Features with NaN:\n{nan_features.to_string()}\n"
+                f"This indicates upstream data quality issues. "
+                f"Check feature engineering or data loading."
+            )
+
         y = cv_data["total_points"]
 
         print("\n📊 Final training data shape:")

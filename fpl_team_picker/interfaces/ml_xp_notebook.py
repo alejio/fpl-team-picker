@@ -288,9 +288,10 @@ def _(mo):
 
 @app.cell
 def _(get_team_strength_ratings, mo, teams_df):
-    # ✅ USE PRODUCTION CODE: Team strength ratings from ml_pipeline_factory
-    # This ensures notebook and gameweek_manager.py use IDENTICAL logic
-    team_strength = get_team_strength_ratings()
+    # ✅ USE PRODUCTION CODE: Dynamic team strength using TeamAnalyticsService
+    # Multi-factor: position (25%), quality (35%), reputation (20%), form (20%)
+    # Using GW1 baseline for training consistency - actual predictions use target_gameweek
+    team_strength = get_team_strength_ratings(target_gameweek=1, teams_df=teams_df)
 
     # Display team strength summary
     if not teams_df.empty:

@@ -196,54 +196,39 @@ def load_pipeline(path: Path) -> Tuple[Pipeline, Optional[Dict]]:
     return pipeline, metadata
 
 
-def get_team_strength_ratings() -> Dict[str, float]:
+def get_team_strength_ratings(
+    target_gameweek: int = 1,
+    teams_df: Optional[pd.DataFrame] = None,
+) -> Dict[str, float]:
     """
-    Get team strength ratings based on 2023-24 final table positions.
+    Get dynamic team strength ratings using TeamAnalyticsService.
+
+    DEPRECATED: This wrapper is kept for backward compatibility with existing code.
+    New code should use TeamAnalyticsService directly.
+
+    Args:
+        target_gameweek: Target gameweek for strength calculation (default: 1 = early season baseline)
+        teams_df: Teams data (if None, will load from FPLDataClient)
 
     Returns:
-        Dict mapping team name to strength rating [0.65, 1.30]
+        Dict mapping team name to strength rating [0.7, 1.3]
     """
-    team_positions = {
-        "Manchester City": 1,
-        "Arsenal": 2,
-        "Liverpool": 3,
-        "Aston Villa": 4,
-        "Tottenham": 5,
-        "Chelsea": 6,
-        "Newcastle": 7,
-        "Manchester Utd": 8,
-        "West Ham": 9,
-        "Crystal Palace": 10,
-        "Brighton": 11,
-        "Bournemouth": 12,
-        "Fulham": 13,
-        "Wolves": 14,
-        "Everton": 15,
-        "Brentford": 16,
-        "Nottingham Forest": 17,
-        "Luton": 18,
-        "Burnley": 19,
-        "Sheffield Utd": 20,
-        # Promoted teams
-        "Ipswich": 21,
-        "Leicester": 21,
-        "Southampton": 21,
-        # Aliases
-        "Man City": 1,
-        "Man Utd": 8,
-        "Nott'm Forest": 17,
-        "Spurs": 5,
-    }
+    from .team_analytics_service import TeamAnalyticsService
 
-    strength_ratings = {}
-    for team, position in team_positions.items():
-        if position <= 20:
-            strength = 1.3 - (position - 1) * (1.3 - 0.7) / 19
-        else:
-            strength = 0.65
-        strength_ratings[team] = round(strength, 3)
+    # Load teams data if not provided
+    if teams_df is None or teams_df.empty:
+        from client import FPLDataClient
 
-    return strength_ratings
+        client = FPLDataClient()
+        teams_df = client.get_current_teams()
+
+    # Use TeamAnalyticsService for dynamic calculation
+    service = TeamAnalyticsService(debug=False)
+    return service.get_team_strength(
+        target_gameweek=target_gameweek,
+        teams_data=teams_df,
+        current_season_data=None,
+    )
 
 
 # Example usage functions for notebook/gameweek_manager integration
@@ -274,8 +259,14 @@ def train_and_save_model(
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     import numpy as np
 
-    # Get team strength ratings
-    team_strength = get_team_strength_ratings()
+    # Get dynamic team strength ratings for most recent gameweek
+    # TODO: Ideally calculate per-gameweek strength during feature engineering
+    # For now, use latest GW as best approximation of current team quality
+    target_gw = historical_df["gameweek"].max()
+    team_strength = get_team_strength_ratings(
+        target_gameweek=target_gw,
+        teams_df=teams_df,
+    )
 
     # Create pipeline
     pipeline = create_fpl_pipeline(

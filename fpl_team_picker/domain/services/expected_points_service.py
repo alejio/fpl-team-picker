@@ -47,10 +47,9 @@ class ExpectedPointsService:
         self._team_strength_cache = {}
         self._player_form_cache = {}
 
-        # TODO: clarify print below only relevant for rules-based
         if self.debug:
             print(
-                f"🧠 ExpectedPointsService initialized - Form weight: {self.form_weight}, Window: {self.form_window} GWs"
+                f"🧠 ExpectedPointsService initialized - (Rule-based Form weight: {self.form_weight}, Window: {self.form_window} GWs"
             )
 
     def calculate_expected_points(
@@ -139,11 +138,7 @@ class ExpectedPointsService:
         gameweeks_ahead: int,
         xp_config: Any,
     ) -> pd.DataFrame:
-        """Calculate expected points using ML model.
-
-        Note: ML model migration is pending. Currently falls back to rule-based model.
-        TODO: Migrate ml_xp_model.py into this service.
-        """
+        """Calculate expected points using ML model."""
         from fpl_team_picker.domain.services.ml_expected_points_service import (
             MLExpectedPointsService,
         )

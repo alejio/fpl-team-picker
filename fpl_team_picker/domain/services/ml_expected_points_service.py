@@ -177,8 +177,15 @@ class MLExpectedPointsService:
                 "Ensure live_data includes position information before calling ML service."
             )
 
-        # Get team strength ratings
-        team_strength = get_team_strength_ratings()
+        # Get team strength ratings for most recent gameweek in historical data
+        # TODO: Ideally, calculate per-gameweek team strength during feature engineering
+        # (GW6 uses GW1-5 strength, GW7 uses GW1-6 strength, etc.)
+        # For now, use latest GW as best approximation
+        target_gw = historical_df["gameweek"].max()
+        team_strength = get_team_strength_ratings(
+            target_gameweek=target_gw,
+            teams_df=teams_df,
+        )
 
         # Create pipeline
         pipeline = create_fpl_pipeline(
@@ -328,7 +335,11 @@ class MLExpectedPointsService:
                         "🔧 Creating feature engineering wrapper for TPOT model..."
                     )
 
-                team_strength = get_team_strength_ratings()
+                # Use target_gameweek for dynamic team strength (important for fixture difficulty)
+                team_strength = get_team_strength_ratings(
+                    target_gameweek=target_gameweek,
+                    teams_df=teams_data,
+                )
 
                 # Validate enhanced data sources for 80-feature model
                 if ownership_trends_df is None or ownership_trends_df.empty:
@@ -386,10 +397,14 @@ class MLExpectedPointsService:
                 ):
                     feature_engineer = self.pipeline.named_steps["feature_engineer"]
 
-                    # Update context (fixtures, teams, team_strength)
+                    # Update context (fixtures, teams, team_strength) with current gameweek
                     from .ml_pipeline_factory import get_team_strength_ratings
 
-                    team_strength = get_team_strength_ratings()
+                    # Use target_gameweek for dynamic team strength (important for fixture difficulty)
+                    team_strength = get_team_strength_ratings(
+                        target_gameweek=target_gameweek,
+                        teams_df=teams_data,
+                    )
 
                     feature_engineer.fixtures_df = (
                         fixtures_data if not fixtures_data.empty else None

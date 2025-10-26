@@ -92,7 +92,11 @@ prices = cv_data["price"].copy()
 
 # Feature engineering (with full context)
 print("\n🔧 Engineering features...")
-team_strength = get_team_strength_ratings()
+# Use latest gameweek for team strength (most current team quality)
+# TODO: Ideally calculate per-gameweek strength during feature engineering
+target_gw = end_gw
+print(f"   📊 Using team strength for GW{target_gw} (most recent in training data)")
+team_strength = get_team_strength_ratings(target_gameweek=target_gw, teams_df=teams_df)
 feature_engineer = FPLFeatureEngineer(
     fixtures_df=fixtures_df,
     teams_df=teams_df,
