@@ -138,6 +138,8 @@ Marimo MCP (Model Context Protocol) server enables AI assistants like Claude Cod
 
 **Team features rationale**: Safe with player-based GroupKFold validation - testing "can we predict NEW players on KNOWN teams?" not future outcomes. All team features use shift(1) to exclude current gameweek.
 
+**New player handling**: Mid-season player additions (e.g., Kieran Morrison in GW9) are automatically handled with neutral feature values for ownership and value analysis. No manual intervention required.
+
 ## TPOT Pipeline Optimization
 
 **TPOT** (Tree-based Pipeline Optimization Tool): Automated ML pipeline discovery for xP prediction.
