@@ -83,7 +83,7 @@ class TestPlayerDomain:
 
         # Price too low
         with pytest.raises(ValueError):
-            PlayerDomain(**{**base_data, "price": 3.8})
+            PlayerDomain(**{**base_data, "price": 3.7})
 
         # Price too high
         with pytest.raises(ValueError):
