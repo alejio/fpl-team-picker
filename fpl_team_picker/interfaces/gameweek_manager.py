@@ -911,8 +911,7 @@ def _(
 ):
     # before we do the transfer optimisation analysis, so we have a visual comparison.
     # Transfer optimization using interactive optimization engine
-    # TODO: shouldn't these DataContract models be moved to models/?
-    from fpl_team_picker.interfaces.data_contracts import (
+    from fpl_team_picker.interfaces.display_utils import (
         resolve_team_names_pydantic,
         DataContractError as _DataContractError2,
     )
