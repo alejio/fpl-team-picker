@@ -42,7 +42,7 @@ class PlayerDomain(BaseModel):
         ..., ge=1, le=20, description="Team ID (1-20 for Premier League)"
     )
     position: Position = Field(..., description="Player position")
-    price: float = Field(..., ge=3.9, le=15.0, description="Price in millions")
+    price: float = Field(..., ge=3.8, le=15.0, description="Price in millions")
     selected_by_percent: float = Field(
         ..., ge=0.0, le=100.0, description="Selection percentage"
     )
