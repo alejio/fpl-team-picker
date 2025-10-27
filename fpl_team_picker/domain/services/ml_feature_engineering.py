@@ -835,44 +835,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 df.loc[gw1_mask, "ownership_velocity"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
-            # Handle new players who appear mid-season (no prior ownership history)
-            # TODO: this is a hack: should probably fix in fpl-dataset-builder
-            if missing_gws:
-                missing_mask = df["selected_by_percent"].isna()
-                missing_players = df[missing_mask]["player_id"].unique()
-
-                # Check if these are genuinely new players (first appearance in ownership trends)
-                new_players = []
-                for player_id in missing_players:
-                    player_ownership = ownership_df[
-                        ownership_df["player_id"] == player_id
-                    ]
-                    if len(player_ownership) > 0:
-                        first_gw = player_ownership["gameweek"].min()
-                        # Player's first gameweek should match their missing data
-                        if first_gw in missing_gws:
-                            new_players.append(player_id)
-
-                if new_players:
-                    # Fill new players with neutral ownership values
-                    new_player_mask = missing_mask & df["player_id"].isin(new_players)
-                    df.loc[new_player_mask, "selected_by_percent"] = (
-                        1.0  # Low ownership
-                    )
-                    df.loc[new_player_mask, "ownership_tier"] = "punt"  # Low tier
-                    df.loc[new_player_mask, "net_transfers_gw"] = 0
-                    df.loc[new_player_mask, "avg_net_transfers_5gw"] = 0
-                    df.loc[new_player_mask, "bandwagon_score"] = 0
-                    df.loc[new_player_mask, "ownership_velocity"] = 0
-
-                    # Update missing_gws to exclude those handled
-                    remaining_missing = df[df["selected_by_percent"].isna()]
-                    if len(remaining_missing) == 0:
-                        missing_gws = []
-                    else:
-                        missing_gws = sorted(remaining_missing["gameweek"].unique())
-
-            # Check if there are still missing gameweeks (after handling GW1 and new players)
+            # Check if there are still missing gameweeks (after handling GW1)
             if missing_gws:
                 raise ValueError(
                     f"Missing ownership data for gameweeks {missing_gws}. "
@@ -960,38 +923,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 df.loc[gw1_mask, "price_risk"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
-            # Handle new players who appear mid-season (no prior value history)
-            # TODO: this is a hack: should probably fix in fpl-dataset-builder
-            if missing_gws:
-                missing_mask = df["points_per_pound"].isna()
-                missing_players = df[missing_mask]["player_id"].unique()
-
-                # Check if these are genuinely new players (first appearance)
-                new_players = []
-                for player_id in missing_players:
-                    player_value = value_df[value_df["player_id"] == player_id]
-                    if len(player_value) > 0:
-                        first_gw = player_value["gameweek"].min()
-                        if first_gw in missing_gws:
-                            new_players.append(player_id)
-
-                if new_players:
-                    # Fill new players with neutral value features
-                    new_player_mask = missing_mask & df["player_id"].isin(new_players)
-                    df.loc[new_player_mask, "points_per_pound"] = 0.5  # Neutral
-                    df.loc[new_player_mask, "value_vs_position"] = 1.0  # Average
-                    df.loc[new_player_mask, "predicted_price_change_1gw"] = 0
-                    df.loc[new_player_mask, "price_volatility"] = 0
-                    df.loc[new_player_mask, "price_risk"] = 0
-
-                    # Update missing_gws
-                    remaining_missing = df[df["points_per_pound"].isna()]
-                    if len(remaining_missing) == 0:
-                        missing_gws = []
-                    else:
-                        missing_gws = sorted(remaining_missing["gameweek"].unique())
-
-            # Check if there are still missing gameweeks (after handling GW1 and new players)
+            # Check if there are still missing gameweeks (after handling GW1)
             if missing_gws:
                 raise ValueError(
                     f"Missing value analysis data for gameweeks {missing_gws}. "
