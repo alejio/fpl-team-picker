@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/tpot/tpot_pipeline_gw1-8_20251025_032240.joblib",
+        default="models/tpot/tpot_pipeline_gw1-9_20251028_222834.joblib",
         description="Path to pre-trained ML model with 80 features (TPOT auto-optimized, MAE: 0.757)",
     )
     ml_ensemble_rule_weight: float = Field(
@@ -51,39 +51,6 @@ class XPModelConfig(BaseModel):
         ge=10,
         le=100,
     )
-
-    # UNUSED PARAMETERS - DEPRECATED 2025-01-21
-    # These were designed for form analytics features but are not currently used
-    # in any interfaces. Form analytics are handled directly in charts.py
-    # Keep commented for potential future use.
-
-    # # Form classification thresholds
-    # hot_threshold: float = Field(
-    #     default=6.0, description="Points per gameweek for 'hot' players", ge=0.0
-    # )
-    # rising_threshold: float = Field(
-    #     default=5.0, description="Points per gameweek for 'rising' players", ge=0.0
-    # )
-    # stable_threshold: float = Field(
-    #     default=3.0, description="Points per gameweek for 'stable' players", ge=0.0
-    # )
-    # declining_threshold: float = Field(
-    #     default=1.0, description="Points per gameweek for 'declining' players", ge=0.0
-    # )
-
-    # # Form multiplier thresholds
-    # hot_multiplier_threshold: float = Field(
-    #     default=1.4, description=">= 1.4 = 🔥 Hot", ge=1.0
-    # )
-    # rising_multiplier_threshold: float = Field(
-    #     default=1.15, description=">= 1.15 = 📈 Rising", ge=1.0
-    # )
-    # stable_multiplier_threshold: float = Field(
-    #     default=0.85, description=">= 0.85 = ➡️ Stable", ge=0.0, le=1.0
-    # )
-    # declining_multiplier_threshold: float = Field(
-    #     default=0.7, description=">= 0.7 = 📉 Declining (else ❄️ Cold)", ge=0.0, le=1.0
-    # )
 
 
 class TeamStrengthConfig(BaseModel):
