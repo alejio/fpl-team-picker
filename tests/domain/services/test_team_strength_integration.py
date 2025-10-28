@@ -17,7 +17,7 @@ Test coverage:
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 from fpl_team_picker.domain.services.team_analytics_service import TeamAnalyticsService
 from fpl_team_picker.domain.services.ml_pipeline_factory import (
@@ -357,7 +357,7 @@ class TestWrapperFunctionCompatibility:
             mock_service.return_value = mock_service_instance
 
             # Call without teams_df
-            strength = get_team_strength_ratings(target_gameweek=1, teams_df=None)
+            get_team_strength_ratings(target_gameweek=1, teams_df=None)
 
             # Verify teams were loaded
             mock_client_instance.get_current_teams.assert_called_once()

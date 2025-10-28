@@ -8,6 +8,9 @@ This module provides factory functions to build complete ML pipelines that can b
 - Integrated with gameweek_manager.py
 """
 
+# TODO: many of these features could be created upstream
+# for analytics purposes
+
 import joblib
 import pandas as pd
 from pathlib import Path
@@ -259,12 +262,17 @@ def train_and_save_model(
     from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
     import numpy as np
 
-    # Get dynamic team strength ratings for most recent gameweek
-    # TODO: Ideally calculate per-gameweek strength during feature engineering
-    # For now, use latest GW as best approximation of current team quality
-    target_gw = historical_df["gameweek"].max()
-    team_strength = get_team_strength_ratings(
-        target_gameweek=target_gw,
+    # Calculate per-gameweek team strength (no data leakage)
+    # For GW N, uses team strength calculated from GW 1 to N-1
+    from fpl_team_picker.domain.services.ml_feature_engineering import (
+        calculate_per_gameweek_team_strength,
+    )
+
+    start_gw = 6  # First trainable gameweek (needs GW1-5 for rolling features)
+    end_gw = historical_df["gameweek"].max()
+    team_strength = calculate_per_gameweek_team_strength(
+        start_gw=start_gw,
+        end_gw=end_gw,
         teams_df=teams_df,
     )
 

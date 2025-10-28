@@ -32,9 +32,6 @@ from client import FPLDataClient  # noqa: E402
 from fpl_team_picker.domain.services.ml_feature_engineering import (  # noqa: E402
     FPLFeatureEngineer,
 )
-from fpl_team_picker.domain.services.team_analytics_service import (  # noqa: E402
-    TeamAnalyticsService,
-)
 
 
 class TemporalCVSplitter(BaseCrossValidator):
@@ -246,21 +243,21 @@ def engineer_features(
         "\n🔧 Engineering features (production FPLFeatureEngineer with 80 features)..."
     )
 
-    # Calculate dynamic team strength ratings using TeamAnalyticsService
-    # TODO: Ideally calculate per-gameweek team strength during feature engineering
-    # (GW6 uses GW1-5 strength, GW7 uses GW1-6 strength, etc.)
-    # For now, use latest GW as best approximation of current team quality
-    target_gw = historical_df["gameweek"].max()
-    print(
-        f"   📊 Calculating team strength for GW{target_gw} (most recent in training data)"
+    # Calculate per-gameweek team strength (no data leakage)
+    # For GW N, uses team strength calculated from GW 1 to N-1
+    print("   📊 Calculating per-gameweek team strength (leak-free)...")
+    from fpl_team_picker.domain.services.ml_feature_engineering import (
+        calculate_per_gameweek_team_strength,
     )
 
-    team_analytics = TeamAnalyticsService(debug=False)
-    team_strength = team_analytics.get_team_strength(
-        target_gameweek=target_gw,
-        teams_data=teams_df,
-        current_season_data=None,
+    start_gw = 6  # First trainable gameweek (needs GW1-5 for rolling features)
+    end_gw = historical_df["gameweek"].max()
+    team_strength = calculate_per_gameweek_team_strength(
+        start_gw=start_gw,
+        end_gw=end_gw,
+        teams_df=teams_df,
     )
+    print(f"   ✅ Team strength calculated for GW{start_gw}-{end_gw}")
 
     # Initialize production feature engineer with enhanced data sources
     feature_engineer = FPLFeatureEngineer(

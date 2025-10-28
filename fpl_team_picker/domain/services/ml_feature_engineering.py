@@ -11,6 +11,59 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from typing import Dict, Optional
 
 
+def calculate_per_gameweek_team_strength(
+    start_gw: int,
+    end_gw: int,
+    teams_df: pd.DataFrame,
+) -> Dict[int, Dict[str, float]]:
+    """
+    Calculate team strength for each gameweek using only prior gameweeks.
+
+    For GW N, uses data from GW1 to GW(N-1) to calculate strength.
+    This ensures no data leakage during ML training.
+
+    Args:
+        start_gw: First gameweek to calculate strength for (typically 6, first trainable GW)
+        end_gw: Last gameweek to calculate strength for
+        teams_df: Teams DataFrame with [team_id, name] columns
+
+    Returns:
+        Dict mapping gameweek to team strength dict:
+        {6: {"Arsenal": 1.2, "Liverpool": 1.25, ...},
+         7: {"Arsenal": 1.21, "Liverpool": 1.24, ...},
+         ...}
+
+    Example:
+        >>> team_strength = calculate_per_gameweek_team_strength(6, 10, teams_df)
+        >>> # GW6 predictions use strength calculated from GW1-5
+        >>> # GW7 predictions use strength calculated from GW1-6
+        >>> feature_engineer = FPLFeatureEngineer(
+        ...     fixtures_df=fixtures_df,
+        ...     teams_df=teams_df,
+        ...     team_strength=team_strength  # Per-gameweek format
+        ... )
+    """
+    from fpl_team_picker.domain.services.team_analytics_service import (
+        TeamAnalyticsService,
+    )
+
+    team_analytics = TeamAnalyticsService(debug=False)
+    per_gw_strength = {}
+
+    for gw in range(start_gw, end_gw + 1):
+        # Use data up to (gw - 1) to predict gw
+        # For GW6, use GW5 data (which itself uses GW1-5)
+        # For GW7, use GW6 data (which itself uses GW1-6)
+        target_gw = gw - 1 if gw > 1 else 1
+        per_gw_strength[gw] = team_analytics.get_team_strength(
+            target_gameweek=target_gw,
+            teams_data=teams_df,
+            current_season_data=None,
+        )
+
+    return per_gw_strength
+
+
 # TODO: do we have penalty taker as a feature?
 class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
@@ -41,7 +94,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         self,
         fixtures_df: Optional[pd.DataFrame] = None,
         teams_df: Optional[pd.DataFrame] = None,
-        team_strength: Optional[Dict[str, float]] = None,
+        team_strength: Optional[Dict] = None,
         ownership_trends_df: Optional[pd.DataFrame] = None,
         value_analysis_df: Optional[pd.DataFrame] = None,
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
@@ -52,7 +105,10 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         Args:
             fixtures_df: Fixture data with [event, home_team_id, away_team_id]
             teams_df: Teams data with [team_id, name]
-            team_strength: Dict mapping team name to strength rating [0.65, 1.30]
+            team_strength: Team strength ratings. Supports two formats:
+                - Dict[str, float]: Single static dict {team_name: strength} (backward compatible)
+                - Dict[int, Dict[str, float]]: Per-gameweek dict {gameweek: {team_name: strength}}
+                  Recommended format to avoid data leakage (GW N uses strength from GW 1 to N-1)
             ownership_trends_df: Ownership trends from get_derived_ownership_trends() (NEW - Issue #37)
             value_analysis_df: Value analysis from get_derived_value_analysis() (NEW - Issue #37)
             fixture_difficulty_df: Enhanced fixture difficulty from get_derived_fixture_difficulty() (NEW - Issue #37)
@@ -60,6 +116,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
         self.team_strength = team_strength if team_strength is not None else {}
+
+        # Detect team_strength format for efficient lookup
+        self._is_per_gameweek_strength = self._detect_strength_format()
 
         # NEW: Enhanced data sources for differential strategy (Issue #37)
         self.ownership_trends_df = (
@@ -76,6 +135,37 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         # Store feature names for reference
         self.feature_names_ = None
+
+    def _detect_strength_format(self) -> bool:
+        """
+        Detect if team_strength is per-gameweek format.
+
+        Returns:
+            True if team_strength is Dict[int, Dict[str, float]] (per-gameweek)
+            False if team_strength is Dict[str, float] (static) or empty
+        """
+        if not self.team_strength:
+            return False
+
+        # Check first key - if it's an int, assume per-gameweek format
+        first_key = next(iter(self.team_strength.keys()))
+        if isinstance(first_key, int):
+            # Validate structure: {int: {str: float}}
+            first_value = self.team_strength[first_key]
+            if not isinstance(first_value, dict):
+                raise ValueError(
+                    f"Invalid team_strength format. Per-gameweek format requires "
+                    f"Dict[int, Dict[str, float]], got {type(first_value)} for gameweek {first_key}"
+                )
+            return True
+        elif isinstance(first_key, str):
+            # Static format: {str: float}
+            return False
+        else:
+            raise ValueError(
+                f"Invalid team_strength format. Expected Dict[str, float] or Dict[int, Dict[str, float]], "
+                f"got key type {type(first_key)}"
+            )
 
     def fit(self, X, y=None):
         """
@@ -630,10 +720,22 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         all_team_fixtures = all_team_fixtures.rename(columns={"name": "opponent_name"})
         all_team_fixtures = all_team_fixtures.drop(columns=["team_id_opponent"])
 
-        # Add opponent strength
-        all_team_fixtures["opponent_strength"] = (
-            all_team_fixtures["opponent_name"].map(self.team_strength).fillna(1.0)
-        )
+        # Add opponent strength (per-gameweek or static)
+        if self._is_per_gameweek_strength:
+            # Per-gameweek format: {gw: {team: strength}}
+            def map_opponent_strength(row):
+                gw = int(row["gameweek"])
+                opponent = row["opponent_name"]
+                return self.team_strength.get(gw, {}).get(opponent, 1.0)
+
+            all_team_fixtures["opponent_strength"] = all_team_fixtures.apply(
+                map_opponent_strength, axis=1
+            )
+        else:
+            # Static format: {team: strength} (backward compatible)
+            all_team_fixtures["opponent_strength"] = (
+                all_team_fixtures["opponent_name"].map(self.team_strength).fillna(1.0)
+            )
 
         # Calculate fixture difficulty
         all_team_fixtures["fixture_difficulty"] = np.where(
@@ -836,13 +938,14 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
             # Check if there are still missing gameweeks (after handling GW1)
+            # Note: With dataset-builder backfill, this should never happen
             if missing_gws:
                 raise ValueError(
                     f"Missing ownership data for gameweeks {missing_gws}. "
                     f"Ownership trends data available through GW{max_ownership_gw}. "
                     f"With shift(1), can predict up to GW{max_ownership_gw + 1}. "
                     f"\n\nCannot predict GW{missing_gws[0]} - need GW{missing_gws[0] - 1} ownership data. "
-                    f"\n\nSolution: Wait for GW{missing_gws[0] - 1} to complete, then regenerate ownership trends."
+                    f"\n\nSolution: Regenerate ownership trends with backfill enabled in dataset-builder."
                 )
 
         # Encode categorical ownership_tier
@@ -924,12 +1027,13 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
             # Check if there are still missing gameweeks (after handling GW1)
+            # Note: With dataset-builder backfill, this should never happen
             if missing_gws:
                 raise ValueError(
                     f"Missing value analysis data for gameweeks {missing_gws}. "
                     f"Value analysis data available through GW{max_value_gw}. "
                     f"With shift(1), can predict up to GW{max_value_gw + 1}. "
-                    f"\n\nSolution: Wait for GW{missing_gws[0] - 1} to complete, then regenerate value analysis."
+                    f"\n\nSolution: Regenerate value analysis with backfill enabled in dataset-builder."
                 )
 
         return df

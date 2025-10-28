@@ -30,7 +30,6 @@ from .ml_pipeline_factory import (
     create_fpl_pipeline,
     save_pipeline,
     load_pipeline,
-    get_team_strength_ratings,
 )
 
 warnings.filterwarnings("ignore")
@@ -177,13 +176,17 @@ class MLExpectedPointsService:
                 "Ensure live_data includes position information before calling ML service."
             )
 
-        # Get team strength ratings for most recent gameweek in historical data
-        # TODO: Ideally, calculate per-gameweek team strength during feature engineering
-        # (GW6 uses GW1-5 strength, GW7 uses GW1-6 strength, etc.)
-        # For now, use latest GW as best approximation
-        target_gw = historical_df["gameweek"].max()
-        team_strength = get_team_strength_ratings(
-            target_gameweek=target_gw,
+        # Calculate per-gameweek team strength (no data leakage)
+        # For GW N, uses team strength calculated from GW 1 to N-1
+        from fpl_team_picker.domain.services.ml_feature_engineering import (
+            calculate_per_gameweek_team_strength,
+        )
+
+        start_gw = 6  # First trainable gameweek (needs GW1-5 for rolling features)
+        end_gw = historical_df["gameweek"].max()
+        team_strength = calculate_per_gameweek_team_strength(
+            start_gw=start_gw,
+            end_gw=end_gw,
             teams_df=teams_df,
         )
 
@@ -460,9 +463,14 @@ class MLExpectedPointsService:
                         current_data[col] = 0  # Future performance = 0 (unknown)
 
             # CRITICAL: The feature engineer needs ALL historical data to calculate rolling features!
+            # Filter out target gameweek from live_data to avoid duplicates (same as rule-based service)
+            # live_data might include actual target_gameweek performance if available
+            gw_col = "gameweek" if "gameweek" in live_data.columns else "event"
+            historical_only = live_data[live_data[gw_col] < target_gameweek].copy()
+
             # Append current data to historical - pass ALL data through pipeline
             prediction_data_all = pd.concat(
-                [live_data, current_data], ignore_index=True
+                [historical_only, current_data], ignore_index=True
             )
 
             # CRITICAL FIX: Sort by player_id and gameweek BEFORE prediction

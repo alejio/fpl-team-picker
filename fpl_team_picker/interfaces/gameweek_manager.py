@@ -1408,9 +1408,6 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 
         if _current_squad is not None and not _current_squad.empty and _team_data:
             from fpl_team_picker.domain.services import ChipAssessmentService
-            from fpl_team_picker.interfaces.data_contracts import (
-                DataContractError as _DataContractError3,
-            )
 
             # Get available chips from team data
             available_chips = _team_data.get(
@@ -1481,7 +1478,7 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 
                     chip_assessment_display = mo.vstack(chip_displays)
 
-                except (ValueError, _DataContractError3) as e:
+                except ValueError as e:
                     # Data contract violations in chip assessment
                     chip_assessment_display = mo.md(
                         f"❌ **Chip assessment data error:** {str(e)}"

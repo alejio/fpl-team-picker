@@ -38,9 +38,9 @@ from lightgbm import LGBMRegressor
 from catboost import CatBoostRegressor
 
 from client import FPLDataClient
-from fpl_team_picker.domain.services.ml_feature_engineering import FPLFeatureEngineer
-from fpl_team_picker.domain.services.ml_pipeline_factory import (
-    get_team_strength_ratings,
+from fpl_team_picker.domain.services.ml_feature_engineering import (
+    FPLFeatureEngineer,
+    calculate_per_gameweek_team_strength,
 )
 
 print("=" * 80)
@@ -103,13 +103,17 @@ prices = cv_data["price"].copy()
 
 # Feature engineering (with fixtures and teams context)
 print("\n🔧 Engineering features...")
-# Use latest gameweek for team strength (most current team quality)
-# TODO: Ideally calculate per-gameweek strength during feature engineering
-target_gw = end_gw
-print(
-    f"   📊 Using dynamic team strength for GW{target_gw} (most recent in training data)"
+# Calculate per-gameweek team strength (no data leakage)
+print("   📊 Calculating per-gameweek team strength (leak-free)...")
+
+start_gw = 6  # First trainable gameweek
+team_strength = calculate_per_gameweek_team_strength(
+    start_gw=start_gw,
+    end_gw=end_gw,
+    teams_df=teams_df,
 )
-team_strength = get_team_strength_ratings(target_gameweek=target_gw, teams_df=teams_df)
+print(f"   ✅ Team strength calculated for GW{start_gw}-{end_gw}")
+
 feature_engineer = FPLFeatureEngineer(
     fixtures_df=fixtures_df,
     teams_df=teams_df,
