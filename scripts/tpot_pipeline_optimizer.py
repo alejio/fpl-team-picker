@@ -22,6 +22,8 @@ import numpy as np
 import pandas as pd
 from tpot import TPOTRegressor
 from sklearn.model_selection import BaseCrossValidator
+from sklearn.metrics import make_scorer
+from scipy.stats import spearmanr
 from dask.distributed import Client, LocalCluster
 
 # Add project root to path
@@ -32,6 +34,63 @@ from client import FPLDataClient  # noqa: E402
 from fpl_team_picker.domain.services.ml_feature_engineering import (  # noqa: E402
     FPLFeatureEngineer,
 )
+
+
+def fpl_weighted_huber_scorer(y_true, y_pred, sample_weight=None):
+    """
+    Custom FPL scorer: Weighted Huber Loss with position-aware penalties.
+
+    Optimized for FPL optimization use case:
+    1. Huber loss balances MAE/MSE (robust to outliers, penalizes large errors)
+    2. Value-based weighting (penalize errors on high xP players - captaincy candidates)
+    3. Asymmetric loss (underestimation worse than overestimation)
+    4. Position-aware weighting (via sample_weight if provided)
+
+    Returns:
+        Negative loss (higher is better for sklearn compatibility)
+    """
+    errors = y_true - y_pred
+
+    # 1. Huber loss (delta=2.0 tuned for FPL point scale)
+    #    Acts like MAE for small errors (<2 pts), MSE for large errors (>2 pts)
+    #    Prevents catastrophic misses on explosive hauls
+    delta = 2.0
+    huber_loss = np.where(
+        np.abs(errors) <= delta, 0.5 * errors**2, delta * (np.abs(errors) - 0.5 * delta)
+    )
+
+    # 2. Value-based weighting (penalize errors on high scorers)
+    #    Captain candidates (8+ predicted points) matter most for FPL strategy
+    value_weights = np.where(
+        y_pred >= 8.0,
+        2.0,  # High xP (captaincy): 2x penalty
+        np.where(
+            y_pred >= 5.0,
+            1.5,  # Medium xP (premium): 1.5x penalty
+            1.0,  # Low xP (budget): 1x penalty
+        ),
+    )
+
+    # 3. Asymmetric penalty (underestimation is worse for FPL)
+    #    Missing a 15pt haul (underestimate) costs more than overestimating a 2pt return
+    #    Ratio: penalize underestimation 1.3x vs overestimation 1.0x
+    asymmetric_weights = np.where(errors > 0, 1.3, 1.0)
+
+    # 4. Combine weights
+    combined_weights = value_weights * asymmetric_weights
+
+    # Apply sample weights if provided (e.g., position-based from cross-validation)
+    if sample_weight is not None:
+        combined_weights *= sample_weight
+
+    # Weighted Huber loss
+    weighted_loss = (huber_loss * combined_weights).mean()
+
+    return -weighted_loss  # Negative for sklearn (higher is better)
+
+
+# Create sklearn-compatible scorer
+fpl_custom_scorer = make_scorer(fpl_weighted_huber_scorer, greater_is_better=True)
 
 
 class TemporalCVSplitter(BaseCrossValidator):
@@ -101,8 +160,9 @@ def parse_args():
             "neg_mean_squared_error",
             "neg_median_absolute_error",
             "r2",
+            "fpl_weighted_huber",
         ],
-        help="Scoring metric for TPOT (default: neg_mean_absolute_error). TPOT 1.1.0 uses 'scorers' parameter.",
+        help="Scoring metric for TPOT (default: neg_mean_absolute_error). 'fpl_weighted_huber' uses custom FPL-optimized scorer. TPOT 1.1.0 uses 'scorers' parameter.",
     )
     parser.add_argument(
         "--output-dir",
@@ -401,6 +461,12 @@ def run_tpot_optimization(
     # Wrap custom CV splits in sklearn-compatible splitter
     cv_splitter = TemporalCVSplitter(cv_splits)
 
+    # Handle custom scorer
+    scorer_name = args.scorer
+    if args.scorer == "fpl_weighted_huber":
+        scorer_name = fpl_custom_scorer
+        print("   Using custom FPL weighted Huber loss scorer")
+
     # Set up Dask cluster for parallelization
     n_workers = args.n_jobs if args.n_jobs > 0 else None
     print("\n🔧 Starting Dask LocalCluster...")
@@ -417,7 +483,9 @@ def run_tpot_optimization(
 
     try:
         tpot = TPOTRegressor(
-            scorers=[args.scorer],  # TPOT 1.1.0 uses 'scorers' list
+            scorers=[
+                scorer_name
+            ],  # TPOT 1.1.0 uses 'scorers' list (can be string or callable)
             cv=cv_splitter,  # Custom temporal CV splitter
             max_time_mins=args.max_time_mins,
             max_eval_time_mins=args.max_eval_time_mins,
@@ -548,12 +616,17 @@ def evaluate_pipeline(
         tpot: Fitted TPOTRegressor
         X: Feature matrix
         y: Target variable
-        cv_data: CV data with metadata
+        cv_data: CV data with metadata (includes 'gameweek', 'player_id', 'position')
     """
     print("\n📊 Evaluating best pipeline...")
 
     # Get predictions
     y_pred = tpot.predict(X)
+
+    # Create evaluation dataframe
+    cv_data_eval = cv_data.copy()
+    cv_data_eval["predicted"] = y_pred
+    cv_data_eval["actual"] = y.values
 
     # Overall metrics
     mae = np.abs(y_pred - y).mean()
@@ -565,12 +638,35 @@ def evaluate_pipeline(
     print(f"   RMSE: {rmse:.3f} points")
     print(f"   R²:   {r2:.3f}")
 
+    # FPL-specific strategic metrics
+    print("\n🎯 FPL Strategic Metrics:")
+
+    # Ranking correlation (how well does model rank players?)
+    rank_corr, _ = spearmanr(cv_data_eval["actual"], cv_data_eval["predicted"])
+    print(f"   Spearman correlation (ranking): {rank_corr:.3f}")
+
+    # Top-15 selection accuracy (squad building)
+    for gw in sorted(cv_data_eval["gameweek"].unique()):
+        gw_data = cv_data_eval[cv_data_eval["gameweek"] == gw]
+
+        # Top-15 players by actual vs predicted
+        top_15_actual = set(gw_data.nlargest(15, "actual")["player_id"])
+        top_15_pred = set(gw_data.nlargest(15, "predicted")["player_id"])
+        top_15_overlap = len(top_15_actual & top_15_pred)
+
+        # Captain accuracy (top-1)
+        best_actual_id = gw_data.loc[gw_data["actual"].idxmax(), "player_id"]
+        best_pred_id = gw_data.loc[gw_data["predicted"].idxmax(), "player_id"]
+        captain_correct = 1 if best_actual_id == best_pred_id else 0
+
+        print(
+            f"   GW{gw}: Top-15 overlap {top_15_overlap}/15 ({100 * top_15_overlap / 15:.0f}%), "
+            f"Captain {'✓' if captain_correct else '✗'}"
+        )
+
     # Position-specific metrics
-    if "position" in cv_data.columns:
+    if "position" in cv_data_eval.columns:
         print("\n📊 Position-Specific MAE:")
-        cv_data_eval = cv_data.copy()
-        cv_data_eval["predicted"] = y_pred
-        cv_data_eval["actual"] = y.values
 
         for position in sorted(cv_data_eval["position"].unique()):
             pos_mask = cv_data_eval["position"] == position
@@ -580,18 +676,39 @@ def evaluate_pipeline(
             ).mean()
             print(f"   {position}: {pos_mae:.3f} points")
 
-    # Gameweek-specific metrics
-    print("\n📅 Gameweek-Specific MAE:")
-    cv_data_eval = cv_data.copy()
-    cv_data_eval["predicted"] = y_pred
-    cv_data_eval["actual"] = y.values
+    # Gameweek-specific metrics with chaos detection
+    print("\n📅 Gameweek Analysis (with chaos detection):")
 
     for gw in sorted(cv_data_eval["gameweek"].unique()):
         gw_mask = cv_data_eval["gameweek"] == gw
-        gw_mae = np.abs(
-            cv_data_eval.loc[gw_mask, "predicted"] - cv_data_eval.loc[gw_mask, "actual"]
-        ).mean()
-        print(f"   GW{gw}: {gw_mae:.3f} points")
+        gw_data = cv_data_eval.loc[gw_mask]
+
+        # MAE
+        gw_mae = np.abs(gw_data["predicted"] - gw_data["actual"]).mean()
+
+        # Chaos indicators
+        actual_std = gw_data["actual"].std()
+        actual_max = gw_data["actual"].max()
+        high_scorers = (gw_data["actual"] >= 10).sum()
+        zero_scorers = (gw_data["actual"] == 0).sum()
+        zero_pct = 100 * zero_scorers / len(gw_data)
+
+        # Flag chaos weeks
+        chaos_flags = []
+        if actual_std > 2.5:
+            chaos_flags.append("high_variance")
+        if actual_max >= 20:
+            chaos_flags.append("extreme_haul")
+        if high_scorers >= 15:
+            chaos_flags.append("many_hauls")
+
+        chaos_str = f" ⚠️ [{', '.join(chaos_flags)}]" if chaos_flags else ""
+
+        print(
+            f"   GW{gw}: MAE {gw_mae:.3f} | Std {actual_std:.2f} | "
+            f"Max {actual_max:.0f} | 10+ pts: {high_scorers} | "
+            f"0 pts: {zero_pct:.0f}%{chaos_str}"
+        )
 
 
 def main():

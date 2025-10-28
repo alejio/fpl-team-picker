@@ -27,6 +27,7 @@ dependencies = [
     "setuptools>=75.0.0",
     "bokeh>=3.8.0",
     "catboost>=1.2.8",
+    "altair>=5.5.0",
 ]
 
 [dependency-groups]

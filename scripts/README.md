@@ -9,10 +9,11 @@ Standalone scripts for ML pipeline optimization and experimentation.
 ### Features
 
 - Uses the same temporal cross-validation (walk-forward) as `ml_xp_notebook.py`
-- Leak-free feature engineering via `FPLFeatureEngineer`
+- Leak-free feature engineering via `FPLFeatureEngineer` (80 features: 65 base + 15 enhanced)
+- **Custom FPL-optimized scorer** (`fpl_weighted_huber`): Weighted Huber loss with position-aware penalties
 - Automatic hyperparameter tuning and algorithm selection
-- Exports production-ready sklearn pipelines
-- Position-specific and gameweek-specific evaluation metrics
+- Exports production-ready sklearn pipelines (.py and .joblib)
+- Enhanced evaluation metrics: position-specific MAE, ranking correlation, top-15 selection accuracy, captain accuracy, chaos detection
 
 ### Quick Start
 
@@ -20,14 +21,14 @@ Standalone scripts for ML pipeline optimization and experimentation.
 # Install TPOT dependency
 uv sync
 
-# Run with default settings (fast test)
-python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --generations 5
+# Run with default MAE scorer (fast test)
+uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 9 --max-time-mins 10
 
-# Production run (longer, better results)
-python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --generations 20 --population-size 100
+# Run with custom FPL-optimized scorer (recommended)
+uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 9 --scorer fpl_weighted_huber --max-time-mins 30
 
-# With time limit (useful for CI/CD or quick experiments)
-python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --max-time-mins 30
+# Production run with more data (better model)
+uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 15 --scorer fpl_weighted_huber --max-time-mins 60
 ```
 
 ### Command Line Options
@@ -36,23 +37,56 @@ python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --max-time-min
 |--------|---------|-------------|
 | `--start-gw` | 1 | Training start gameweek |
 | `--end-gw` | 8 | Training end gameweek (inclusive) |
-| `--generations` | 10 | Number of TPOT generations (more = better but slower) |
-| `--population-size` | 50 | Population size per generation |
-| `--max-time-mins` | None | Maximum runtime in minutes (None = no limit) |
+| `--max-time-mins` | 60 | Maximum runtime in minutes (TPOT 1.1.0 time-based) |
 | `--max-eval-time-mins` | 5 | Max evaluation time per pipeline in minutes |
 | `--cv-folds` | auto | Number of temporal CV folds (auto = all available) |
-| `--scoring` | neg_mean_absolute_error | Scoring metric (MAE, MSE, R²) |
+| `--scorer` | neg_mean_absolute_error | Scoring metric (MAE, MSE, R², **fpl_weighted_huber**) |
 | `--output-dir` | models/tpot | Output directory for exported pipelines |
 | `--random-seed` | 42 | Random seed for reproducibility |
-| `--verbosity` | 2 | TPOT verbosity level (0-3) |
+| `--verbose` | 2 | TPOT verbosity level (0-3) |
 | `--n-jobs` | -1 | Number of parallel jobs (-1 = all CPUs) |
+
+### Custom FPL Scorer
+
+The `fpl_weighted_huber` scorer optimizes for FPL-specific strategic objectives:
+
+**Design Principles:**
+1. **Huber loss** (δ=2.0): Balances MAE/MSE - robust to outliers, penalizes large errors
+2. **Value-based weighting**: Errors on high xP predictions (8+ = captaincy candidates) penalized 2x more
+3. **Asymmetric penalty**: Underestimation (missing hauls) penalized 1.3x vs overestimation
+4. **Position-aware**: Supports sample weighting for position-specific models
+
+**Why use it?**
+- Standard MAE treats all errors equally (predicting budget player ±2pts = premium player ±2pts)
+- FPL strategy cares more about correctly identifying captains and avoiding premium player mistakes
+- Asymmetric penalty reflects FPL reality: missing a 15pt haul hurts more than overestimating a blank
+
+**Test it:**
+```bash
+uv run python scripts/test_custom_scorer.py
+```
+
+### Enhanced Evaluation Metrics
+
+Beyond standard MAE/RMSE/R², the optimizer reports:
+
+**FPL Strategic Metrics:**
+- **Spearman correlation**: Ranking accuracy (how well model orders players)
+- **Top-15 selection accuracy**: Per-gameweek overlap with actual top performers (squad building)
+- **Captain accuracy**: Did model identify the best player to captain?
+
+**Chaos Detection:**
+- Flags gameweeks with extreme variance, outlier hauls (20+ pts), or many high scorers
+- Helps explain MAE spikes (e.g., GW9 had 23-point defender haul + rotation chaos)
+- Format: `GW9: MAE 1.028 | Std 2.44 | Max 23 | 10+ pts: 14 | 0 pts: 60% ⚠️ [extreme_haul]`
 
 ### Output
 
-TPOT exports two files to `models/tpot/`:
+TPOT exports three files to `models/tpot/`:
 
-1. **Pipeline file** (`tpot_pipeline_gw1-8_YYYYMMDD_HHMMSS.py`) - Standalone sklearn pipeline
-2. **Metadata file** (`tpot_pipeline_gw1-8_YYYYMMDD_HHMMSS_metadata.txt`) - Run configuration and results
+1. **Pipeline file** (`tpot_pipeline_gw1-9_YYYYMMDD_HHMMSS.py`) - Standalone sklearn pipeline code
+2. **Model file** (`tpot_pipeline_gw1-9_YYYYMMDD_HHMMSS.joblib`) - Serialized model for immediate use
+3. **Metadata file** (`tpot_pipeline_gw1-9_YYYYMMDD_HHMMSS_metadata.txt`) - Run configuration and CV scores
 
 ### Example Output
 
