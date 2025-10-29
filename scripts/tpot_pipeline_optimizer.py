@@ -34,6 +34,7 @@ from client import FPLDataClient  # noqa: E402
 from fpl_team_picker.domain.services.ml_feature_engineering import (  # noqa: E402
     FPLFeatureEngineer,
 )
+from custom_scorers import fpl_topk_scorer, fpl_captain_scorer  # noqa: E402
 
 
 def fpl_weighted_huber_scorer(y_true, y_pred, sample_weight=None):
@@ -60,21 +61,26 @@ def fpl_weighted_huber_scorer(y_true, y_pred, sample_weight=None):
     )
 
     # 2. Value-based weighting (penalize errors on high scorers)
-    #    Captain candidates (8+ predicted points) matter most for FPL strategy
+    #    AGGRESSIVE: Focus on top scorers (actual points, not predicted)
+    #    Captain candidates (10+ actual points) matter most for FPL strategy
     value_weights = np.where(
-        y_pred >= 8.0,
-        2.0,  # High xP (captaincy): 2x penalty
+        y_true >= 10.0,
+        5.0,  # Explosive hauls (10+ pts): 5x penalty - MUST get these right!
         np.where(
-            y_pred >= 5.0,
-            1.5,  # Medium xP (premium): 1.5x penalty
-            1.0,  # Low xP (budget): 1x penalty
+            y_true >= 6.0,
+            3.0,  # Good returns (6-9 pts): 3x penalty
+            np.where(
+                y_true >= 3.0,
+                1.5,  # Decent (3-5 pts): 1.5x penalty
+                1.0,  # Blanks (0-2 pts): 1x penalty
+            ),
         ),
     )
 
-    # 3. Asymmetric penalty (underestimation is worse for FPL)
-    #    Missing a 15pt haul (underestimate) costs more than overestimating a 2pt return
-    #    Ratio: penalize underestimation 1.3x vs overestimation 1.0x
-    asymmetric_weights = np.where(errors > 0, 1.3, 1.0)
+    # 3. Asymmetric penalty (underestimation is MUCH worse for FPL)
+    #    Missing a 15pt haul (underestimate) costs WAY more than overestimating a 2pt return
+    #    AGGRESSIVE: penalize underestimation 3.0x vs overestimation 1.0x
+    asymmetric_weights = np.where(errors > 0, 3.0, 1.0)
 
     # 4. Combine weights
     combined_weights = value_weights * asymmetric_weights
@@ -161,8 +167,10 @@ def parse_args():
             "neg_median_absolute_error",
             "r2",
             "fpl_weighted_huber",
+            "fpl_top_k_ranking",
+            "fpl_captain_pick",
         ],
-        help="Scoring metric for TPOT (default: neg_mean_absolute_error). 'fpl_weighted_huber' uses custom FPL-optimized scorer. TPOT 1.1.0 uses 'scorers' parameter.",
+        help="Scoring metric for TPOT (default: neg_mean_absolute_error). Custom scorers: 'fpl_weighted_huber' (AGGRESSIVE balanced), 'fpl_top_k_ranking' (best for team selection), 'fpl_captain_pick' (captain focus). TPOT 1.1.0 uses 'scorers' parameter.",
     )
     parser.add_argument(
         "--output-dir",
@@ -465,7 +473,17 @@ def run_tpot_optimization(
     scorer_name = args.scorer
     if args.scorer == "fpl_weighted_huber":
         scorer_name = fpl_custom_scorer
-        print("   Using custom FPL weighted Huber loss scorer")
+        print(
+            "   Using custom FPL weighted Huber loss scorer (AGGRESSIVE: 3x asymmetric, 5x high-scorer penalty)"
+        )
+    elif args.scorer == "fpl_top_k_ranking":
+        scorer_name = fpl_topk_scorer
+        print(
+            "   Using top-K ranking scorer (optimizes top-50 player ranking + captain overlap)"
+        )
+    elif args.scorer == "fpl_captain_pick":
+        scorer_name = fpl_captain_scorer
+        print("   Using captain pick scorer (pure captain identification focus)")
 
     # Set up Dask cluster for parallelization
     n_workers = args.n_jobs if args.n_jobs > 0 else None
