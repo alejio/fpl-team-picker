@@ -424,7 +424,7 @@ def _(gameweek_data, mo):
 
         if use_ml:
             # Use pre-trained ML model specified in config
-            # Default: TPOT auto-optimized pipeline with 80 features
+            # Default: TPOT auto-optimized pipeline with 84 features
             # Override via config.json or env var: FPL_XP_MODEL_ML_MODEL_PATH
             model_path = Path(config.xp_model.ml_model_path)
 
@@ -468,6 +468,7 @@ def _(gameweek_data, mo):
                 ownership_trends_df=gameweek_data.get("ownership_trends"),
                 value_analysis_df=gameweek_data.get("value_analysis"),
                 fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
+                raw_players_df=gameweek_data.get("raw_players"),
             )
 
             # Enrich with additional season statistics FIRST

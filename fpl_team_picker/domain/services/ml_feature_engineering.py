@@ -64,12 +64,11 @@ def calculate_per_gameweek_team_strength(
     return per_gw_strength
 
 
-# TODO: do we have penalty taker as a feature?
 class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 80 features (65 base + 15 enhanced):
+    Generates 84 features (65 base + 15 enhanced + 4 penalty/set-piece):
 
     Base features (65):
     - Cumulative season statistics (up to GW N-1)
@@ -87,6 +86,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - Enhanced fixture difficulty (3): congestion_difficulty, form_adjusted_difficulty,
       clean_sheet_probability_enhanced
 
+    Penalty & set-piece taker features (4):
+    - is_primary_penalty_taker: Primary penalty taker (order=1)
+    - is_penalty_taker: Any penalty taker (order>=1, includes backups)
+    - is_corner_taker: Primary corner taker (order=1)
+    - is_fk_taker: Primary free-kick taker (order=1)
+
     All features are leak-free (only use past data).
     """
 
@@ -98,6 +103,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         ownership_trends_df: Optional[pd.DataFrame] = None,
         value_analysis_df: Optional[pd.DataFrame] = None,
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
+        raw_players_df: Optional[pd.DataFrame] = None,
     ):
         """
         Initialize feature engineer.
@@ -112,6 +118,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             ownership_trends_df: Ownership trends from get_derived_ownership_trends() (NEW - Issue #37)
             value_analysis_df: Value analysis from get_derived_value_analysis() (NEW - Issue #37)
             fixture_difficulty_df: Enhanced fixture difficulty from get_derived_fixture_difficulty() (NEW - Issue #37)
+            raw_players_df: Raw FPL players bootstrap data with penalty/set-piece order columns
+                [player_id, penalties_order, corners_and_indirect_freekicks_order, direct_freekicks_order]
         """
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
@@ -131,6 +139,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             fixture_difficulty_df
             if fixture_difficulty_df is not None
             else pd.DataFrame()
+        )
+
+        # Raw players data for penalty/set-piece taker features
+        self.raw_players_df = (
+            raw_players_df if raw_players_df is not None else pd.DataFrame()
         )
 
         # Store feature names for reference
@@ -191,8 +204,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                minutes, goals_scored, assists, total_points, etc.]
 
         Returns:
-            DataFrame with 80 engineered features per player-gameweek
-            (65 base + 15 enhanced: ownership, value, fixture difficulty)
+            DataFrame with 84 engineered features per player-gameweek
+            (65 base + 15 enhanced + 4 penalty/set-piece taker features)
         """
         if X.empty:
             return X
@@ -506,6 +519,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df = self._add_ownership_features(df)
         df = self._add_value_features(df)
         df = self._add_enhanced_fixture_features(df)
+
+        # ===== PENALTY & SET-PIECE TAKER FEATURES =====
+        df = self._add_penalty_set_piece_features(df)
 
         # Fill missing values
         df = df.fillna(0)
@@ -1102,8 +1118,99 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         return df
 
+    def _add_penalty_set_piece_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add penalty and set-piece taker features from raw FPL players bootstrap data.
+
+        Creates 4 binary features:
+        - is_primary_penalty_taker: penalties_order == 1
+        - is_penalty_taker: penalties_order >= 1 (includes backups)
+        - is_corner_taker: corners_and_indirect_freekicks_order == 1
+        - is_fk_taker: direct_freekicks_order == 1
+
+        All features default to 0 if raw_players_df is not provided.
+
+        Args:
+            df: Player performance DataFrame with player_id column
+
+        Returns:
+            DataFrame with 4 additional binary features
+        """
+        # If no raw players data, return with default zero values
+        if self.raw_players_df.empty:
+            df["is_primary_penalty_taker"] = 0
+            df["is_penalty_taker"] = 0
+            df["is_corner_taker"] = 0
+            df["is_fk_taker"] = 0
+            return df
+
+        # Validate required columns exist in raw_players_df
+        required_cols = [
+            "player_id",
+            "penalties_order",
+            "corners_and_indirect_freekicks_order",
+            "direct_freekicks_order",
+        ]
+        missing_cols = [
+            col for col in required_cols if col not in self.raw_players_df.columns
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"raw_players_df is missing required columns: {missing_cols}"
+            )
+
+        # Create subset with only needed columns (and gameweek if available)
+        merge_keys = ["player_id"]
+        extra_cols = []
+        if "gameweek" in self.raw_players_df.columns:
+            # Support per-gameweek penalty/set-piece orders
+            merge_keys = ["player_id", "gameweek"]
+            extra_cols = ["gameweek"]
+
+        penalty_data = self.raw_players_df[extra_cols + required_cols].copy()
+
+        # Create binary features based on order values
+        penalty_data["is_primary_penalty_taker"] = (
+            penalty_data["penalties_order"] == 1
+        ).astype(int)
+        penalty_data["is_penalty_taker"] = (
+            penalty_data["penalties_order"] >= 1
+        ).astype(int)
+        penalty_data["is_corner_taker"] = (
+            penalty_data["corners_and_indirect_freekicks_order"] == 1
+        ).astype(int)
+        penalty_data["is_fk_taker"] = (
+            penalty_data["direct_freekicks_order"] == 1
+        ).astype(int)
+
+        # Merge with main DataFrame on player_id (and gameweek if available)
+        # Use left merge to keep all rows, features default to 0 for unmatched players
+        df = df.merge(
+            penalty_data[
+                [
+                    *merge_keys,
+                    "is_primary_penalty_taker",
+                    "is_penalty_taker",
+                    "is_corner_taker",
+                    "is_fk_taker",
+                ]
+            ],
+            on=merge_keys,
+            how="left",
+        )
+
+        # Handle any NaN values from merge (players not in raw_players_df)
+        df["is_primary_penalty_taker"] = (
+            df["is_primary_penalty_taker"].fillna(0).astype(int)
+        )
+        df["is_penalty_taker"] = df["is_penalty_taker"].fillna(0).astype(int)
+        df["is_corner_taker"] = df["is_corner_taker"].fillna(0).astype(int)
+        df["is_fk_taker"] = df["is_fk_taker"].fillna(0).astype(int)
+
+        return df
+
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (80 features: 65 base + 15 enhanced)."""
+        """Get list of all feature columns (84 features: 65 base + 15 enhanced + 4 penalty/set-piece)."""
         return [
             # Static (4)
             "price",
@@ -1197,6 +1304,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "congestion_difficulty",
             "form_adjusted_difficulty",
             "clean_sheet_probability_enhanced",
+            # Penalty & set-piece taker features (4)
+            "is_primary_penalty_taker",
+            "is_penalty_taker",
+            "is_corner_taker",
+            "is_fk_taker",
         ]
 
     def _get_team_feature_columns(self) -> list:

@@ -25,12 +25,56 @@ from pathlib import Path
 import logging
 
 from sklearn.pipeline import Pipeline
-
+from sklearn.base import BaseEstimator, TransformerMixin
 from .ml_pipeline_factory import (
     create_fpl_pipeline,
     save_pipeline,
     load_pipeline,
 )
+
+
+class ColumnProjector(BaseEstimator, TransformerMixin):
+    """
+    Projects feature matrices to the expected feature set of a pre-trained model.
+
+    - Detects expected feature names from inner model/scaler (feature_names_in_)
+    - On transform: selects intersecting columns and fills missing with 0
+    - Ensures compatibility when feature engineer adds new columns post-training
+    """
+
+    def __init__(self, model_pipeline):
+        self.model_pipeline = model_pipeline
+        self.expected_feature_names = None
+
+    def fit(self, X, y=None):
+        # Try to discover expected feature names from the trained pipeline
+        names = None
+        try:
+            # If TPOT model is itself a pipeline, probe inner steps
+            if hasattr(self.model_pipeline, "named_steps"):
+                for step_name, step in self.model_pipeline.named_steps.items():
+                    if hasattr(step, "feature_names_in_"):
+                        names = list(step.feature_names_in_)
+                        break
+            # Otherwise, check the estimator directly
+            if names is None and hasattr(self.model_pipeline, "feature_names_in_"):
+                names = list(self.model_pipeline.feature_names_in_)
+        except Exception:
+            names = None
+
+        # Fallback: use columns from X at fit time
+        self.expected_feature_names = names if names else list(X.columns)
+        return self
+
+    def transform(self, X):
+        # Ensure all expected columns exist; missing -> 0
+        for col in self.expected_feature_names:
+            if col not in X.columns:
+                X[col] = 0
+
+        # Return in the exact order expected
+        return X[self.expected_feature_names]
+
 
 warnings.filterwarnings("ignore")
 
@@ -47,9 +91,10 @@ class MLExpectedPointsService:
       - TPOT: scripts/tpot_pipeline_optimizer.py
       - Or: ml_xp_experiment.py
 
-    Uses comprehensive 80-feature set with:
+    Uses comprehensive 84-feature set with:
     - Base features (65): 5GW rolling form windows, team context, fixtures, price bands
     - Enhanced features (15): Ownership trends, value analysis, fixture difficulty
+    - Set-piece & penalty features (4): penalty/corners/freekicks taker flags
     - Leak-free temporal features (all use past data only)
 
     Maintains same public interface as old service for drop-in replacement in gameweek_manager.py
@@ -270,6 +315,7 @@ class MLExpectedPointsService:
         ownership_trends_df: Optional[pd.DataFrame] = None,
         value_analysis_df: Optional[pd.DataFrame] = None,
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
+        raw_players_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Main interface method compatible with existing XP calculations.
@@ -288,6 +334,8 @@ class MLExpectedPointsService:
             ownership_trends_df: Enhanced ownership trends data (Issue #37)
             value_analysis_df: Enhanced value analysis data (Issue #37)
             fixture_difficulty_df: Enhanced fixture difficulty data (Issue #37)
+            raw_players_df: Raw FPL players bootstrap data with penalty/set-piece order
+                (ONLY used for inference, NOT training - avoids data leakage)
 
         Returns:
             DataFrame with ML-based expected points in 'xP' column
@@ -361,6 +409,9 @@ class MLExpectedPointsService:
                         "DataOrchestrationService should provide this in gameweek_data."
                     )
 
+                # IMPORTANT: raw_players_df is ONLY used for inference (not training)
+                # Training data uses default 0 values for penalty features (no leakage)
+                # Live predictions use current penalty taker status for inference-time boost
                 feature_engineer = FPLFeatureEngineer(
                     fixtures_df=fixtures_data,
                     teams_df=teams_data,
@@ -368,12 +419,19 @@ class MLExpectedPointsService:
                     ownership_trends_df=ownership_trends_df,
                     value_analysis_df=value_analysis_df,
                     fixture_difficulty_df=fixture_difficulty_df,
+                    raw_players_df=raw_players_df,  # Penalty/set-piece taker features (inference only)
                 )
 
                 # Create wrapper pipeline
                 tpot_model = self.pipeline  # Save reference to loaded TPOT model
+                # Insert a projection step to match model's expected features (backward-compatible)
+                projector = ColumnProjector(tpot_model)
                 wrapper_pipeline = SklearnPipeline(
-                    [("feature_engineer", feature_engineer), ("model", tpot_model)]
+                    [
+                        ("feature_engineer", feature_engineer),
+                        ("projector", projector),
+                        ("model", tpot_model),
+                    ]
                 )
 
                 # Fit ONLY the feature_engineer step (TPOT model is already fitted)
@@ -383,7 +441,11 @@ class MLExpectedPointsService:
                         f"   Fitting feature_engineer on {len(live_data)} historical samples..."
                     )
 
-                feature_engineer.fit(live_data, live_data["total_points"])
+                # Fit feature engineer and projector on historical features
+                features_for_fit = feature_engineer.fit_transform(
+                    live_data, live_data["total_points"]
+                )
+                projector.fit(features_for_fit)
 
                 # Replace pipeline with fitted wrapper
                 self.pipeline = wrapper_pipeline

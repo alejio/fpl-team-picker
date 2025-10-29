@@ -20,7 +20,7 @@ class XPModelConfig(BaseModel):
     )
     ml_model_path: str = Field(
         default="models/tpot/tpot_pipeline_gw1-9_20251029_132326.joblib",
-        description="Path to pre-trained ML model with 80 features (TPOT auto-optimized, MAE: 0.757)",
+        description="Path to pre-trained ML model with 84 features (TPOT auto-optimized, MAE: 0.757)",
     )
     ml_ensemble_rule_weight: float = Field(
         default=0.0,

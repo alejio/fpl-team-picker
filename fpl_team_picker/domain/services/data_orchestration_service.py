@@ -58,6 +58,7 @@ class DataOrchestrationService:
             ownership_trends,
             value_analysis,
             fixture_difficulty,
+            raw_players_df,
         ) = fpl_data
 
         # Validate core data contracts
@@ -100,6 +101,8 @@ class DataOrchestrationService:
             "ownership_trends": ownership_trends,
             "value_analysis": value_analysis,
             "fixture_difficulty": fixture_difficulty,
+            # Set-piece and penalty taker data (per-gameweek if available)
+            "raw_players": raw_players_df,
         }
 
     def get_current_gameweek_info(self) -> Dict[str, Any]:
@@ -396,6 +399,16 @@ class DataOrchestrationService:
         # 8. Load xG/xA rates (cumulative up to target_gameweek)
         xg_rates = client.get_player_xg_xa_rates()
 
+        # 8b. Load set-piece/penalty taker data (historical, per-gameweek if available)
+        raw_players_df = pd.DataFrame()
+        try:
+            if hasattr(client, "get_players_set_piece_orders"):
+                raw_players_df = client.get_players_set_piece_orders()
+            else:
+                raw_players_df = client.get_raw_players_bootstrap()
+        except Exception as e:
+            print(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
+
         # ========== Standardize ALL DataFrames for guaranteed clean data contracts ==========
 
         # Standardize xg_rates columns
@@ -490,6 +503,8 @@ class DataOrchestrationService:
             "current_squad": None,  # Not applicable for historical reconstruction
             "target_gameweek": target_gameweek,
             "form_window": form_window,
+            # Set-piece and penalty taker data (per-gameweek if available)
+            "raw_players": raw_players_df,
         }
 
     # ========== Private Internal Methods (Migrated from core/data_loader.py) ==========
@@ -623,6 +638,7 @@ class DataOrchestrationService:
         pd.DataFrame,
         pd.DataFrame,
         pd.DataFrame,
+        pd.DataFrame,
     ]:
         """
         Fetch FPL data from database for specified gameweek with historical form data
@@ -633,7 +649,7 @@ class DataOrchestrationService:
 
         Returns:
             Tuple of (players, teams, xg_rates, fixtures, target_gameweek, live_data_historical,
-                     ownership_trends, value_analysis, fixture_difficulty)
+                     ownership_trends, value_analysis, fixture_difficulty, raw_players_df)
 
         Note:
             Always loads from GW1 to (target_gameweek-1) to support ML rolling window features.
@@ -978,6 +994,32 @@ class DataOrchestrationService:
             f"Fixture difficulty: {len(fixture_difficulty)}"
         )
 
+        # Load set-piece and penalty taker data (supports per-gameweek if available)
+        raw_players_df = pd.DataFrame()
+        try:
+            # Preferred per-gameweek method from fpl-dataset-builder
+            if hasattr(client, "get_players_set_piece_orders"):
+                raw_players_df = client.get_players_set_piece_orders()
+            else:
+                # Fallback to bootstrap snapshot (may not have gameweek column)
+                raw_players_df = client.get_raw_players_bootstrap()
+        except Exception as e:
+            print(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
+
+        # Keep only relevant columns if present
+        needed_cols = [
+            "player_id",
+            "penalties_order",
+            "corners_and_indirect_freekicks_order",
+            "direct_freekicks_order",
+        ]
+        keep_cols = [c for c in needed_cols if c in raw_players_df.columns]
+        if keep_cols:
+            # Include gameweek if available for per-gameweek merge support
+            if "gameweek" in raw_players_df.columns:
+                keep_cols = ["gameweek"] + keep_cols
+            raw_players_df = raw_players_df[keep_cols].copy()
+
         return (
             players,
             teams,
@@ -988,6 +1030,7 @@ class DataOrchestrationService:
             ownership_trends,
             value_analysis,
             fixture_difficulty,
+            raw_players_df,
         )
 
     def _fetch_manager_team_internal(self, previous_gameweek: int) -> Optional[Dict]:

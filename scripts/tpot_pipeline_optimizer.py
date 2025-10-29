@@ -308,7 +308,7 @@ def engineer_features(
         Tuple of (features_df, feature_column_names)
     """
     print(
-        "\n🔧 Engineering features (production FPLFeatureEngineer with 80 features)..."
+        "\n🔧 Engineering features (production FPLFeatureEngineer with 84 features)..."
     )
 
     # Calculate per-gameweek team strength (no data leakage)
@@ -327,6 +327,19 @@ def engineer_features(
     )
     print(f"   ✅ Team strength calculated for GW{start_gw}-{end_gw}")
 
+    # Load per-gameweek set-piece/penalty taker data for training (if available)
+    raw_players_df = None
+    try:
+        from client import FPLDataClient as _C
+
+        _client = _C()
+        if hasattr(_client, "get_players_set_piece_orders"):
+            raw_players_df = _client.get_players_set_piece_orders()
+        else:
+            raw_players_df = _client.get_raw_players_bootstrap()
+    except Exception:
+        raw_players_df = None
+
     # Initialize production feature engineer with enhanced data sources
     feature_engineer = FPLFeatureEngineer(
         fixtures_df=fixtures_df if not fixtures_df.empty else None,
@@ -338,6 +351,9 @@ def engineer_features(
         value_analysis_df=value_analysis_df if not value_analysis_df.empty else None,
         fixture_difficulty_df=fixture_difficulty_df
         if not fixture_difficulty_df.empty
+        else None,
+        raw_players_df=raw_players_df
+        if raw_players_df is not None and not raw_players_df.empty
         else None,
     )
 
@@ -748,7 +764,7 @@ def main():
             fixture_difficulty_df,
         ) = load_historical_data(args.start_gw, args.end_gw)
 
-        # 2. Engineer features (80 features: 65 base + 15 enhanced)
+        # 2. Engineer features (84 features: 65 base + 15 enhanced + 4 set-piece)
         features_df, feature_cols = engineer_features(
             historical_df,
             fixtures_df,
