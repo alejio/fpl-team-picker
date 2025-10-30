@@ -1,0 +1,38 @@
+TPOT 1.1.0 Pipeline Optimization Results
+================================================================================
+
+Date: 2025-10-29 23:49:28
+Gameweek range: GW1 to GW9
+Max time: 180 mins
+Max eval time: 10 mins
+Scoring metric: fpl_weighted_huber
+CV folds: auto (all available)
+Random seed: 42
+Note: TPOT 1.1.0 uses time-based optimization
+
+Best pipeline:
+Pipeline(steps=[('normalizer', Normalizer(norm=np.str_('l1'))),
+                ('variancethreshold',
+                 VarianceThreshold(threshold=0.0002900759094)),
+                ('featureunion-1',
+                 FeatureUnion(transformer_list=[('featureunion',
+                                                 FeatureUnion(transformer_list=[('quantiletransformer',
+                                                                                 QuantileTransformer(n_quantiles=1603,
+                                                                                                     output_distribution=np.str_('uniform'),
+                                                                                                     random_state=42)),
+                                                                                ('column...
+                                                                                                                                              l2_regularization=2.5069119e-05,
+                                                                                                                                              learning_rate=0.0125655401902,
+                                                                                                                                              max_features=0.9660894252111,
+                                                                                                                                              max_leaf_nodes=433,
+                                                                                                                                              min_samples_leaf=81,
+                                                                                                                                              n_iter_no_change=11,
+                                                                                                                                              random_state=42,
+                                                                                                                                              tol=0.0001,
+                                                                                                                                              validation_fraction=0.0901208786672)))])),
+                                                ('passthrough',
+                                                 Passthrough())])),
+                ('adaboostregressor',
+                 AdaBoostRegressor(learning_rate=0.0458209322234,
+                                   loss=np.str_('square'), n_estimators=500,
+                                   random_state=42))])

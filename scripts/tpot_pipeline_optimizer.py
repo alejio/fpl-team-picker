@@ -335,9 +335,28 @@ def engineer_features(
         _client = _C()
         if hasattr(_client, "get_players_set_piece_orders"):
             raw_players_df = _client.get_players_set_piece_orders()
+            print(f"   ✅ Loaded per-gameweek penalty data: {len(raw_players_df)} rows")
         else:
             raw_players_df = _client.get_raw_players_bootstrap()
-    except Exception:
+            print(f"   ✅ Loaded bootstrap penalty data: {len(raw_players_df)} rows")
+
+        # Verify required columns exist
+        required_cols = [
+            "penalties_order",
+            "corners_and_indirect_freekicks_order",
+            "direct_freekicks_order",
+        ]
+        missing_cols = [
+            col for col in required_cols if col not in raw_players_df.columns
+        ]
+        if missing_cols:
+            print(f"   ⚠️  Missing penalty columns: {missing_cols}")
+            raw_players_df = None
+        else:
+            print(f"   ✅ All penalty columns present: {required_cols}")
+
+    except Exception as e:
+        print(f"   ❌ Error loading penalty data: {e}")
         raw_players_df = None
 
     # Initialize production feature engineer with enhanced data sources

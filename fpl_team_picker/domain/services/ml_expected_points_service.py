@@ -25,55 +25,11 @@ from pathlib import Path
 import logging
 
 from sklearn.pipeline import Pipeline
-from sklearn.base import BaseEstimator, TransformerMixin
 from .ml_pipeline_factory import (
     create_fpl_pipeline,
     save_pipeline,
     load_pipeline,
 )
-
-
-class ColumnProjector(BaseEstimator, TransformerMixin):
-    """
-    Projects feature matrices to the expected feature set of a pre-trained model.
-
-    - Detects expected feature names from inner model/scaler (feature_names_in_)
-    - On transform: selects intersecting columns and fills missing with 0
-    - Ensures compatibility when feature engineer adds new columns post-training
-    """
-
-    def __init__(self, model_pipeline):
-        self.model_pipeline = model_pipeline
-        self.expected_feature_names = None
-
-    def fit(self, X, y=None):
-        # Try to discover expected feature names from the trained pipeline
-        names = None
-        try:
-            # If TPOT model is itself a pipeline, probe inner steps
-            if hasattr(self.model_pipeline, "named_steps"):
-                for step_name, step in self.model_pipeline.named_steps.items():
-                    if hasattr(step, "feature_names_in_"):
-                        names = list(step.feature_names_in_)
-                        break
-            # Otherwise, check the estimator directly
-            if names is None and hasattr(self.model_pipeline, "feature_names_in_"):
-                names = list(self.model_pipeline.feature_names_in_)
-        except Exception:
-            names = None
-
-        # Fallback: use columns from X at fit time
-        self.expected_feature_names = names if names else list(X.columns)
-        return self
-
-    def transform(self, X):
-        # Ensure all expected columns exist; missing -> 0
-        for col in self.expected_feature_names:
-            if col not in X.columns:
-                X[col] = 0
-
-        # Return in the exact order expected
-        return X[self.expected_feature_names]
 
 
 warnings.filterwarnings("ignore")
@@ -424,14 +380,9 @@ class MLExpectedPointsService:
 
                 # Create wrapper pipeline
                 tpot_model = self.pipeline  # Save reference to loaded TPOT model
-                # Insert a projection step to match model's expected features (backward-compatible)
-                projector = ColumnProjector(tpot_model)
+                # Wrapper pipeline: feature engineering + trained model
                 wrapper_pipeline = SklearnPipeline(
-                    [
-                        ("feature_engineer", feature_engineer),
-                        ("projector", projector),
-                        ("model", tpot_model),
-                    ]
+                    [("feature_engineer", feature_engineer), ("model", tpot_model)]
                 )
 
                 # Fit ONLY the feature_engineer step (TPOT model is already fitted)
@@ -441,11 +392,8 @@ class MLExpectedPointsService:
                         f"   Fitting feature_engineer on {len(live_data)} historical samples..."
                     )
 
-                # Fit feature engineer and projector on historical features
-                features_for_fit = feature_engineer.fit_transform(
-                    live_data, live_data["total_points"]
-                )
-                projector.fit(features_for_fit)
+                # Fit only the feature engineer on historical data
+                feature_engineer.fit(live_data, live_data["total_points"])
 
                 # Replace pipeline with fitted wrapper
                 self.pipeline = wrapper_pipeline
