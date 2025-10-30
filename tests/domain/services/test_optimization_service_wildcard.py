@@ -145,9 +145,9 @@ class TestWildcardBasicFunctionality:
         assert position_counts.get("MID", 0) == 5, "Should have 5 midfielders"
         assert position_counts.get("FWD", 0) == 3, "Should have 3 forwards"
 
-        # Check budget constraint
+        # Check budget constraint (with floating point tolerance)
         total_cost = squad_df["price"].sum()
-        assert total_cost <= 100.0, f"Squad cost {total_cost} exceeds £100m budget"
+        assert total_cost <= 100.0 + 1e-9, f"Squad cost {total_cost} exceeds £100m budget"
 
         # Check 3-per-team constraint
         team_counts = squad_df["team"].value_counts()
