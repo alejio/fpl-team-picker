@@ -272,6 +272,7 @@ class MLExpectedPointsService:
         value_analysis_df: Optional[pd.DataFrame] = None,
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
+        betting_features_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Main interface method compatible with existing XP calculations.
@@ -292,6 +293,7 @@ class MLExpectedPointsService:
             fixture_difficulty_df: Enhanced fixture difficulty data (Issue #37)
             raw_players_df: Raw FPL players bootstrap data with penalty/set-piece order
                 (ONLY used for inference, NOT training - avoids data leakage)
+            betting_features_df: Betting odds features data (Issue #38)
 
         Returns:
             DataFrame with ML-based expected points in 'xP' column
@@ -376,6 +378,7 @@ class MLExpectedPointsService:
                     value_analysis_df=value_analysis_df,
                     fixture_difficulty_df=fixture_difficulty_df,
                     raw_players_df=raw_players_df,  # Penalty/set-piece taker features (inference only)
+                    betting_features_df=betting_features_df,  # Betting odds features (Issue #38)
                 )
 
                 # Create wrapper pipeline
