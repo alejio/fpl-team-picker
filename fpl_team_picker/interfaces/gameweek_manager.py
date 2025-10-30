@@ -542,12 +542,13 @@ def _(gameweek_data, mo):
             model_info = {
                 "type": model_type_label,
                 # TODO: these features are hardcoded. Should be a variable count
-                "features": "64 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures)",
+                "features": "84 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures)",
                 "status": "✅ ML predictions generated",
             }
         else:
             # Use rule-based model
             # TODO: We need a clear log here that explains we are using rules-based
+            # model.
             xp_service = ExpectedPointsService()
             players_with_xp = xp_service.calculate_combined_results(
                 gameweek_data, use_ml_model=False
@@ -942,87 +943,8 @@ def _(
         # Calculate max single acquisition
         max_single_acquisition = min(budget_pool_info.get("total_budget", 0.0), 15.0)
 
-        # TODO: Only keep simulated annealing
-        # Build strategic summary
-        if method == "greedy":
-            scenarios = optimization_metadata.get("scenarios", [])
-            current_xp = optimization_metadata.get("current_xp", 0.0)
-
-            # Create before/after comparison
-            transfers_made = best_scenario["transfers"]
-            transfer_penalty = best_scenario["penalty"]
-            new_squad_xp = (
-                best_scenario["net_xp"] + transfer_penalty
-            )  # Gross XP before penalty
-            net_xp = best_scenario["net_xp"]
-            xp_gain = best_scenario["xp_gain"]
-
-            comparison_data = [
-                {
-                    "Option": "❌ No Transfers",
-                    "Squad XP": round(current_xp, 2),
-                    "Transfer Penalty": 0,
-                    "Net XP": round(current_xp, 2),
-                    "vs Current": 0.0,
-                },
-                {
-                    "Option": f"✅ {transfers_made} Transfer(s)",
-                    "Squad XP": round(new_squad_xp, 2),
-                    "Transfer Penalty": -round(transfer_penalty, 2)
-                    if transfer_penalty > 0
-                    else 0,
-                    "Net XP": round(net_xp, 2),
-                    "vs Current": round(xp_gain, 2),
-                },
-            ]
-            comparison_df = _pd.DataFrame(comparison_data)
-
-            # Create scenarios table
-            scenario_data = []
-            for s in scenarios[:7]:  # Top 7 scenarios
-                scenario_data.append(
-                    {
-                        "Transfers": s["transfers"],
-                        "Type": s["type"],
-                        "Description": s["description"],
-                        "Penalty": -s["penalty"] if s["penalty"] > 0 else 0,
-                        "Net XP": round(s["net_xp"], 2),
-                        "Formation": s["formation"],
-                        "XP Gain": round(s["xp_gain"], 2),
-                    }
-                )
-
-            scenarios_df = _pd.DataFrame(scenario_data)
-
-            strategic_summary = f"""
-    ## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal
-
-    **Recommended Strategy:** {best_scenario["description"]}
-
-    *Decisions based on {horizon_label.lower()} horizon using greedy scenario enumeration ({len(scenarios)} scenarios analyzed)*
-
-    ### 📊 Impact Analysis:
-    """
-
-            budget_summary = f"""
-    ### 💰 Budget Pool Analysis:
-    - **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info.get("sellable_value", 0.0):.1f}m | **Total Pool:** £{budget_pool_info.get("total_budget", 0.0):.1f}m
-    - **Max Single Acquisition:** £{max_single_acquisition:.1f}m
-    """
-
-            return mo.vstack(
-                [
-                    mo.md(strategic_summary),
-                    mo.ui.table(comparison_df, page_size=5),
-                    mo.md(budget_summary),
-                    mo.md("### 🔄 All Scenarios (sorted by Net XP):"),
-                    mo.ui.table(
-                        scenarios_df, page_size=_config.visualization.scenario_page_size
-                    ),
-                ]
-            )
-
-        elif method == "simulated_annealing":
+        # Only simulated annealing is supported
+        if method == "simulated_annealing":
             sa_iterations = optimization_metadata.get("sa_iterations", 0)
             sa_improvements = optimization_metadata.get("sa_improvements", 0)
             free_transfers = optimization_metadata.get("free_transfers", 1)

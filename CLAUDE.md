@@ -72,7 +72,7 @@ Clean Architecture with domain/infrastructure/presentation separation. All busin
 - **ExpectedPointsService**: Rule-based XP (1GW + 5GW projections)
 - **MLExpectedPointsService**: Pre-trained ML predictions (requires .joblib artifact, no on-the-fly training)
 - **TeamAnalyticsService**: Dynamic team strength ratings
-- **OptimizationService**: Transfer optimization, starting XI, captain selection, squad generation
+- **OptimizationService**: Transfer optimization via simulated annealing, starting XI selection, captain recommendation, squad generation
 - **ChipAssessmentService**: Traffic light chip recommendations
 - **PerformanceAnalyticsService**: Form analysis, historical recomputation
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)

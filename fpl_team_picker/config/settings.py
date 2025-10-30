@@ -342,18 +342,18 @@ class OptimizationConfig(BaseModel):
             raise ValueError("optimization_horizon must be either '1gw' or '5gw'")
         return v
 
-    # Transfer optimization method
+    # Transfer optimization method (only simulated annealing is supported)
     transfer_optimization_method: str = Field(
         default="simulated_annealing",
-        description="Transfer optimization method: 'greedy' for scenario enumeration, 'simulated_annealing' for SA exploration",
+        description="Transfer optimization method: 'simulated_annealing' for SA exploration",
     )
 
     @field_validator("transfer_optimization_method")
     @classmethod
     def validate_transfer_method(cls, v):
-        if v not in ["greedy", "simulated_annealing"]:
+        if v != "simulated_annealing":
             raise ValueError(
-                "transfer_optimization_method must be either 'greedy' or 'simulated_annealing'"
+                "transfer_optimization_method must be 'simulated_annealing' (greedy method has been removed)"
             )
         return v
 
