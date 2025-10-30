@@ -109,6 +109,34 @@ def mock_raw_players_data():
 
 
 @pytest.fixture
+def mock_betting_features():
+    """Mock betting features data."""
+    data = []
+    for gw in [5, 6, 7]:
+        for player_id in [1, 2, 3, 4]:
+            data.append({
+                "player_id": player_id,
+                "gameweek": gw,
+                "team_win_probability": 0.40,
+                "opponent_win_probability": 0.30,
+                "draw_probability": 0.30,
+                "implied_clean_sheet_probability": 0.35,
+                "implied_total_goals": 2.5,
+                "team_expected_goals": 1.3,
+                "market_consensus_strength": 0.6,
+                "odds_movement_team": 0.0,
+                "odds_movement_magnitude": 0.1,
+                "favorite_status": 0.5,
+                "asian_handicap_line": 0.0,
+                "handicap_team_odds": 1.9,
+                "expected_goal_difference": 0.0,
+                "over_under_signal": 0.1,
+                "referee_encoded": 5,
+            })
+    return pd.DataFrame(data)
+
+
+@pytest.fixture
 def minimal_enhanced_data():
     """Minimal ownership, value, and fixture difficulty data."""
     ownership = pd.DataFrame(
@@ -164,6 +192,7 @@ class TestPenaltySetPieceFeatures:
         mock_fixtures_data,
         mock_raw_players_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that is_primary_penalty_taker=1 only for players with penalties_order=1."""
         engineer = FPLFeatureEngineer(
@@ -174,6 +203,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(
@@ -214,6 +244,7 @@ class TestPenaltySetPieceFeatures:
         mock_fixtures_data,
         mock_raw_players_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that is_penalty_taker=1 for any player with penalties_order >= 1."""
         engineer = FPLFeatureEngineer(
@@ -224,6 +255,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(
@@ -258,6 +290,7 @@ class TestPenaltySetPieceFeatures:
         mock_fixtures_data,
         mock_raw_players_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that is_corner_taker=1 only for primary corner takers (order=1)."""
         engineer = FPLFeatureEngineer(
@@ -268,6 +301,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(
@@ -294,6 +328,7 @@ class TestPenaltySetPieceFeatures:
         mock_fixtures_data,
         mock_raw_players_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that is_fk_taker=1 only for primary FK takers (order=1)."""
         engineer = FPLFeatureEngineer(
@@ -304,6 +339,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(
@@ -326,6 +362,7 @@ class TestPenaltySetPieceFeatures:
         mock_teams_data,
         mock_fixtures_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that features default to 0 when raw_players_df not provided."""
         engineer = FPLFeatureEngineer(
@@ -336,6 +373,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(
@@ -360,6 +398,7 @@ class TestPenaltySetPieceFeatures:
         mock_fixtures_data,
         mock_raw_players_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that penalty/set-piece features are consistent across gameweeks for same player."""
         engineer = FPLFeatureEngineer(
@@ -370,6 +409,7 @@ class TestPenaltySetPieceFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(

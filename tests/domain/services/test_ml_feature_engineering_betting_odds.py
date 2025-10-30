@@ -232,61 +232,41 @@ class TestBettingOddsFeatures:
         )
 
         # Player 1, GW6 (row 0): team_win_probability should be 0.55
-        assert np.isclose(
-            result.iloc[0]["team_win_probability"], 0.55, atol=0.01
-        ), "Player 1 GW6 should have team_win_prob=0.55"
+        assert np.isclose(result.iloc[0]["team_win_probability"], 0.55, atol=0.01), (
+            "Player 1 GW6 should have team_win_prob=0.55"
+        )
 
         # Player 2, GW7 (row 3): team_win_probability should be 0.65
-        assert np.isclose(
-            result.iloc[3]["team_win_probability"], 0.65, atol=0.01
-        ), "Player 2 GW7 should have team_win_prob=0.65"
+        assert np.isclose(result.iloc[3]["team_win_probability"], 0.65, atol=0.01), (
+            "Player 2 GW7 should have team_win_prob=0.65"
+        )
 
         # Player 3, GW6 (row 4): underdog team, favorite_status should be 0
-        assert (
-            result.iloc[4]["favorite_status"] == 0.0
-        ), "Player 3 GW6 should not be favorite"
+        assert result.iloc[4]["favorite_status"] == 0.0, (
+            "Player 3 GW6 should not be favorite"
+        )
 
-    def test_features_default_to_neutral_without_betting_data(
+    def test_fails_fast_without_betting_data(
         self,
         mock_player_data,
         mock_teams_data,
         mock_fixtures_data,
         minimal_enhanced_data,
     ):
-        """Test that features default to neutral values when betting_features_df not provided."""
+        """Test that FPLFeatureEngineer fails fast when betting_features_df not provided (FAIL FAST principle)."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
             team_strength={"Arsenal": 1.2, "Liverpool": 1.25, "Man City": 1.23},
-            # betting_features_df NOT provided
+            # betting_features_df NOT provided - should fail
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
         )
 
-        result = engineer.fit_transform(
-            mock_player_data, mock_player_data["total_points"]
-        )
-
-        # All features should exist with neutral defaults
-        assert all(
-            np.isclose(result["team_win_probability"], 0.33, atol=0.01)
-        ), "Default team_win_probability should be 0.33"
-        assert all(
-            np.isclose(result["draw_probability"], 0.33, atol=0.01)
-        ), "Default draw_probability should be 0.33"
-        assert all(
-            np.isclose(result["implied_total_goals"], 2.5, atol=0.01)
-        ), "Default implied_total_goals should be 2.5"
-        assert all(
-            result["asian_handicap_line"] == 0.0
-        ), "Default asian_handicap_line should be 0.0"
-        assert all(
-            result["favorite_status"] == 0.5
-        ), "Default favorite_status should be 0.5 (unknown)"
-        assert all(
-            result["referee_encoded"] == -1
-        ), "Default referee_encoded should be -1 (unknown)"
+        # Should fail with clear error message
+        with pytest.raises(ValueError, match="betting_features_df is empty"):
+            engineer.fit_transform(mock_player_data, mock_player_data["total_points"])
 
     def test_asian_handicap_features_have_correct_values(
         self,
@@ -312,17 +292,17 @@ class TestBettingOddsFeatures:
         )
 
         # Player 2 (Haaland), GW6 (row 2): Strong favorite, handicap -1.5
-        assert np.isclose(
-            result.iloc[2]["asian_handicap_line"], -1.5, atol=0.01
-        ), "Haaland GW6 should have handicap=-1.5"
+        assert np.isclose(result.iloc[2]["asian_handicap_line"], -1.5, atol=0.01), (
+            "Haaland GW6 should have handicap=-1.5"
+        )
         assert np.isclose(
             result.iloc[2]["expected_goal_difference"], -1.05, atol=0.01
         ), "Haaland GW6 expected_goal_diff should be -1.05"
 
         # Player 3 (Defender), GW6 (row 4): Underdog, positive handicap
-        assert np.isclose(
-            result.iloc[4]["asian_handicap_line"], 1.0, atol=0.01
-        ), "Underdog GW6 should have positive handicap"
+        assert np.isclose(result.iloc[4]["asian_handicap_line"], 1.0, atol=0.01), (
+            "Underdog GW6 should have positive handicap"
+        )
         assert np.isclose(
             result.iloc[4]["expected_goal_difference"], 0.70, atol=0.01
         ), "Underdog GW6 expected_goal_diff should be 0.70"
@@ -354,17 +334,17 @@ class TestBettingOddsFeatures:
         assert np.isclose(
             result.iloc[2]["market_consensus_strength"], 0.9, atol=0.01
         ), "Haaland GW6 should have high consensus"
-        assert np.isclose(
-            result.iloc[2]["odds_movement_team"], -0.15, atol=0.01
-        ), "Haaland GW6 odds sharpened (-0.15)"
+        assert np.isclose(result.iloc[2]["odds_movement_team"], -0.15, atol=0.01), (
+            "Haaland GW6 odds sharpened (-0.15)"
+        )
 
         # Player 3, GW6 (row 4): Low consensus (0.4), positive odds movement
         assert np.isclose(
             result.iloc[4]["market_consensus_strength"], 0.4, atol=0.01
         ), "Underdog GW6 should have low consensus"
-        assert np.isclose(
-            result.iloc[4]["odds_movement_team"], 0.10, atol=0.01
-        ), "Underdog GW6 odds drifted (+0.10)"
+        assert np.isclose(result.iloc[4]["odds_movement_team"], 0.10, atol=0.01), (
+            "Underdog GW6 odds drifted (+0.10)"
+        )
 
     def test_total_feature_count_includes_betting_odds(
         self,
@@ -392,9 +372,9 @@ class TestBettingOddsFeatures:
         feature_names = engineer.get_feature_names_out()
 
         # Should be 99 features total (65 base + 15 enhanced + 4 penalty + 15 betting)
-        assert (
-            len(feature_names) == 99
-        ), f"Expected 99 features, got {len(feature_names)}"
-        assert (
-            result.shape[1] == 99
-        ), f"Result should have 99 columns, got {result.shape[1]}"
+        assert len(feature_names) == 99, (
+            f"Expected 99 features, got {len(feature_names)}"
+        )
+        assert result.shape[1] == 99, (
+            f"Result should have 99 columns, got {result.shape[1]}"
+        )

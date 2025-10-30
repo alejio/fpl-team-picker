@@ -1240,16 +1240,20 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         - Asian Handicap (3): asian_handicap_line, handicap_team_odds, expected_goal_difference
         - Match context (2): over_under_signal, referee_encoded
 
-        All features default to neutral values if betting_features_df is not provided.
+        FAIL FAST: betting_features_df must be non-empty. Individual missing records are filled with
+        neutral defaults, but the entire dataset cannot be empty.
 
         Args:
             df: Player performance DataFrame with [player_id, gameweek] columns
 
         Returns:
             DataFrame with 15 additional betting odds features
+
+        Raises:
+            ValueError: If betting_features_df is empty or missing required columns
         """
-        # Define neutral defaults for missing betting odds data
-        # These are used for GW1 or when betting data is unavailable
+        # Define neutral defaults for missing individual records
+        # These are used when specific fixtures don't have betting odds yet
         betting_defaults = {
             "team_win_probability": 0.33,  # neutral 3-way split
             "opponent_win_probability": 0.33,
@@ -1268,11 +1272,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "referee_encoded": -1,  # unknown referee
         }
 
-        # If no betting features data, use neutral defaults
+        # FAIL FAST: betting features are required
         if self.betting_features_df.empty:
-            for feature, default_value in betting_defaults.items():
-                df[feature] = default_value
-            return df
+            raise ValueError(
+                "betting_features_df is empty. ML model requires betting odds features. "
+                "Ensure DataOrchestrationService loads betting features from fpl-dataset-builder."
+            )
 
         # Validate required columns in betting_features_df
         required_cols = ["gameweek", "player_id"] + list(betting_defaults.keys())
@@ -1298,7 +1303,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             how="left",
         )
 
-        # Fill missing values (GW1 or missing odds) with neutral defaults
+        # Fill missing values for individual fixtures with neutral defaults
         for feature, default_value in betting_defaults.items():
             df[feature] = df[feature].fillna(default_value)
 

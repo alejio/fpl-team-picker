@@ -59,6 +59,7 @@ class DataOrchestrationService:
             value_analysis,
             fixture_difficulty,
             raw_players_df,
+            betting_features_df,
         ) = fpl_data
 
         # Validate core data contracts
@@ -103,6 +104,8 @@ class DataOrchestrationService:
             "fixture_difficulty": fixture_difficulty,
             # Set-piece and penalty taker data (per-gameweek if available)
             "raw_players": raw_players_df,
+            # Betting odds features (Issue #38)
+            "betting_features": betting_features_df,
         }
 
     def get_current_gameweek_info(self) -> Dict[str, Any]:
@@ -639,6 +642,7 @@ class DataOrchestrationService:
         pd.DataFrame,
         pd.DataFrame,
         pd.DataFrame,
+        pd.DataFrame,
     ]:
         """
         Fetch FPL data from database for specified gameweek with historical form data
@@ -649,7 +653,7 @@ class DataOrchestrationService:
 
         Returns:
             Tuple of (players, teams, xg_rates, fixtures, target_gameweek, live_data_historical,
-                     ownership_trends, value_analysis, fixture_difficulty, raw_players_df)
+                     ownership_trends, value_analysis, fixture_difficulty, raw_players_df, betting_features_df)
 
         Note:
             Always loads from GW1 to (target_gameweek-1) to support ML rolling window features.
@@ -994,6 +998,15 @@ class DataOrchestrationService:
             f"Fixture difficulty: {len(fixture_difficulty)}"
         )
 
+        # Load betting odds features (Issue #38)
+        print("🎲 Loading betting odds features...")
+        try:
+            betting_features_df = client.get_derived_betting_features()
+            print(f"   ✅ Betting features: {len(betting_features_df)} records")
+        except (AttributeError, Exception) as e:
+            print(f"   ⚠️  Betting features unavailable: {e}")
+            raise ValueError(f"Betting features unavailable: {e}")
+
         # Load set-piece and penalty taker data (supports per-gameweek if available)
         raw_players_df = pd.DataFrame()
         try:
@@ -1031,6 +1044,7 @@ class DataOrchestrationService:
             value_analysis,
             fixture_difficulty,
             raw_players_df,
+            betting_features_df,
         )
 
     def _fetch_manager_team_internal(self, previous_gameweek: int) -> Optional[Dict]:

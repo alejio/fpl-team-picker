@@ -127,6 +127,35 @@ def minimal_enhanced_data():
     }
 
 
+@pytest.fixture
+def mock_betting_features():
+    """Mock betting features data."""
+    data = []
+    for gw in range(5, 10):
+        for player_id in range(1, 10):
+            data.append({
+                "player_id": player_id,
+                "gameweek": gw,
+                "team_win_probability": 0.40,
+                "opponent_win_probability": 0.30,
+                "draw_probability": 0.30,
+                "implied_clean_sheet_probability": 0.35,
+                "implied_total_goals": 2.5,
+                "team_expected_goals": 1.3,
+                "market_consensus_strength": 0.6,
+                "odds_movement_team": 0.0,
+                "odds_movement_magnitude": 0.1,
+                "favorite_status": 0.5,
+                "asian_handicap_line": 0.0,
+                "handicap_team_odds": 1.9,
+                "expected_goal_difference": 0.0,
+                "over_under_signal": 0.1,
+                "referee_encoded": 5,
+            })
+    return pd.DataFrame(data)
+
+
+
 class TestCalculatePerGameweekTeamStrength:
     """Test suite for calculate_per_gameweek_team_strength() utility function."""
 
@@ -231,6 +260,8 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
             team_strength=per_gw_strength,
+
+            betting_features_df=mock_betting_features,
         )
 
         assert engineer._is_per_gameweek_strength is True
@@ -243,12 +274,14 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
             team_strength=static_strength,
+
+            betting_features_df=mock_betting_features,
         )
 
         assert engineer._is_per_gameweek_strength is False
 
     def test_applies_per_gameweek_strength_correctly(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data
+        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
     ):
         """Test that per-gameweek strength is applied correctly to features."""
         # Different strength for GW6 vs GW7
@@ -264,6 +297,8 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+
+            betting_features_df=mock_betting_features,
         )
 
         # Transform the data
@@ -281,7 +316,7 @@ class TestFPLFeatureEngineerPerGameweekStrength:
         assert not np.array_equal(gw6_strengths, gw7_strengths)
 
     def test_backward_compatible_with_static_strength(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data
+        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
     ):
         """Test that static format still works (backward compatibility)."""
         static_strength = {"Arsenal": 1.2, "Liverpool": 1.25, "Man City": 1.23, "Leicester": 1.1}
@@ -293,6 +328,8 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+
+            betting_features_df=mock_betting_features,
         )
 
         # Should not raise any errors
@@ -313,10 +350,12 @@ class TestFPLFeatureEngineerPerGameweekStrength:
                 fixtures_df=mock_fixtures_data,
                 teams_df=mock_teams_data,
                 team_strength=invalid_strength,
-            )
+
+            betting_features_df=mock_betting_features,
+        )
 
     def test_empty_strength_dict_handled(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data
+        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
     ):
         """Test that empty team_strength dict is handled gracefully."""
         engineer = FPLFeatureEngineer(
@@ -326,6 +365,8 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+
+            betting_features_df=mock_betting_features,
         )
 
         # Should not crash, should use default 1.0 strength
@@ -346,6 +387,7 @@ class TestIntegration:
         mock_fixtures_data,
         mock_player_data,
         minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test full workflow: calculate per-GW strength -> feature engineering."""
         # Mock TeamAnalyticsService
@@ -372,6 +414,8 @@ class TestIntegration:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+
+            betting_features_df=mock_betting_features,
         )
 
         result = engineer.fit_transform(mock_player_data)
