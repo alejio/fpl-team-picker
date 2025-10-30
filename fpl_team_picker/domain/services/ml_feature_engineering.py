@@ -68,7 +68,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 84 features (65 base + 15 enhanced + 4 penalty/set-piece):
+    Generates 99 features (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting odds):
 
     Base features (65):
     - Cumulative season statistics (up to GW N-1)
@@ -92,6 +92,14 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - is_corner_taker: Primary corner taker (order=1)
     - is_fk_taker: Primary free-kick taker (order=1)
 
+    Betting odds features (15) - Issue #38:
+    - Implied probabilities (6): team_win_probability, opponent_win_probability, draw_probability,
+      implied_clean_sheet_probability, implied_total_goals, team_expected_goals
+    - Market confidence (4): market_consensus_strength, odds_movement_team, odds_movement_magnitude,
+      favorite_status
+    - Asian Handicap (3): asian_handicap_line, handicap_team_odds, expected_goal_difference
+    - Match context (2): over_under_signal, referee_encoded
+
     All features are leak-free (only use past data).
     """
 
@@ -104,6 +112,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         value_analysis_df: Optional[pd.DataFrame] = None,
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
+        betting_features_df: Optional[pd.DataFrame] = None,
     ):
         """
         Initialize feature engineer.
@@ -120,6 +129,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             fixture_difficulty_df: Enhanced fixture difficulty from get_derived_fixture_difficulty() (NEW - Issue #37)
             raw_players_df: Raw FPL players bootstrap data with penalty/set-piece order columns
                 [player_id, penalties_order, corners_and_indirect_freekicks_order, direct_freekicks_order]
+            betting_features_df: Betting odds features from get_derived_betting_features() (NEW - Issue #38)
+                [gameweek, player_id, team_win_probability, ..., referee_encoded]
         """
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
@@ -144,6 +155,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # Raw players data for penalty/set-piece taker features
         self.raw_players_df = (
             raw_players_df if raw_players_df is not None else pd.DataFrame()
+        )
+
+        # NEW: Betting odds features (Issue #38)
+        self.betting_features_df = (
+            betting_features_df if betting_features_df is not None else pd.DataFrame()
         )
 
         # Store feature names for reference
@@ -522,6 +538,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         # ===== PENALTY & SET-PIECE TAKER FEATURES =====
         df = self._add_penalty_set_piece_features(df)
+
+        # ===== BETTING ODDS FEATURES (Issue #38) =====
+        df = self._add_betting_odds_features(df)
 
         # Fill missing values
         df = df.fillna(0)
@@ -1209,8 +1228,84 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         return df
 
+    def _add_betting_odds_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add betting odds features from derived betting features data.
+
+        Creates 15 features from betting odds:
+        - Implied probabilities (6): team_win_probability, opponent_win_probability, draw_probability,
+          implied_clean_sheet_probability, implied_total_goals, team_expected_goals
+        - Market confidence (4): market_consensus_strength, odds_movement_team, odds_movement_magnitude,
+          favorite_status
+        - Asian Handicap (3): asian_handicap_line, handicap_team_odds, expected_goal_difference
+        - Match context (2): over_under_signal, referee_encoded
+
+        All features default to neutral values if betting_features_df is not provided.
+
+        Args:
+            df: Player performance DataFrame with [player_id, gameweek] columns
+
+        Returns:
+            DataFrame with 15 additional betting odds features
+        """
+        # Define neutral defaults for missing betting odds data
+        # These are used for GW1 or when betting data is unavailable
+        betting_defaults = {
+            "team_win_probability": 0.33,  # neutral 3-way split
+            "opponent_win_probability": 0.33,
+            "draw_probability": 0.33,
+            "implied_clean_sheet_probability": 0.35,  # PL average
+            "implied_total_goals": 2.5,  # PL average
+            "team_expected_goals": 1.25,  # neutral split
+            "market_consensus_strength": 0.5,  # unknown confidence
+            "odds_movement_team": 0.0,  # no movement
+            "odds_movement_magnitude": 0.0,
+            "favorite_status": 0.5,  # unknown
+            "asian_handicap_line": 0.0,  # neutral handicap
+            "handicap_team_odds": 2.0,  # neutral odds
+            "expected_goal_difference": 0.0,
+            "over_under_signal": 0.0,  # neutral tempo
+            "referee_encoded": -1,  # unknown referee
+        }
+
+        # If no betting features data, use neutral defaults
+        if self.betting_features_df.empty:
+            for feature, default_value in betting_defaults.items():
+                df[feature] = default_value
+            return df
+
+        # Validate required columns in betting_features_df
+        required_cols = ["gameweek", "player_id"] + list(betting_defaults.keys())
+        missing_cols = [
+            col for col in required_cols if col not in self.betting_features_df.columns
+        ]
+        if missing_cols:
+            raise ValueError(
+                f"betting_features_df is missing required columns: {missing_cols}. "
+                f"Expected columns from get_derived_betting_features(): {required_cols}"
+            )
+
+        # NO TEMPORAL SHIFT NEEDED - betting odds are forward-looking
+        # Odds for GW N are available before GW N kickoff (before points are known)
+        # Unlike player performance data (which requires shift(1)), odds are pre-match
+        # This is leak-free: odds exist BEFORE the match outcome
+
+        # Merge betting features on player_id + gameweek
+        # Left join keeps all player-gameweek rows
+        df = df.merge(
+            self.betting_features_df[required_cols],
+            on=["player_id", "gameweek"],
+            how="left",
+        )
+
+        # Fill missing values (GW1 or missing odds) with neutral defaults
+        for feature, default_value in betting_defaults.items():
+            df[feature] = df[feature].fillna(default_value)
+
+        return df
+
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (84 features: 65 base + 15 enhanced + 4 penalty/set-piece)."""
+        """Get list of all feature columns (99 features: 65 base + 15 enhanced + 4 penalty/set-piece + 15 betting odds)."""
         return [
             # Static (4)
             "price",
@@ -1309,6 +1404,26 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "is_penalty_taker",
             "is_corner_taker",
             "is_fk_taker",
+            # Betting odds features (15) - Issue #38
+            # Implied probabilities (6)
+            "team_win_probability",
+            "opponent_win_probability",
+            "draw_probability",
+            "implied_clean_sheet_probability",
+            "implied_total_goals",
+            "team_expected_goals",
+            # Market confidence (4)
+            "market_consensus_strength",
+            "odds_movement_team",
+            "odds_movement_magnitude",
+            "favorite_status",
+            # Asian Handicap (3)
+            "asian_handicap_line",
+            "handicap_team_odds",
+            "expected_goal_difference",
+            # Match context (2)
+            "over_under_signal",
+            "referee_encoded",
         ]
 
     def _get_team_feature_columns(self) -> list:

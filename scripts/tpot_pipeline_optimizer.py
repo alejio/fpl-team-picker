@@ -204,7 +204,13 @@ def parse_args():
 def load_historical_data(
     start_gw: int, end_gw: int
 ) -> tuple[
-    pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
 ]:
     """
     Load historical gameweek performance data and enhanced data sources.
@@ -214,7 +220,7 @@ def load_historical_data(
         end_gw: Ending gameweek (inclusive)
 
     Returns:
-        Tuple of (historical_df, fixtures_df, teams_df, ownership_trends_df, value_analysis_df, fixture_difficulty_df)
+        Tuple of (historical_df, fixtures_df, teams_df, ownership_trends_df, value_analysis_df, fixture_difficulty_df, betting_features_df)
     """
     client = FPLDataClient()
     historical_data = []
@@ -272,6 +278,16 @@ def load_historical_data(
     print(f"   ✅ Value analysis: {len(value_analysis_df)} records")
     print(f"   ✅ Fixture difficulty: {len(fixture_difficulty_df)} records")
 
+    # Load betting odds features (Issue #38)
+    print("\n🎲 Loading betting odds features...")
+    try:
+        betting_features_df = client.get_derived_betting_features()
+        print(f"   ✅ Betting features: {len(betting_features_df)} records")
+    except (AttributeError, Exception) as e:
+        print(f"   ⚠️  Betting features unavailable: {e}")
+        print("   ℹ️  Continuing with neutral defaults (features will be 0/neutral)")
+        betting_features_df = pd.DataFrame()
+
     print(f"\n✅ Total records: {len(historical_df):,}")
     print(f"   Unique players: {historical_df['player_id'].nunique():,}")
 
@@ -282,6 +298,7 @@ def load_historical_data(
         ownership_trends_df,
         value_analysis_df,
         fixture_difficulty_df,
+        betting_features_df,
     )
 
 
@@ -292,6 +309,7 @@ def engineer_features(
     ownership_trends_df: pd.DataFrame,
     value_analysis_df: pd.DataFrame,
     fixture_difficulty_df: pd.DataFrame,
+    betting_features_df: pd.DataFrame,
 ) -> tuple[pd.DataFrame, list[str]]:
     """
     Engineer features using production FPLFeatureEngineer.
@@ -303,12 +321,13 @@ def engineer_features(
         ownership_trends_df: Ownership trends data (Issue #37)
         value_analysis_df: Value analysis data (Issue #37)
         fixture_difficulty_df: Enhanced fixture difficulty data (Issue #37)
+        betting_features_df: Betting odds features data (Issue #38)
 
     Returns:
         Tuple of (features_df, feature_column_names)
     """
     print(
-        "\n🔧 Engineering features (production FPLFeatureEngineer with 84 features)..."
+        "\n🔧 Engineering features (production FPLFeatureEngineer with 99 features)..."
     )
 
     # Calculate per-gameweek team strength (no data leakage)
@@ -373,6 +392,9 @@ def engineer_features(
         else None,
         raw_players_df=raw_players_df
         if raw_players_df is not None and not raw_players_df.empty
+        else None,
+        betting_features_df=betting_features_df
+        if not betting_features_df.empty
         else None,
     )
 
@@ -773,7 +795,7 @@ def main():
     print("=" * 80)
 
     try:
-        # 1. Load historical data (includes enhanced data sources)
+        # 1. Load historical data (includes enhanced data sources + betting odds)
         (
             historical_df,
             fixtures_df,
@@ -781,9 +803,10 @@ def main():
             ownership_trends_df,
             value_analysis_df,
             fixture_difficulty_df,
+            betting_features_df,
         ) = load_historical_data(args.start_gw, args.end_gw)
 
-        # 2. Engineer features (84 features: 65 base + 15 enhanced + 4 set-piece)
+        # 2. Engineer features (99 features: 65 base + 15 enhanced + 4 set-piece + 15 betting odds)
         features_df, feature_cols = engineer_features(
             historical_df,
             fixtures_df,
@@ -791,6 +814,7 @@ def main():
             ownership_trends_df,
             value_analysis_df,
             fixture_difficulty_df,
+            betting_features_df,
         )
 
         # 3. Create temporal CV splits
