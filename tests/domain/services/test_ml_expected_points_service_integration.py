@@ -9,7 +9,6 @@ Tests the feature engineering pipeline:
 
 import pytest
 import pandas as pd
-import numpy as np
 
 
 class TestFPLFeatureEngineer99Features:
