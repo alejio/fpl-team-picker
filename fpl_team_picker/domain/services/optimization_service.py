@@ -857,7 +857,10 @@ class OptimizationService:
             "horizon_label": horizon_label,
             "xp_column": xp_column,
             "budget_pool_info": budget_pool_info,
-            "available_budget": remaining_budget,
+            "available_budget": team_data[
+                "bank"
+            ],  # Actual bank balance before optimization
+            "remaining_budget": remaining_budget,  # Budget left after optimization
             "free_transfers": free_transfers,
             "current_xp": current_xp,
             "current_formation": current_formation,
