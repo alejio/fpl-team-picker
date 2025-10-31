@@ -1,7 +1,7 @@
 {
   "xp_model": {
     "use_ml_model": true,
-    "ml_model_path": "models/tpot/tpot_pipeline_gw1-9_20251030_220518.joblib",
+    "ml_model_path": "models/tpot/tpot_pipeline_gw1-9_20251031_064636.joblib",
     "ml_ensemble_rule_weight": 0.0,
     "ml_min_training_gameweeks": 3,
     "ml_training_gameweeks": 5,
