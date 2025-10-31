@@ -41,8 +41,41 @@ Install: `uv sync`
 
 **Leak-free**: All features use shift(1) or historical lookback. Betting odds are forward-looking (available pre-match) - no shift needed.
 
-**TPOT**: `scripts/tpot_pipeline_optimizer.py` - Automated ML pipeline discovery with temporal CV
-Quick start: `uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8 --generations 10`
+## ML Pipeline Training
+
+**⚠️ CRITICAL**: TPOT's auto-ML RFE drops penalty features (ranks 4-8 by permutation importance) due to MDI bias. Use custom pipeline instead.
+
+**Reusable Training Infrastructure** (`scripts/ml_training_utils.py`):
+- `load_training_data()` - Load all 8 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players)
+- `engineer_features()` - FPLFeatureEngineer with leak-free per-GW team strength (FIXED: data alignment bug)
+- `create_temporal_cv_splits()` - Walk-forward validation (GW6→7, GW6-7→8, etc.)
+- `evaluate_fpl_comprehensive()` - MAE/RMSE/Spearman/top-15 overlap/captain accuracy
+- Ensures "apples to apples" comparison across experiments
+
+**Custom ML Transformers** (`fpl_team_picker/domain/ml/`):
+- `FeatureSelector` - Self-contained transformer that selects features by name (makes pipelines service-agnostic)
+- Enables pipelines to accept all 99 features and internally select the subset they need
+- Fixes pickle issues - properly importable from domain layer
+
+**Custom Pipeline Optimizer** (`scripts/custom_pipeline_optimizer.py`):
+- **Production Model**: `models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib`
+- **Performance**: RandomForest with RFE-smart (60 features + penalties): MAE=0.632, Spearman=0.818
+- **64% better than TPOT** (MAE 0.632 vs 1.752, same scorer/data/CV)
+- 8 regressors: XGBoost, LightGBM, RandomForest, GradientBoosting, AdaBoost, Ridge, Lasso, ElasticNet
+- 4 feature selection strategies: none, correlation, permutation, rfe-smart
+- `--keep-penalty-features` flag to force-keep critical domain features
+- Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
+- Quick start: `uv run python scripts/custom_pipeline_optimizer.py --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber`
+
+**TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
+- MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)
+- Use for comparison/exploration, NOT production
+- Quick start: `uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 9 --scorer fpl_weighted_huber --max-time-mins 480`
+
+**Model Comparison** (`experiments/FINAL_MODEL_COMPARISON.md`):
+- Custom RandomForest: 64% better MAE, 20% better top-15 overlap, 240x faster training
+- Key insight: Domain knowledge (preserving penalty features) > algorithmic complexity (8hr genetic search)
+- Always preserve domain-critical features (penalties, goals, assists)
 
 ## Expected Points Models
 
