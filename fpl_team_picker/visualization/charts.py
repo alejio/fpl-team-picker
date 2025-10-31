@@ -803,10 +803,10 @@ def create_fixture_difficulty_visualization(
                         opponent_id = fixture["home_team_id"]
                         is_home = False
 
-                    # Get opponent name
-                    opponent_name = teams[teams["team_id"] == opponent_id]["name"].iloc[
-                        0
-                    ]
+                    # Get opponent name and short name
+                    opponent_row = teams[teams["team_id"] == opponent_id].iloc[0]
+                    opponent_name = opponent_row["name"]
+                    opponent_short_name = opponent_row["short_name"]
 
                     # Get opponent strength for difficulty calculation
                     opponent_strength = team_strength.get(opponent_name, 1.0)
@@ -822,9 +822,8 @@ def create_fixture_difficulty_visualization(
                         difficulty *= 1.1  # Harder away
                         venue = "(A)"
 
-                    # Create display text
-                    short_name = opponent_name[:3].upper()
-                    team_row[f"GW{gw}"] = f"{short_name} {venue}"
+                    # Create display text using proper short name from data
+                    team_row[f"GW{gw}"] = f"{opponent_short_name} {venue}"
                     team_row[f"GW{gw}_difficulty"] = difficulty
                 else:
                     team_row[f"GW{gw}"] = "BGW"  # Blank gameweek
