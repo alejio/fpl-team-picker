@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/tpot/tpot_pipeline_gw1-9_20251031_064636.joblib",
+        default="models/tpot/tpot_pipeline_gw1-9_20251101_064204.joblib",
         description="Path to pre-trained ML model with 99 features (TPOT auto-optimized)",
     )
     ml_ensemble_rule_weight: float = Field(

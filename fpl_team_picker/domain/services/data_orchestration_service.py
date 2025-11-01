@@ -1002,7 +1002,34 @@ class DataOrchestrationService:
         print("🎲 Loading betting odds features...")
         try:
             betting_features_df = client.get_derived_betting_features()
-            print(f"   ✅ Betting features: {len(betting_features_df)} records")
+            if (
+                not betting_features_df.empty
+                and "gameweek" in betting_features_df.columns
+            ):
+                gw_range = (
+                    f"GW{betting_features_df['gameweek'].min()}-{betting_features_df['gameweek'].max()}"
+                    if betting_features_df["gameweek"].nunique() > 1
+                    else f"GW{betting_features_df['gameweek'].iloc[0]}"
+                )
+                print(
+                    f"   ✅ Betting features: {len(betting_features_df)} records ({gw_range})"
+                )
+                # Log next GW availability for inference pipeline verification
+                if target_gameweek in betting_features_df["gameweek"].values:
+                    next_gw_count = len(
+                        betting_features_df[
+                            betting_features_df["gameweek"] == target_gameweek
+                        ]
+                    )
+                    print(
+                        f"   ✅ GW{target_gameweek} betting data available: {next_gw_count} player records"
+                    )
+                else:
+                    print(
+                        f"   ⚠️  GW{target_gameweek} betting data not found - will use neutral defaults"
+                    )
+            else:
+                print(f"   ✅ Betting features: {len(betting_features_df)} records")
         except (AttributeError, Exception) as e:
             print(f"   ⚠️  Betting features unavailable: {e}")
             raise ValueError(f"Betting features unavailable: {e}")

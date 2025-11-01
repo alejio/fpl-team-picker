@@ -421,6 +421,10 @@ def _(gameweek_data, mo):
 
         # Choose ML or rule-based model based on config
         use_ml = config.xp_model.use_ml_model
+        if config.xp_model.debug:
+            print(
+                f"🔧 Config: use_ml_model={use_ml}, ml_model_path={config.xp_model.ml_model_path}"
+            )
 
         if use_ml:
             # Use pre-trained ML model specified in config
@@ -449,14 +453,24 @@ def _(gameweek_data, mo):
                 model_type_label = f"ML Pipeline ({model_path.stem})"
 
             # Initialize ML service with configured model
+            if config.xp_model.debug:
+                print(f"🤖 Initializing ML XP Service: {model_path.name}")
             ml_xp_service = MLExpectedPointsService(
                 model_path=str(model_path),
                 ensemble_rule_weight=config.xp_model.ml_ensemble_rule_weight,
                 debug=config.xp_model.debug,
             )
+            if config.xp_model.debug:
+                print(
+                    f"✅ ML XP Service initialized with {len(ml_xp_service.pipeline.named_steps) if hasattr(ml_xp_service, 'pipeline') and ml_xp_service.pipeline else 'N/A'} pipeline steps"
+                )
 
             # Calculate xP using ML service (no fallback - fail explicitly)
             # Note: ML service currently only does 1GW predictions
+            if config.xp_model.debug:
+                print(
+                    f"🚀 Calculating ML xP for GW{gameweek_data['target_gameweek']} with betting features..."
+                )
             players_with_xp = ml_xp_service.calculate_expected_points(
                 players_data=gameweek_data.get("players", _pd.DataFrame()),
                 teams_data=gameweek_data.get("teams", _pd.DataFrame()),
@@ -551,6 +565,7 @@ def _(gameweek_data, mo):
             # TODO: We need a clear log here that explains we are using rules-based
             # model.
             xp_service = ExpectedPointsService()
+            # Respect config setting (should be False here since use_ml is False, but be explicit)
             players_with_xp = xp_service.calculate_combined_results(
                 gameweek_data, use_ml_model=False
             )
