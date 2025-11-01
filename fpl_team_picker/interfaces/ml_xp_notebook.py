@@ -147,10 +147,16 @@ def _(data_service, mo):
 @app.cell
 def _(client, end_gw_input, mo, pd, start_gw_input):
     # Load historical gameweek performance data + fixtures & teams for opponent features
+    # Also load enhanced data sources for 99-feature FPLFeatureEngineer
     historical_data = []
     data_load_status = []
     fixtures_df = pd.DataFrame()
     teams_df = pd.DataFrame()
+    ownership_trends_df = pd.DataFrame()
+    value_analysis_df = pd.DataFrame()
+    fixture_difficulty_df = pd.DataFrame()
+    betting_features_df = pd.DataFrame()
+    raw_players_df = pd.DataFrame()
 
     if start_gw_input.value and end_gw_input.value:
         if end_gw_input.value <= start_gw_input.value:
@@ -215,6 +221,59 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
                             f"⚠️ Warning: Could not load fixtures/teams: {str(e)}"
                         )
 
+                    # Load enhanced data sources for 99-feature FPLFeatureEngineer
+                    try:
+                        ownership_trends_df = client.get_derived_ownership_trends()
+                        value_analysis_df = client.get_derived_value_analysis()
+                        fixture_difficulty_df = client.get_derived_fixture_difficulty()
+                        data_load_status.append(
+                            f"✅ Enhanced: Ownership={len(ownership_trends_df)}, Value={len(value_analysis_df)}, Fixture Difficulty={len(fixture_difficulty_df)}"
+                        )
+                    except Exception as e:
+                        data_load_status.append(
+                            f"⚠️ Warning: Could not load enhanced data: {str(e)}"
+                        )
+
+                    # Load betting odds features
+                    try:
+                        betting_features_df = client.get_derived_betting_features()
+                        data_load_status.append(
+                            f"✅ Betting features: {len(betting_features_df)} records"
+                        )
+                    except (AttributeError, Exception) as e:
+                        data_load_status.append(
+                            f"⚠️ Betting features unavailable: {str(e)} (continuing with defaults)"
+                        )
+                        betting_features_df = pd.DataFrame()
+
+                    # Load raw players data for penalty/set-piece features
+                    try:
+                        raw_players_df = client.get_raw_players_bootstrap()
+                        required_cols = [
+                            "penalties_order",
+                            "corners_and_indirect_freekicks_order",
+                            "direct_freekicks_order",
+                        ]
+                        missing_cols = [
+                            col
+                            for col in required_cols
+                            if col not in raw_players_df.columns
+                        ]
+                        if missing_cols:
+                            data_load_status.append(
+                                f"⚠️ Missing penalty columns: {missing_cols}"
+                            )
+                            raw_players_df = pd.DataFrame()
+                        else:
+                            data_load_status.append(
+                                f"✅ Penalty/set-piece data: {len(raw_players_df)} players"
+                            )
+                    except Exception as e:
+                        data_load_status.append(
+                            f"⚠️ Penalty data unavailable: {str(e)} (continuing without)"
+                        )
+                        raw_players_df = pd.DataFrame()
+
                     load_summary = mo.vstack(
                         [
                             mo.md(f"### ✅ Loaded {len(historical_data)} Gameweeks"),
@@ -237,7 +296,16 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
         load_summary = mo.md("⚠️ **Select gameweek range to load data**")
 
     load_summary
-    return fixtures_df, historical_df, teams_df
+    return (
+        betting_features_df,
+        fixture_difficulty_df,
+        fixtures_df,
+        historical_df,
+        ownership_trends_df,
+        raw_players_df,
+        teams_df,
+        value_analysis_df,
+    )
 
 
 @app.cell
@@ -328,12 +396,17 @@ def _(mo):
 @app.cell
 def _(
     FPLFeatureEngineer,
+    betting_features_df,
+    fixture_difficulty_df,
     fixtures_df,
     historical_df,
     mo,
+    ownership_trends_df,
     pd,
+    raw_players_df,
     team_strength,
     teams_df,
+    value_analysis_df,
 ):
     # ===================================================================
     # ✅ USE PRODUCTION CODE: FPLFeatureEngineer from ml_feature_engineering.py
@@ -355,11 +428,25 @@ def _(
     # ===================================================================
 
     if not historical_df.empty:
-        # Initialize production feature engineer
+        # Initialize production feature engineer with ALL data sources for 99 features
+        # This matches what TPOT models were trained with
         feature_engineer = FPLFeatureEngineer(
             fixtures_df=fixtures_df if not fixtures_df.empty else None,
             teams_df=teams_df if not teams_df.empty else None,
             team_strength=team_strength if team_strength else None,
+            ownership_trends_df=ownership_trends_df
+            if not ownership_trends_df.empty
+            else None,
+            value_analysis_df=value_analysis_df
+            if not value_analysis_df.empty
+            else None,
+            fixture_difficulty_df=fixture_difficulty_df
+            if not fixture_difficulty_df.empty
+            else None,
+            raw_players_df=raw_players_df if not raw_players_df.empty else None,
+            betting_features_df=betting_features_df
+            if not betting_features_df.empty
+            else None,
         )
 
         # Transform historical data to features (same as production!)
@@ -470,11 +557,46 @@ def _(
                     "- `opponent_rolling_5gw_xgc` - Opponent's expected goals conceded"
                 ),
                 mo.md(""),
+                mo.md("**Enhanced Features (Issue #37):**"),
+                mo.md(
+                    "- `ownership_tier`, `transfer_momentum`, `bandwagon_score` - Ownership trends (7 features)"
+                ),
+                mo.md(
+                    "- `points_per_pound`, `value_vs_position`, `predicted_price_change` - Value analysis (5 features)"
+                ),
+                mo.md(
+                    "- `congestion_difficulty`, `form_adjusted_difficulty` - Enhanced fixture difficulty (3 features)"
+                ),
+                mo.md(""),
+                mo.md("**Penalty & Set-Piece Taker Features:**"),
+                mo.md(
+                    "- `is_primary_penalty_taker`, `is_penalty_taker` - Penalty taker indicators"
+                ),
+                mo.md(
+                    "- `is_corner_taker`, `is_fk_taker` - Set-piece taker indicators"
+                ),
+                mo.md(""),
+                mo.md("**Betting Odds Features (Issue #38):**"),
+                mo.md(
+                    "- `team_win_probability`, `opponent_win_probability`, `draw_probability` - Match outcome probabilities"
+                ),
+                mo.md(
+                    "- `implied_clean_sheet_probability`, `implied_total_goals` - Implied statistics"
+                ),
+                mo.md(
+                    "- `market_consensus_strength`, `odds_movement_team` - Market confidence indicators"
+                ),
+                mo.md(
+                    "- `asian_handicap_line`, `expected_goal_difference` - Handicap and expectation features"
+                ),
+                mo.md(""),
                 mo.md(
                     "💡 **Team features are safe with player-based GroupKFold:** We test the model's ability to predict NEW players on KNOWN teams, not future outcomes."
                 ),
                 mo.md(""),
-                mo.md(f"**Total features created:** {len(features_df.columns)}"),
+                mo.md(
+                    f"**Total features created:** {len(production_feature_cols)} (99 when all data sources available)"
+                ),
                 mo.md(
                     "**Features using 5GW windows:** All rolling features use 5-gameweek lookback"
                 ),
@@ -799,6 +921,7 @@ def _(
     cv_data,
     cv_groups,
     cv_strategy_selector,
+    feature_cols,
     mo,
     model_selector,
     n_folds_input,
@@ -1078,7 +1201,7 @@ def _(
 
         if model_selector.value == "tpot" or model_selector.value == "ensemble":
             # TPOT Pipeline - Load pre-trained auto-optimized model
-            # NOTE: TPOT model expects 64 features from FPLFeatureEngineer
+            # NOTE: TPOT model expects 99 features from FPLFeatureEngineer (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting)
             # Generate TPOT models via: uv run python scripts/tpot_pipeline_optimizer.py
             import joblib
             from pathlib import Path
@@ -1096,6 +1219,33 @@ def _(
 
                     # Load pre-trained TPOT pipeline
                     tpot_pipeline = joblib.load(_tpot_model_path)
+
+                    # Validate feature count matches (TPOT models expect 99 features)
+                    # Check first transformer step (usually RobustScaler) to see expected input size
+                    try:
+                        first_step = tpot_pipeline.steps[0][1]
+                        # Try to get n_features_in_ if available (some transformers have this)
+                        if hasattr(first_step, "n_features_in_"):
+                            expected_features = first_step.n_features_in_
+                            actual_features = len(feature_cols)
+                            if expected_features != actual_features:
+                                print(
+                                    f"⚠️ Feature count mismatch: Model expects {expected_features}, got {actual_features}"
+                                )
+                                print(
+                                    "   Model was likely trained with different feature set."
+                                )
+                                print(
+                                    "   Ensure all enhanced data sources are loaded (ownership, value, fixture_difficulty, betting, penalties)."
+                                )
+                            else:
+                                print(
+                                    f"✅ Feature count validated: {actual_features} features match model expectations"
+                                )
+                    except Exception as e:
+                        print(
+                            f"⚠️ Could not validate feature count: {e} (continuing anyway)"
+                        )
 
                     # Cross-validation scoring (using pre-trained pipeline)
                     _tpot_mae_scores = -cross_val_score(
