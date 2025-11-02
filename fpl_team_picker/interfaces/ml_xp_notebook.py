@@ -1,29 +1,24 @@
 """
-ML Expected Points (xP) Experimentation Notebook
+ML Expected Points (xP) Deep Dive Analysis Notebook
 
-This notebook provides a structured environment for developing, testing, and validating
-ML-based xP prediction models. The goal is to improve upon the current rule-based model
-used in gameweek_manager.py.
+This notebook provides comprehensive analysis of pre-trained TPOT ML models for FPL xP prediction.
+The goal is to understand model behavior, identify strengths/weaknesses, and validate performance.
 
-Key Features:
-- Leak-free player-based validation with 5-gameweek rolling windows
-- Comprehensive feature engineering:
-  * Cumulative season statistics (up to GW N-1)
-  * Rolling 5GW form features (GW N-6 to N-1)
-  * Season-long and rolling per-90 efficiency metrics
-  * Consistency and volatility indicators
-  * Team context features (rolling 5GW team form, cumulative team stats)
-- Position-specific model evaluation
+Key Analysis Features:
+- Automatic loading of latest pre-trained TPOT model
+- Temporal cross-validation for proper time-series evaluation
+- Feature importance analysis (which features drive predictions)
+- Position-specific error breakdown (where model struggles)
+- Prediction bias detection (systematic over/under-prediction)
 - Model comparison against rule-based baseline
-- Production-ready model export
+- Comprehensive feature engineering (99 features) with all enhanced data sources
 
-Modeling Strategy:
-- Use 5 preceding gameweeks (GW N-5 to N-1) to predict GW N performance
-- Player-based train/test split using GroupKFold (ensures each player's data stays together)
-- All features properly lagged to prevent data leakage (shift(1) applied to all rolling stats)
-- Team features are safe: Testing "can we predict NEW players on KNOWN teams?" not future outcomes
-- Minimum requirement: GW6+ for complete rolling feature coverage
-- Tests model's ability to generalize to unseen players (not unseen time periods)
+Analysis Strategy:
+- Load historical gameweek data (GW6+ for rolling features)
+- Engineer 99 features using production FPLFeatureEngineer
+- Load latest TPOT model automatically
+- Use temporal walk-forward validation (test on future gameweeks)
+- Deep dive into predictions, errors, and model behavior
 """
 
 import marimo
@@ -91,9 +86,17 @@ def _():
 def _(mo):
     mo.md(
         r"""
-    # 🤖 ML Expected Points (xP) Experimentation Lab
+    # 🔬 ML Expected Points (xP) Deep Dive Analysis
 
-    **Goal:** Develop and validate ML models to improve xP predictions beyond the current rule-based approach.
+    **Goal:** Comprehensive analysis of pre-trained TPOT models to understand model behavior,
+    validate performance, and identify areas for improvement.
+
+    This notebook automatically loads the latest TPOT model and provides detailed analysis including:
+    - Feature importance analysis
+    - Position-specific error breakdown
+    - Prediction bias detection
+    - Temporal cross-validation metrics
+    - Comparison with rule-based baseline
 
     ---
     """
@@ -108,46 +111,31 @@ def _(mo):
 
 
 @app.cell
-def _(data_service, mo):
-    # Get current gameweek
-    gw_info = data_service.get_current_gameweek_info()
-    current_gw = gw_info.get("current_gameweek", 1)
-
-    # Gameweek range selector
-    start_gw_input = mo.ui.number(
-        start=1,
-        stop=38,
-        value=1,
-        step=1,
-        label="Training Start Gameweek",
-    )
-
-    end_gw_input = mo.ui.number(
-        start=2,
-        stop=38,
-        value=min(6, current_gw),
-        step=1,
-        label="Training End Gameweek (predict this GW)",
-    )
+def _(mo):
+    # Fixed gameweek range for analysis
+    # NOTE: Latest TPOT model was trained on GW1-9
+    # We load GW1-9 for feature engineering, then use GW6-9 for temporal CV analysis
+    start_gw = 1
+    end_gw = 9
 
     mo.vstack(
         [
-            mo.md(f"**Current Season Gameweek:** GW{current_gw}"),
+            mo.md("### 📊 Analysis Configuration"),
+            mo.md(f"**Model Training Range:** GW{start_gw}-{end_gw}"),
+            mo.md(
+                f"**Temporal CV Range:** GW6-{end_gw} (GW6+ required for rolling features)"
+            ),
             mo.md("---"),
-            mo.md("### 📅 Select Training Window"),
-            mo.md("*Training data: GW{start} to GW{end-1} → Predict GW{end}*"),
-            start_gw_input,
-            end_gw_input,
-            mo.md("*Example: GW1-5 data predicts GW6 (no future leakage)*"),
         ]
     )
-    return end_gw_input, start_gw_input
+    return end_gw, start_gw
 
 
 @app.cell
-def _(client, end_gw_input, mo, pd, start_gw_input):
+def _(client, end_gw, mo, pd, start_gw):
     # Load historical gameweek performance data + fixtures & teams for opponent features
     # Also load enhanced data sources for 99-feature FPLFeatureEngineer
+    # NOTE: TPOT model was trained on GW1-9, so we load data in that range for analysis
     historical_data = []
     data_load_status = []
     fixtures_df = pd.DataFrame()
@@ -158,142 +146,133 @@ def _(client, end_gw_input, mo, pd, start_gw_input):
     betting_features_df = pd.DataFrame()
     raw_players_df = pd.DataFrame()
 
-    if start_gw_input.value and end_gw_input.value:
-        if end_gw_input.value <= start_gw_input.value:
-            load_summary = mo.md("❌ **End gameweek must be after start gameweek**")
-        else:
+    try:
+        # Load actual performance data for each gameweek (GW1-9)
+        for gw in range(start_gw, end_gw + 1):
+            gw_performance = client.get_gameweek_performance(gw)
+            if not gw_performance.empty:
+                gw_performance["gameweek"] = gw
+                historical_data.append(gw_performance)
+                data_load_status.append(f"✅ GW{gw}: {len(gw_performance)} players")
+            else:
+                data_load_status.append(f"⚠️ GW{gw}: No data available")
+
+        if historical_data:
+            historical_df = pd.concat(historical_data, ignore_index=True)
+
+            # Enrich with player position data (not in gameweek_performance)
+            # Need to join from current_players to get position
             try:
-                # Load actual performance data for each gameweek
-                for gw in range(start_gw_input.value, end_gw_input.value + 1):
-                    gw_performance = client.get_gameweek_performance(gw)
-                    if not gw_performance.empty:
-                        gw_performance["gameweek"] = gw
-                        historical_data.append(gw_performance)
-                        data_load_status.append(
-                            f"✅ GW{gw}: {len(gw_performance)} players"
-                        )
-                    else:
-                        data_load_status.append(f"⚠️ GW{gw}: No data available")
-
-                if historical_data:
-                    historical_df = pd.concat(historical_data, ignore_index=True)
-
-                    # Enrich with player position data (not in gameweek_performance)
-                    # Need to join from current_players to get position
-                    try:
-                        players_data = client.get_current_players()
-                        if (
-                            "position" in players_data.columns
-                            and "player_id" in players_data.columns
-                        ):
-                            # Merge position data
-                            historical_df = historical_df.merge(
-                                players_data[["player_id", "position"]],
-                                on="player_id",
-                                how="left",
-                            )
-                            # Validate all players have position
-                            if historical_df["position"].isna().any():
-                                missing_count = historical_df["position"].isna().sum()
-                                data_load_status.append(
-                                    f"⚠️ Warning: {missing_count} records missing position data"
-                                )
-                        else:
-                            raise ValueError(
-                                f"Position column not found in current_players data. "
-                                f"Available columns: {list(players_data.columns)}"
-                            )
-                    except Exception as e:
-                        raise ValueError(
-                            f"Failed to enrich historical data with position information: {str(e)}"
-                        )
-
-                    # Load fixtures and teams data for fixture-specific features
-                    try:
-                        fixtures_df = client.get_fixtures_normalized()
-                        teams_df = client.get_current_teams()
-
-                        data_load_status.append(
-                            f"✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}"
-                        )
-                    except Exception as e:
-                        data_load_status.append(
-                            f"⚠️ Warning: Could not load fixtures/teams: {str(e)}"
-                        )
-
-                    # Load enhanced data sources for 99-feature FPLFeatureEngineer
-                    try:
-                        ownership_trends_df = client.get_derived_ownership_trends()
-                        value_analysis_df = client.get_derived_value_analysis()
-                        fixture_difficulty_df = client.get_derived_fixture_difficulty()
-                        data_load_status.append(
-                            f"✅ Enhanced: Ownership={len(ownership_trends_df)}, Value={len(value_analysis_df)}, Fixture Difficulty={len(fixture_difficulty_df)}"
-                        )
-                    except Exception as e:
-                        data_load_status.append(
-                            f"⚠️ Warning: Could not load enhanced data: {str(e)}"
-                        )
-
-                    # Load betting odds features
-                    try:
-                        betting_features_df = client.get_derived_betting_features()
-                        data_load_status.append(
-                            f"✅ Betting features: {len(betting_features_df)} records"
-                        )
-                    except (AttributeError, Exception) as e:
-                        data_load_status.append(
-                            f"⚠️ Betting features unavailable: {str(e)} (continuing with defaults)"
-                        )
-                        betting_features_df = pd.DataFrame()
-
-                    # Load raw players data for penalty/set-piece features
-                    try:
-                        raw_players_df = client.get_raw_players_bootstrap()
-                        required_cols = [
-                            "penalties_order",
-                            "corners_and_indirect_freekicks_order",
-                            "direct_freekicks_order",
-                        ]
-                        missing_cols = [
-                            col
-                            for col in required_cols
-                            if col not in raw_players_df.columns
-                        ]
-                        if missing_cols:
-                            data_load_status.append(
-                                f"⚠️ Missing penalty columns: {missing_cols}"
-                            )
-                            raw_players_df = pd.DataFrame()
-                        else:
-                            data_load_status.append(
-                                f"✅ Penalty/set-piece data: {len(raw_players_df)} players"
-                            )
-                    except Exception as e:
-                        data_load_status.append(
-                            f"⚠️ Penalty data unavailable: {str(e)} (continuing without)"
-                        )
-                        raw_players_df = pd.DataFrame()
-
-                    load_summary = mo.vstack(
-                        [
-                            mo.md(f"### ✅ Loaded {len(historical_data)} Gameweeks"),
-                            mo.md("\n".join(data_load_status)),
-                            mo.md(f"**Total records:** {len(historical_df):,}"),
-                            mo.md(
-                                f"**Unique players:** {historical_df['player_id'].nunique():,}"
-                            ),
-                            mo.md("---"),
-                        ]
+                players_data = client.get_current_players()
+                if (
+                    "position" in players_data.columns
+                    and "player_id" in players_data.columns
+                ):
+                    # Merge position data
+                    historical_df = historical_df.merge(
+                        players_data[["player_id", "position"]],
+                        on="player_id",
+                        how="left",
                     )
+                    # Validate all players have position
+                    if historical_df["position"].isna().any():
+                        missing_count = historical_df["position"].isna().sum()
+                        data_load_status.append(
+                            f"⚠️ Warning: {missing_count} records missing position data"
+                        )
                 else:
-                    historical_df = pd.DataFrame()
-                    load_summary = mo.md("❌ **No data loaded**")
+                    raise ValueError(
+                        f"Position column not found in current_players data. "
+                        f"Available columns: {list(players_data.columns)}"
+                    )
             except Exception as e:
-                historical_df = pd.DataFrame()
-                load_summary = mo.md(f"❌ **Data loading error:** {str(e)}")
-    else:
+                raise ValueError(
+                    f"Failed to enrich historical data with position information: {str(e)}"
+                )
+
+            # Load fixtures and teams data for fixture-specific features
+            try:
+                fixtures_df = client.get_fixtures_normalized()
+                teams_df = client.get_current_teams()
+
+                data_load_status.append(
+                    f"✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}"
+                )
+            except Exception as e:
+                data_load_status.append(
+                    f"⚠️ Warning: Could not load fixtures/teams: {str(e)}"
+                )
+
+            # Load enhanced data sources for 99-feature FPLFeatureEngineer
+            try:
+                ownership_trends_df = client.get_derived_ownership_trends()
+                value_analysis_df = client.get_derived_value_analysis()
+                fixture_difficulty_df = client.get_derived_fixture_difficulty()
+                data_load_status.append(
+                    f"✅ Enhanced: Ownership={len(ownership_trends_df)}, Value={len(value_analysis_df)}, Fixture Difficulty={len(fixture_difficulty_df)}"
+                )
+            except Exception as e:
+                data_load_status.append(
+                    f"⚠️ Warning: Could not load enhanced data: {str(e)}"
+                )
+
+            # Load betting odds features
+            try:
+                betting_features_df = client.get_derived_betting_features()
+                data_load_status.append(
+                    f"✅ Betting features: {len(betting_features_df)} records"
+                )
+            except (AttributeError, Exception) as e:
+                data_load_status.append(
+                    f"⚠️ Betting features unavailable: {str(e)} (continuing with defaults)"
+                )
+                betting_features_df = pd.DataFrame()
+
+            # Load raw players data for penalty/set-piece features
+            try:
+                raw_players_df = client.get_raw_players_bootstrap()
+                required_cols = [
+                    "penalties_order",
+                    "corners_and_indirect_freekicks_order",
+                    "direct_freekicks_order",
+                ]
+                missing_cols = [
+                    col for col in required_cols if col not in raw_players_df.columns
+                ]
+                if missing_cols:
+                    data_load_status.append(
+                        f"⚠️ Missing penalty columns: {missing_cols}"
+                    )
+                    raw_players_df = pd.DataFrame()
+                else:
+                    data_load_status.append(
+                        f"✅ Penalty/set-piece data: {len(raw_players_df)} players"
+                    )
+            except Exception as e:
+                data_load_status.append(
+                    f"⚠️ Penalty data unavailable: {str(e)} (continuing without)"
+                )
+                raw_players_df = pd.DataFrame()
+
+            load_summary = mo.vstack(
+                [
+                    mo.md(
+                        f"### ✅ Loaded {len(historical_data)} Gameweeks (GW{start_gw}-{end_gw})"
+                    ),
+                    mo.md("\n".join(data_load_status)),
+                    mo.md(f"**Total records:** {len(historical_df):,}"),
+                    mo.md(
+                        f"**Unique players:** {historical_df['player_id'].nunique():,}"
+                    ),
+                    mo.md("---"),
+                ]
+            )
+        else:
+            historical_df = pd.DataFrame()
+            load_summary = mo.md("❌ **No data loaded**")
+    except Exception as e:
         historical_df = pd.DataFrame()
-        load_summary = mo.md("⚠️ **Select gameweek range to load data**")
+        load_summary = mo.md(f"❌ **Data loading error:** {str(e)}")
 
     load_summary
     return (
@@ -668,146 +647,83 @@ def _(features_df, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 4️⃣ Cross-Validation Setup - Player-Based Stratified K-Fold""")
+    mo.md(r"""## 4️⃣ Analysis Data Preparation - Temporal Validation Setup""")
     return
 
 
 @app.cell
-def _(mo):
-    # Number of folds for cross-validation
-    n_folds_input = mo.ui.slider(
-        start=3,
-        stop=10,
-        value=5,
-        step=1,
-        label="Number of Cross-Validation Folds",
-        show_value=True,
-    )
-    n_folds_input
-    return (n_folds_input,)
-
-
-@app.cell
 def _(
-    end_gw_input,
+    end_gw,
     features_df,
     mo,
-    n_folds_input,
     pd,
     production_feature_cols,
 ):
-    # Prepare data for cross-validation
-    # Strategy: Use ALL available gameweeks (GW6+) with player-based stratified k-fold
-    if not features_df.empty and end_gw_input.value and n_folds_input.value:
-        # Validate sufficient training history for 5GW rolling features
-        # Need at least GW6 to have 5 preceding gameweeks of data
-        if end_gw_input.value < 6:
-            cv_summary = mo.md(
-                f"⚠️ **Target gameweek must be GW6 or later for 5GW rolling features.**\n\n"
-                f"Current selection: GW{end_gw_input.value}\n\n"
-                f"Rolling 5GW features require data from GW N-5 to N-1 to predict GW N."
+    # Prepare data for analysis
+    # Strategy: Use GW6-9 for temporal validation (GW6+ required for rolling features)
+    if not features_df.empty:
+        # Use GW6-9 for temporal CV analysis (GW6+ required for rolling features)
+        # Model was trained on GW1-9, so we analyze on GW6-9 for proper temporal validation
+        cv_data = features_df[
+            (features_df["gameweek"] >= 6) & (features_df["gameweek"] <= end_gw)
+        ].copy()
+
+        # ✅ USE PRODUCTION FEATURE LIST from FPLFeatureEngineer
+        # This ensures notebook uses same features as gameweek_manager.py
+        feature_cols = production_feature_cols
+
+        # Validate all feature columns exist in the data
+        missing_features = [col for col in feature_cols if col not in cv_data.columns]
+        if missing_features:
+            raise ValueError(
+                f"Missing feature columns: {missing_features}. "
+                f"Available columns: {list(cv_data.columns)}"
             )
-            X_cv = pd.DataFrame()
-            y_cv = pd.Series()
-            cv_data = pd.DataFrame()
-            feature_cols = []
-            cv_groups = None
-        else:
-            # Use all completed gameweeks from GW6 up to end_gw (inclusive)
-            # This provides more training data across multiple gameweeks
-            cv_data = features_df[
-                (features_df["gameweek"] >= 6)
-                & (features_df["gameweek"] <= end_gw_input.value)
-            ].copy()
 
-            # ✅ USE PRODUCTION FEATURE LIST from FPLFeatureEngineer
-            # This ensures notebook training uses same features as gameweek_manager.py
-            # OLD: Hardcoded list of 63 features (could drift from production)
-            # NEW: Dynamic list from production code (always in sync)
-            feature_cols = production_feature_cols
+        # Prepare X and y for cross-validation
+        X_cv = cv_data[feature_cols].fillna(0)
+        y_cv = cv_data["total_points"]
 
-            # Validate all feature columns exist in the data
-            missing_features = [
-                col for col in feature_cols if col not in cv_data.columns
+        # Calculate gameweek coverage
+        _cv_gws = sorted(cv_data["gameweek"].unique())
+        _gw_range = (
+            f"GW{min(_cv_gws)}-{max(_cv_gws)}"
+            if len(_cv_gws) > 1
+            else f"GW{_cv_gws[0]}"
+        )
+
+        cv_summary = mo.vstack(
+            [
+                mo.md("### ✅ Analysis Data Prepared"),
+                mo.md(f"**Data Range:** {_gw_range} ({len(cv_data):,} total records)"),
+                mo.md(
+                    f"**Players:** {cv_data['player_id'].nunique():,} unique players"
+                ),
+                mo.md(
+                    f"**Features:** {len(feature_cols)} columns (99-feature TPOT model)"
+                ),
+                mo.md(""),
+                mo.md("**✅ No Data Leakage:**"),
+                mo.md("- All features use `.shift(1)` to exclude current gameweek"),
+                mo.md("- Cumulative stats: up to GW N-1 only"),
+                mo.md("- Rolling features: GW N-6 to N-1 window"),
+                mo.md("- Temporal validation will test on future gameweeks"),
+                mo.md(""),
+                mo.md(
+                    f"**Total: {len(feature_cols)} features** (65 base + 15 enhanced + 4 penalty + 15 betting)"
+                ),
+                mo.md("---"),
             ]
-            if missing_features:
-                raise ValueError(
-                    f"Missing feature columns: {missing_features}. "
-                    f"Available columns: {list(cv_data.columns)}"
-                )
-
-            # Prepare X and y for cross-validation
-            X_cv = cv_data[feature_cols].fillna(0)
-            y_cv = cv_data["total_points"]
-
-            # Create groups for GroupKFold based on player_id
-            # This ensures each player's data stays together in folds
-            cv_groups = cv_data["player_id"].values
-
-            # Calculate gameweek coverage
-            _cv_gws = sorted(cv_data["gameweek"].unique())
-            _gw_range = (
-                f"GW{min(_cv_gws)}-{max(_cv_gws)}"
-                if len(_cv_gws) > 1
-                else f"GW{_cv_gws[0]}"
-            )
-
-            cv_summary = mo.vstack(
-                [
-                    mo.md("### ✅ Cross-Validation Setup Complete"),
-                    mo.md(
-                        f"**Strategy:** {n_folds_input.value}-Fold Player-Based Cross-Validation"
-                    ),
-                    mo.md(f"**Data:** {_gw_range} ({len(cv_data):,} total records)"),
-                    mo.md(
-                        f"**Players:** {cv_data['player_id'].nunique():,} unique players"
-                    ),
-                    mo.md(
-                        f"**Features:** {len(feature_cols)} columns (5GW rolling windows)"
-                    ),
-                    mo.md(""),
-                    mo.md("**✅ No Data Leakage:**"),
-                    mo.md("- All features use `.shift(1)` to exclude current gameweek"),
-                    mo.md("- Cumulative stats: up to GW N-1 only"),
-                    mo.md("- Rolling features: GW N-6 to N-1 window"),
-                    mo.md("- Player-based CV ensures generalization to unseen players"),
-                    mo.md(""),
-                    mo.md("**Cross-Validation Details:**"),
-                    mo.md(
-                        f"- Each fold tests on ~{100 // n_folds_input.value}% of players"
-                    ),
-                    mo.md(
-                        f"- {n_folds_input.value} independent evaluations for robust metrics"
-                    ),
-                    mo.md("- GroupKFold ensures player data stays within single fold"),
-                    mo.md(""),
-                    mo.md("**Feature Categories:**"),
-                    mo.md("- Static: 3 features (price, position, games_played)"),
-                    mo.md("- Cumulative Season Stats: 9 features"),
-                    mo.md("- Cumulative Per-90 Rates: 7 features"),
-                    mo.md("- Rolling 5GW Form: 13 features"),
-                    mo.md("- Rolling 5GW Per-90 Rates: 3 features"),
-                    mo.md("- Defensive Metrics: 4 features"),
-                    mo.md("- Consistency & Volatility: 4 features"),
-                    mo.md("- Team Context: 14 features"),
-                    mo.md(
-                        "- **Fixture Features (NEW!): 6 features** (opponent strength, home/away, opponent defense)"
-                    ),
-                    mo.md(""),
-                    mo.md(f"**Total: {len(feature_cols)} features**"),
-                    mo.md("---"),
-                ]
-            )
+        )
     else:
         X_cv = pd.DataFrame()
         y_cv = pd.Series()
         cv_data = pd.DataFrame()
         feature_cols = []
-        cv_groups = None
         cv_summary = mo.md("⚠️ **Engineer features first**")
 
     cv_summary
-    return X_cv, cv_data, cv_groups, feature_cols, y_cv
+    return X_cv, cv_data, feature_cols, y_cv
 
 
 @app.cell
@@ -851,430 +767,131 @@ def _(X_cv, cv_data, mo, y_cv):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 5️⃣ Model Training - Multiple Algorithms""")
+    mo.md(r"""## 5️⃣ Load Pre-Trained TPOT Model""")
     return
 
 
 @app.cell
-def _(mo):
-    # Model selection
-    model_selector = mo.ui.dropdown(
-        options={
-            "TPOT Pipeline (Auto-Optimized)": "tpot",
-            "LightGBM (Recommended)": "lgbm",
-            "Ridge Regression": "ridge",
-            "Random Forest": "rf",
-            "Gradient Boosting": "gb",
-            "Ensemble (All Models)": "ensemble",
-        },
-        value="TPOT Pipeline (Auto-Optimized)",
-        label="Select ML Algorithm",
-    )
-
-    train_button = mo.ui.run_button(
-        label="🚀 Train Model",
-        kind="success",
-    )
-
-    # CV Strategy Selection
-    cv_strategy_selector = mo.ui.dropdown(
-        options={
-            "player_based": "Player-Based GroupKFold (test on NEW players)",
-            "temporal": "Temporal Walk-Forward (test on NEXT gameweek)",
-        },
-        value="temporal",
-        label="Cross-Validation Strategy",
-    )
-
-    mo.vstack(
-        [
-            mo.md("### 🎯 Model Selection"),
-            model_selector,
-            mo.md(""),
-            mo.md("### 📊 Cross-Validation Strategy"),
-            cv_strategy_selector,
-            mo.md(
-                "- **Player-Based:** Tests generalization to unseen players (mixes gameweeks)"
-            ),
-            mo.md(
-                "- **Temporal:** Tests prediction of next future gameweek (proper time-series validation) ⭐"
-            ),
-            mo.md(""),
-            train_button,
-            mo.md("---"),
-        ]
-    )
-    return cv_strategy_selector, model_selector, train_button
-
-
-@app.cell
 def _(
-    GradientBoostingRegressor,
-    GroupKFold,
-    LGBMRegressor,
-    Pipeline,
-    RandomForestRegressor,
-    Ridge,
-    StandardScaler,
     X_cv,
     cross_val_score,
     cv_data,
-    cv_groups,
-    cv_strategy_selector,
     feature_cols,
     mo,
-    model_selector,
-    n_folds_input,
     np,
-    train_button,
     y_cv,
 ):
-    # Train models with cross-validation
-    trained_models = {}
+    # Load pre-trained TPOT model and perform temporal cross-validation analysis
+    import joblib
+    from pathlib import Path
+
+    tpot_model = None
     cv_results = {}
-    _final_metrics = {}
+    model_info = {}
 
-    if train_button.value and not X_cv.empty and cv_groups is not None:
-        # Initialize cross-validator based on selected strategy
-        _use_temporal = False  # Track which CV strategy is actually being used
+    if not X_cv.empty and feature_cols:
+        # Find most recent TPOT model
+        _tpot_models_dir = Path("models/tpot")
+        if _tpot_models_dir.exists():
+            _tpot_joblib_files = sorted(
+                _tpot_models_dir.glob("tpot_pipeline_*.joblib"), reverse=True
+            )
 
-        # DEBUG: Print which CV strategy was selected
-        print(f"🔍 CV Strategy Selected: {cv_strategy_selector.value}")
+            if _tpot_joblib_files:
+                _tpot_model_path = _tpot_joblib_files[0]
+                print(f"📦 Loading TPOT pipeline from: {_tpot_model_path.name}")
 
-        # marimo dropdown returns the display label, not the key
-        if "temporal" in cv_strategy_selector.value.lower():
-            # Temporal walk-forward validation
-            # Train on GW6 to N-1, test on GW N (iterate forward)
-            _cv_splits = []
-            _cv_gws = sorted(cv_data["gameweek"].unique())
+                # Load pre-trained TPOT pipeline
+                tpot_model = joblib.load(_tpot_model_path)
+                model_info["path"] = str(_tpot_model_path)
+                model_info["name"] = _tpot_model_path.name
 
-            print(f"🔍 Available gameweeks: {_cv_gws}")
+                # Inspect pipeline structure
+                print("\n🔍 Pipeline structure:")
+                for i, (name, step) in enumerate(tpot_model.steps, 1):
+                    print(f"   {i}. {name}: {type(step).__name__}")
 
-            # Need at least 2 gameweeks for temporal CV (train on 1, test on 1)
-            if len(_cv_gws) < 2:
-                print(
-                    "⚠️ Need at least 2 gameweeks for temporal CV. Using player-based instead."
-                )
-                _gkf = GroupKFold(n_splits=n_folds_input.value)
-                _cv_strategy_used = "player_based (fallback)"
-                _use_temporal = False
-            else:
-                # Create temporal splits: train on all GWs up to N-1, test on GW N
-                # IMPORTANT: sklearn needs positional indices (0, 1, 2...), not DataFrame index values
-                # Reset index to ensure alignment with X_cv and y_cv
-                cv_data_reset = cv_data.reset_index(drop=True)
-
-                for i in range(len(_cv_gws) - 1):
-                    train_gws = _cv_gws[: i + 1]  # GW6 to GW(6+i)
-                    test_gw = _cv_gws[i + 1]  # GW(6+i+1)
-
-                    # Get positional indices (not DataFrame .index values)
-                    train_mask = cv_data_reset["gameweek"].isin(train_gws)
-                    test_mask = cv_data_reset["gameweek"] == test_gw
-
-                    train_idx = np.where(train_mask)[0]
-                    test_idx = np.where(test_mask)[0]
-
-                    _cv_splits.append((train_idx, test_idx))
+                # Validate feature count matches (TPOT models expect 99 features)
+                try:
+                    first_step = tpot_model.steps[0][1]
+                    if hasattr(first_step, "n_features_in_"):
+                        expected_features = first_step.n_features_in_
+                        actual_features = len(feature_cols)
+                        if expected_features != actual_features:
+                            print(
+                                f"\n⚠️ Feature count mismatch: Model expects {expected_features}, got {actual_features}"
+                            )
+                            print(
+                                "   Model was likely trained with different feature set."
+                            )
+                            print(
+                                "   Ensure all enhanced data sources are loaded (ownership, value, fixture_difficulty, betting, penalties)."
+                            )
+                        else:
+                            print(
+                                f"\n✅ Feature count validated: {actual_features} features match model expectations"
+                            )
+                except Exception as e:
                     print(
-                        f"  Fold {i + 1}: Train on GW{min(train_gws)}-{max(train_gws)} ({len(train_idx)} samples) → Test on GW{test_gw} ({len(test_idx)} samples)"
+                        f"\n⚠️ Could not validate feature count: {e} (continuing anyway)"
                     )
 
-                # Use custom CV splits (pass list directly to sklearn)
-                _gkf = _cv_splits
-                _cv_strategy_used = f"temporal ({len(_cv_splits)} folds)"
-                _use_temporal = True
-                print(f"✅ Temporal CV: {len(_cv_splits)} folds created")
-        else:
-            # Player-based GroupKFold
-            print(f"✅ Player-Based CV: {n_folds_input.value} folds (GroupKFold)")
-            _gkf = GroupKFold(n_splits=n_folds_input.value)
-            _cv_strategy_used = "player_based"
-            _use_temporal = False
+                # Create temporal CV splits for analysis
+                _cv_gws = sorted(cv_data["gameweek"].unique())
+                print(f"\n📊 Available gameweeks for analysis: {_cv_gws}")
 
-        # Prepare CV arguments
-        # For temporal CV (custom splits), groups parameter should be omitted
-        # For player-based CV (GroupKFold), groups parameter is required
-        _cv_kwargs = {
-            "cv": _gkf,
-            "n_jobs": -1,
-        }
-        if not _use_temporal:
-            _cv_kwargs["groups"] = cv_groups
+                if len(_cv_gws) >= 2:
+                    # Create temporal splits: train on all GWs up to N-1, test on GW N
+                    cv_data_reset = cv_data.reset_index(drop=True)
+                    _cv_splits = []
 
-        # Train selected model(s)
-        if model_selector.value == "ridge" or model_selector.value == "ensemble":
-            # Ridge Regression with StandardScaler pipeline
-            ridge_pipeline = Pipeline(
-                [("scaler", StandardScaler()), ("ridge", Ridge(alpha=1.0))]
-            )
+                    for i in range(len(_cv_gws) - 1):
+                        train_gws = _cv_gws[: i + 1]  # GW6 to GW(6+i)
+                        test_gw = _cv_gws[i + 1]  # GW(6+i+1)
 
-            # Cross-validation scoring
-            _ridge_mae_scores = -cross_val_score(
-                ridge_pipeline,
-                X_cv,
-                y_cv,
-                scoring="neg_mean_absolute_error",
-                **_cv_kwargs,
-            )
-            _ridge_rmse_scores = np.sqrt(
-                -cross_val_score(
-                    ridge_pipeline,
-                    X_cv,
-                    y_cv,
-                    scoring="neg_mean_squared_error",
-                    **_cv_kwargs,
-                )
-            )
-            _ridge_r2_scores = cross_val_score(
-                ridge_pipeline,
-                X_cv,
-                y_cv,
-                scoring="r2",
-                **_cv_kwargs,
-            )
+                        train_mask = cv_data_reset["gameweek"].isin(train_gws)
+                        test_mask = cv_data_reset["gameweek"] == test_gw
 
-            # Train final model on all data
-            ridge_pipeline.fit(X_cv, y_cv)
-            trained_models["ridge"] = ridge_pipeline
+                        train_idx = np.where(train_mask)[0]
+                        test_idx = np.where(test_mask)[0]
 
-            cv_results["ridge"] = {
-                "MAE_mean": _ridge_mae_scores.mean(),
-                "MAE_std": _ridge_mae_scores.std(),
-                "RMSE_mean": _ridge_rmse_scores.mean(),
-                "RMSE_std": _ridge_rmse_scores.std(),
-                "R²_mean": _ridge_r2_scores.mean(),
-                "R²_std": _ridge_r2_scores.std(),
-                "fold_scores": _ridge_mae_scores,
-            }
-
-        if model_selector.value == "lgbm" or model_selector.value == "ensemble":
-            # LightGBM with optimal hyperparameters from experiments
-            # See: experiments/hyperparameter_tuning_valid_folds.py
-            lgbm_model = LGBMRegressor(
-                n_estimators=50,
-                max_depth=5,
-                learning_rate=0.1,
-                min_child_samples=20,
-                subsample=0.9,
-                colsample_bytree=0.9,
-                random_state=42,
-                n_jobs=-1,
-                verbosity=-1,  # Suppress warnings
-            )
-
-            # Cross-validation scoring
-            _lgbm_mae_scores = -cross_val_score(
-                lgbm_model,
-                X_cv,
-                y_cv,
-                scoring="neg_mean_absolute_error",
-                **_cv_kwargs,
-            )
-            _lgbm_rmse_scores = np.sqrt(
-                -cross_val_score(
-                    lgbm_model,
-                    X_cv,
-                    y_cv,
-                    scoring="neg_mean_squared_error",
-                    **_cv_kwargs,
-                )
-            )
-            _lgbm_r2_scores = cross_val_score(
-                lgbm_model,
-                X_cv,
-                y_cv,
-                scoring="r2",
-                **_cv_kwargs,
-            )
-
-            # Train final model on all data
-            lgbm_model.fit(X_cv, y_cv)
-            trained_models["lgbm"] = lgbm_model
-
-            cv_results["lgbm"] = {
-                "MAE_mean": _lgbm_mae_scores.mean(),
-                "MAE_std": _lgbm_mae_scores.std(),
-                "RMSE_mean": _lgbm_rmse_scores.mean(),
-                "RMSE_std": _lgbm_rmse_scores.std(),
-                "R²_mean": _lgbm_r2_scores.mean(),
-                "R²_std": _lgbm_r2_scores.std(),
-                "fold_scores": _lgbm_mae_scores,
-            }
-
-        if model_selector.value == "rf" or model_selector.value == "ensemble":
-            # Random Forest (no scaling needed)
-            rf_model = RandomForestRegressor(
-                n_estimators=100,
-                max_depth=10,
-                min_samples_split=10,
-                random_state=42,
-                n_jobs=-1,
-            )
-
-            # Cross-validation scoring
-            _rf_mae_scores = -cross_val_score(
-                rf_model,
-                X_cv,
-                y_cv,
-                scoring="neg_mean_absolute_error",
-                **_cv_kwargs,
-            )
-            _rf_rmse_scores = np.sqrt(
-                -cross_val_score(
-                    rf_model,
-                    X_cv,
-                    y_cv,
-                    scoring="neg_mean_squared_error",
-                    **_cv_kwargs,
-                )
-            )
-            _rf_r2_scores = cross_val_score(
-                rf_model,
-                X_cv,
-                y_cv,
-                scoring="r2",
-                **_cv_kwargs,
-            )
-
-            # Train final model on all data
-            rf_model.fit(X_cv, y_cv)
-            trained_models["rf"] = rf_model
-
-            cv_results["rf"] = {
-                "MAE_mean": _rf_mae_scores.mean(),
-                "MAE_std": _rf_mae_scores.std(),
-                "RMSE_mean": _rf_rmse_scores.mean(),
-                "RMSE_std": _rf_rmse_scores.std(),
-                "R²_mean": _rf_r2_scores.mean(),
-                "R²_std": _rf_r2_scores.std(),
-                "fold_scores": _rf_mae_scores,
-            }
-
-        if model_selector.value == "gb" or model_selector.value == "ensemble":
-            # Gradient Boosting (no scaling needed)
-            gb_model = GradientBoostingRegressor(
-                n_estimators=100,
-                max_depth=5,
-                learning_rate=0.1,
-                random_state=42,
-            )
-
-            # Cross-validation scoring
-            _gb_mae_scores = -cross_val_score(
-                gb_model,
-                X_cv,
-                y_cv,
-                scoring="neg_mean_absolute_error",
-                **_cv_kwargs,
-            )
-            _gb_rmse_scores = np.sqrt(
-                -cross_val_score(
-                    gb_model,
-                    X_cv,
-                    y_cv,
-                    scoring="neg_mean_squared_error",
-                    **_cv_kwargs,
-                )
-            )
-            _gb_r2_scores = cross_val_score(
-                gb_model,
-                X_cv,
-                y_cv,
-                scoring="r2",
-                **_cv_kwargs,
-            )
-
-            # Train final model on all data
-            gb_model.fit(X_cv, y_cv)
-            trained_models["gb"] = gb_model
-
-            cv_results["gb"] = {
-                "MAE_mean": _gb_mae_scores.mean(),
-                "MAE_std": _gb_mae_scores.std(),
-                "RMSE_mean": _gb_rmse_scores.mean(),
-                "RMSE_std": _gb_rmse_scores.std(),
-                "R²_mean": _gb_r2_scores.mean(),
-                "R²_std": _gb_r2_scores.std(),
-                "fold_scores": _gb_mae_scores,
-            }
-
-        if model_selector.value == "tpot" or model_selector.value == "ensemble":
-            # TPOT Pipeline - Load pre-trained auto-optimized model
-            # NOTE: TPOT model expects 99 features from FPLFeatureEngineer (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting)
-            # Generate TPOT models via: uv run python scripts/tpot_pipeline_optimizer.py
-            import joblib
-            from pathlib import Path
-
-            # Find most recent TPOT model
-            _tpot_models_dir = Path("models/tpot")
-            if _tpot_models_dir.exists():
-                _tpot_joblib_files = sorted(
-                    _tpot_models_dir.glob("tpot_pipeline_*.joblib"), reverse=True
-                )
-
-                if _tpot_joblib_files:
-                    _tpot_model_path = _tpot_joblib_files[0]
-                    print(f"📦 Loading TPOT pipeline from: {_tpot_model_path.name}")
-
-                    # Load pre-trained TPOT pipeline
-                    tpot_pipeline = joblib.load(_tpot_model_path)
-
-                    # Validate feature count matches (TPOT models expect 99 features)
-                    # Check first transformer step (usually RobustScaler) to see expected input size
-                    try:
-                        first_step = tpot_pipeline.steps[0][1]
-                        # Try to get n_features_in_ if available (some transformers have this)
-                        if hasattr(first_step, "n_features_in_"):
-                            expected_features = first_step.n_features_in_
-                            actual_features = len(feature_cols)
-                            if expected_features != actual_features:
-                                print(
-                                    f"⚠️ Feature count mismatch: Model expects {expected_features}, got {actual_features}"
-                                )
-                                print(
-                                    "   Model was likely trained with different feature set."
-                                )
-                                print(
-                                    "   Ensure all enhanced data sources are loaded (ownership, value, fixture_difficulty, betting, penalties)."
-                                )
-                            else:
-                                print(
-                                    f"✅ Feature count validated: {actual_features} features match model expectations"
-                                )
-                    except Exception as e:
+                        _cv_splits.append((train_idx, test_idx))
                         print(
-                            f"⚠️ Could not validate feature count: {e} (continuing anyway)"
+                            f"  Fold {i + 1}: Train GW{min(train_gws)}-{max(train_gws)} ({len(train_idx)} samples) → Test GW{test_gw} ({len(test_idx)} samples)"
                         )
 
-                    # Cross-validation scoring (using pre-trained pipeline)
+                    print(
+                        f"\n✅ Temporal CV: {len(_cv_splits)} folds created for analysis"
+                    )
+
+                    # Perform temporal cross-validation
+                    print("\n🔄 Running temporal cross-validation analysis...")
                     _tpot_mae_scores = -cross_val_score(
-                        tpot_pipeline,
+                        tpot_model,
                         X_cv,
                         y_cv,
+                        cv=_cv_splits,
                         scoring="neg_mean_absolute_error",
-                        **_cv_kwargs,
+                        n_jobs=-1,
                     )
                     _tpot_rmse_scores = np.sqrt(
                         -cross_val_score(
-                            tpot_pipeline,
+                            tpot_model,
                             X_cv,
                             y_cv,
+                            cv=_cv_splits,
                             scoring="neg_mean_squared_error",
-                            **_cv_kwargs,
+                            n_jobs=-1,
                         )
                     )
                     _tpot_r2_scores = cross_val_score(
-                        tpot_pipeline,
+                        tpot_model,
                         X_cv,
                         y_cv,
+                        cv=_cv_splits,
                         scoring="r2",
-                        **_cv_kwargs,
+                        n_jobs=-1,
                     )
-
-                    # Re-train on full dataset for consistency
-                    tpot_pipeline.fit(X_cv, y_cv)
-                    trained_models["tpot"] = tpot_pipeline
 
                     cv_results["tpot"] = {
                         "MAE_mean": _tpot_mae_scores.mean(),
@@ -1284,49 +901,61 @@ def _(
                         "R²_mean": _tpot_r2_scores.mean(),
                         "R²_std": _tpot_r2_scores.std(),
                         "fold_scores": _tpot_mae_scores,
+                        "fold_rmse": _tpot_rmse_scores,
+                        "fold_r2": _tpot_r2_scores,
                     }
+
                     print(
-                        f"✅ TPOT pipeline loaded and validated: MAE = {_tpot_mae_scores.mean():.3f} ± {_tpot_mae_scores.std():.3f}"
+                        f"\n✅ Analysis complete: MAE = {_tpot_mae_scores.mean():.3f} ± {_tpot_mae_scores.std():.3f}"
+                    )
+                    print(
+                        f"   RMSE = {_tpot_rmse_scores.mean():.3f} ± {_tpot_rmse_scores.std():.3f}"
+                    )
+                    print(
+                        f"   R² = {_tpot_r2_scores.mean():.3f} ± {_tpot_r2_scores.std():.3f}"
+                    )
+
+                    # Create summary display
+                    model_summary = mo.vstack(
+                        [
+                            mo.md("### ✅ TPOT Model Loaded & Analyzed"),
+                            mo.md(f"**Model:** `{model_info['name']}`"),
+                            mo.md(""),
+                            mo.md("**Temporal Cross-Validation Results:**"),
+                            mo.md(
+                                f"- **MAE:** {_tpot_mae_scores.mean():.3f} ± {_tpot_mae_scores.std():.3f} points"
+                            ),
+                            mo.md(
+                                f"- **RMSE:** {_tpot_rmse_scores.mean():.3f} ± {_tpot_rmse_scores.std():.3f} points"
+                            ),
+                            mo.md(
+                                f"- **R²:** {_tpot_r2_scores.mean():.3f} ± {_tpot_r2_scores.std():.3f}"
+                            ),
+                            mo.md(""),
+                            mo.md(f"**Temporal Folds:** {len(_cv_splits)} folds"),
+                            mo.md(
+                                f"**Fold MAE scores:** {', '.join([f'{s:.2f}' for s in _tpot_mae_scores])}"
+                            ),
+                            mo.md("---"),
+                        ]
                     )
                 else:
-                    print(
-                        "⚠️ No TPOT models found in models/tpot/. Run scripts/tpot_pipeline_optimizer.py first."
+                    model_summary = mo.md(
+                        "⚠️ **Need at least 2 gameweeks for temporal CV analysis**"
                     )
             else:
-                print(
-                    "⚠️ models/tpot/ directory not found. Run scripts/tpot_pipeline_optimizer.py first."
+                model_summary = mo.md(
+                    "⚠️ **No TPOT models found in models/tpot/.**\n\nRun `uv run python scripts/tpot_pipeline_optimizer.py` to generate models."
                 )
-
-        # Display cross-validation results
-        _metrics_display = [
-            mo.md(f"### ✅ Cross-Validation Complete ({n_folds_input.value} folds)")
-        ]
-        for _model_name, _cv_metrics in cv_results.items():
-            _metrics_display.extend(
-                [
-                    mo.md(f"**{_model_name.upper()} Cross-Validation Metrics:**"),
-                    mo.md(
-                        f"- MAE: {_cv_metrics['MAE_mean']:.3f} ± {_cv_metrics['MAE_std']:.3f} points"
-                    ),
-                    mo.md(
-                        f"- RMSE: {_cv_metrics['RMSE_mean']:.3f} ± {_cv_metrics['RMSE_std']:.3f} points"
-                    ),
-                    mo.md(
-                        f"- R²: {_cv_metrics['R²_mean']:.3f} ± {_cv_metrics['R²_std']:.3f}"
-                    ),
-                    mo.md(
-                        f"- Fold MAE scores: {', '.join([f'{s:.2f}' for s in _cv_metrics['fold_scores']])}"
-                    ),
-                    mo.md(""),
-                ]
+        else:
+            model_summary = mo.md(
+                "⚠️ **models/tpot/ directory not found.**\n\nRun `uv run python scripts/tpot_pipeline_optimizer.py` to generate models."
             )
-
-        training_summary = mo.vstack(_metrics_display + [mo.md("---")])
     else:
-        training_summary = mo.md("👆 **Click train button after preparing data**")
+        model_summary = mo.md("⚠️ **Prepare analysis data first**")
 
-    training_summary
-    return cv_results, trained_models
+    model_summary
+    return cv_results, model_info, tpot_model
 
 
 @app.cell
@@ -1410,56 +1039,89 @@ def _(mo):
 
 
 @app.cell
-def _(feature_cols, mo, pd, px, trained_models):
-    # Feature importance analysis
-    if trained_models and feature_cols:
+def _(feature_cols, mo, pd, px, tpot_model):
+    # Feature importance analysis for TPOT model
+    # Note: TPOT models use complex pipelines with feature selection (RFE), so we need to
+    # trace through the pipeline to find which features were actually used
+    if tpot_model and feature_cols:
         importance_data = []
 
-        # Ridge coefficients (absolute values) - extract from pipeline
-        if "ridge" in trained_models:
-            ridge_importance = pd.DataFrame(
-                {
-                    "feature": feature_cols,
-                    "importance": abs(
-                        trained_models["ridge"].named_steps["ridge"].coef_
-                    ),
-                    "model": "Ridge",
-                }
-            ).nlargest(15, "importance")
-            importance_data.append(ridge_importance)
+        # Try to extract feature importance from TPOT pipeline
+        # TPOT pipelines typically end with an AdaBoostRegressor or similar
+        final_estimator = tpot_model.steps[-1][1]
 
-        # Random Forest feature importance
-        if "rf" in trained_models:
-            rf_importance = pd.DataFrame(
-                {
-                    "feature": feature_cols,
-                    "importance": trained_models["rf"].feature_importances_,
-                    "model": "Random Forest",
-                }
-            ).nlargest(15, "importance")
-            importance_data.append(rf_importance)
+        if hasattr(final_estimator, "feature_importances_"):
+            # TPOT pipeline includes RFE which reduces features
+            # Need to trace through to find which features were selected
+            selected_features = feature_cols.copy()
 
-        # Gradient Boosting feature importance
-        if "gb" in trained_models:
-            gb_importance = pd.DataFrame(
-                {
-                    "feature": feature_cols,
-                    "importance": trained_models["gb"].feature_importances_,
-                    "model": "Gradient Boosting",
-                }
-            ).nlargest(15, "importance")
-            importance_data.append(gb_importance)
+            # Step 1: Find RFE step and get selected features
+            for step_name, step_transformer in tpot_model.steps:
+                if hasattr(step_transformer, "support_"):
+                    # RFE has support_ attribute indicating selected features
+                    selected_mask = step_transformer.support_
+                    selected_features = [
+                        f
+                        for f, selected in zip(selected_features, selected_mask)
+                        if selected
+                    ]
+                    print(
+                        f"   🔍 {step_name} selected {len(selected_features)}/{len(selected_mask)} features"
+                    )
+                    break
 
-        # LightGBM feature importance
-        if "lgbm" in trained_models:
-            lgbm_importance = pd.DataFrame(
-                {
-                    "feature": feature_cols,
-                    "importance": trained_models["lgbm"].feature_importances_,
-                    "model": "LightGBM",
-                }
-            ).nlargest(15, "importance")
-            importance_data.append(lgbm_importance)
+            # Step 2: Handle FeatureUnion steps (they may add features)
+            # For now, assume FeatureUnion doesn't change feature order or count significantly
+            # Final estimator importances should match features after all transformations
+
+            n_importances = len(final_estimator.feature_importances_)
+            n_features = len(selected_features)
+
+            if n_importances == n_features:
+                # Perfect match - use selected features
+                feature_names = selected_features
+                print(
+                    f"   ✅ Feature importance extraction: {len(feature_names)} features"
+                )
+            elif n_importances < n_features:
+                # Importances fewer than selected - pipeline further reduced features
+                # This could happen if FeatureUnion or other steps reduced features
+                # Use first N selected features (approximation)
+                feature_names = selected_features[:n_importances]
+                print(
+                    f"   ⚠️ Pipeline further reduced features: {n_importances} vs {n_features} after RFE"
+                )
+                print(
+                    f"   ℹ️  Showing importance for first {n_importances} selected features"
+                )
+            else:
+                # Importances more than selected - FeatureUnion may have expanded features
+                # Pad with placeholder names
+                feature_names = selected_features + [
+                    f"transformed_feature_{i}"
+                    for i in range(len(selected_features), n_importances)
+                ]
+                print(
+                    f"   ⚠️ Pipeline expanded features: {n_importances} vs {n_features} after RFE"
+                )
+                print("   ℹ️  Some features may be transformed/combined versions")
+
+            # Create DataFrame with matching lengths
+            try:
+                tpot_importance = pd.DataFrame(
+                    {
+                        "feature": feature_names[:n_importances],
+                        "importance": final_estimator.feature_importances_,
+                        "model": "TPOT",
+                    }
+                ).nlargest(20, "importance")
+                importance_data.append(tpot_importance)
+            except ValueError as e:
+                print(f"   ❌ Error creating importance DataFrame: {e}")
+                print(
+                    f"      Feature names length: {len(feature_names[:n_importances])}"
+                )
+                print(f"      Importances length: {n_importances}")
 
         if importance_data:
             all_importance = pd.concat(importance_data, ignore_index=True)
@@ -1502,146 +1164,141 @@ def _(mo):
 
 
 @app.cell
-def _(X_cv, cv_data, cv_results, feature_cols, mo, np, px, trained_models):
+def _(X_cv, cv_data, cv_results, feature_cols, mo, np, px, tpot_model):
     # Position-specific error breakdown to identify which positions need improvement
-    if trained_models and not cv_data.empty and feature_cols:
-        # Generate predictions from best model (lowest MAE)
-        if cv_results:
-            _best_model_name = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
-                0
+    if tpot_model and not cv_data.empty and feature_cols and cv_results:
+        # Use TPOT model for predictions
+        _best_model_name = "tpot"
+        _best_model = tpot_model
+
+        # Generate predictions on all CV data
+        _y_pred = _best_model.predict(X_cv)
+
+        # Calculate errors by position
+        _position_errors = cv_data.copy()
+        _position_errors["predicted_points"] = _y_pred
+        _position_errors["actual_points"] = cv_data["total_points"]
+        _position_errors["error"] = abs(
+            _position_errors["predicted_points"] - _position_errors["actual_points"]
+        )
+        _position_errors["signed_error"] = (
+            _position_errors["predicted_points"] - _position_errors["actual_points"]
+        )
+
+        # Need position data - check if available
+        if "position" in _position_errors.columns:
+            # Aggregate by position
+            _position_stats = (
+                _position_errors.groupby("position")
+                .agg(
+                    {
+                        "error": ["mean", "std", "count"],
+                        "signed_error": "mean",
+                        "actual_points": "mean",
+                        "predicted_points": "mean",
+                    }
+                )
+                .reset_index()
+            )
+
+            # Flatten column names
+            _position_stats.columns = [
+                "position",
+                "MAE",
+                "MAE_std",
+                "count",
+                "bias",
+                "actual_avg",
+                "predicted_avg",
             ]
-            _best_model = trained_models[_best_model_name]
 
-            # Generate predictions on all CV data
-            _y_pred = _best_model.predict(X_cv)
-
-            # Calculate errors by position
-            _position_errors = cv_data.copy()
-            _position_errors["predicted_points"] = _y_pred
-            _position_errors["actual_points"] = cv_data["total_points"]
-            _position_errors["error"] = abs(
-                _position_errors["predicted_points"] - _position_errors["actual_points"]
-            )
-            _position_errors["signed_error"] = (
-                _position_errors["predicted_points"] - _position_errors["actual_points"]
-            )
-
-            # Need position data - check if available
-            if "position" in _position_errors.columns:
-                # Aggregate by position
-                _position_stats = (
-                    _position_errors.groupby("position")
-                    .agg(
-                        {
-                            "error": ["mean", "std", "count"],
-                            "signed_error": "mean",
-                            "actual_points": "mean",
-                            "predicted_points": "mean",
-                        }
+            # Calculate RMSE by position
+            _position_rmse = (
+                _position_errors.groupby("position")
+                .apply(
+                    lambda x: np.sqrt(
+                        ((x["predicted_points"] - x["actual_points"]) ** 2).mean()
                     )
-                    .reset_index()
                 )
+                .reset_index(name="RMSE")
+            )
 
-                # Flatten column names
-                _position_stats.columns = [
-                    "position",
-                    "MAE",
-                    "MAE_std",
-                    "count",
-                    "bias",
-                    "actual_avg",
-                    "predicted_avg",
+            _position_stats = _position_stats.merge(_position_rmse, on="position")
+
+            # Sort by MAE descending (worst positions first)
+            _position_stats = _position_stats.sort_values("MAE", ascending=False)
+
+            # Visualize position-specific errors
+            _fig_position_mae = px.bar(
+                _position_stats,
+                x="position",
+                y="MAE",
+                error_y="MAE_std",
+                title=f"Position-Specific MAE ({_best_model_name.upper()} model)",
+                labels={
+                    "MAE": "Mean Absolute Error (points)",
+                    "position": "Position",
+                },
+                text="MAE",
+            )
+            _fig_position_mae.update_traces(
+                texttemplate="%{text:.2f}", textposition="outside"
+            )
+
+            # Bias analysis (systematic over/under-prediction)
+            _fig_position_bias = px.bar(
+                _position_stats,
+                x="position",
+                y="bias",
+                title=f"Position-Specific Prediction Bias ({_best_model_name.upper()} model)",
+                labels={
+                    "bias": "Mean Signed Error (+ = over-predict, - = under-predict)",
+                    "position": "Position",
+                },
+                text="bias",
+                color="bias",
+                color_continuous_scale=["red", "white", "blue"],
+                color_continuous_midpoint=0,
+            )
+            _fig_position_bias.update_traces(
+                texttemplate="%{text:.2f}", textposition="outside"
+            )
+
+            position_analysis_display = mo.vstack(
+                [
+                    mo.md("### 🎯 Position-Specific Error Breakdown"),
+                    mo.md(
+                        f"**Model:** {_best_model_name.upper()} (MAE: {cv_results[_best_model_name]['MAE_mean']:.2f})"
+                    ),
+                    mo.md(""),
+                    mo.ui.plotly(_fig_position_mae),
+                    mo.md("---"),
+                    mo.ui.plotly(_fig_position_bias),
+                    mo.md("---"),
+                    mo.md("### 📊 Position-Specific Metrics"),
+                    mo.ui.table(_position_stats.round(2), page_size=10),
+                    mo.md(""),
+                    mo.md("**Insights:**"),
+                    mo.md(
+                        f"- **Worst Position:** {_position_stats.iloc[0]['position']} (MAE: {_position_stats.iloc[0]['MAE']:.2f})"
+                    ),
+                    mo.md(
+                        f"- **Best Position:** {_position_stats.iloc[-1]['position']} (MAE: {_position_stats.iloc[-1]['MAE']:.2f})"
+                    ),
+                    mo.md(
+                        f"- **Most Over-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmax(), 'position']} (+{_position_stats['bias'].max():.2f} pts)"
+                    ),
+                    mo.md(
+                        f"- **Most Under-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmin(), 'position']} ({_position_stats['bias'].min():.2f} pts)"
+                    ),
                 ]
-
-                # Calculate RMSE by position
-                _position_rmse = (
-                    _position_errors.groupby("position")
-                    .apply(
-                        lambda x: np.sqrt(
-                            ((x["predicted_points"] - x["actual_points"]) ** 2).mean()
-                        )
-                    )
-                    .reset_index(name="RMSE")
-                )
-
-                _position_stats = _position_stats.merge(_position_rmse, on="position")
-
-                # Sort by MAE descending (worst positions first)
-                _position_stats = _position_stats.sort_values("MAE", ascending=False)
-
-                # Visualize position-specific errors
-                _fig_position_mae = px.bar(
-                    _position_stats,
-                    x="position",
-                    y="MAE",
-                    error_y="MAE_std",
-                    title=f"Position-Specific MAE ({_best_model_name.upper()} model)",
-                    labels={
-                        "MAE": "Mean Absolute Error (points)",
-                        "position": "Position",
-                    },
-                    text="MAE",
-                )
-                _fig_position_mae.update_traces(
-                    texttemplate="%{text:.2f}", textposition="outside"
-                )
-
-                # Bias analysis (systematic over/under-prediction)
-                _fig_position_bias = px.bar(
-                    _position_stats,
-                    x="position",
-                    y="bias",
-                    title=f"Position-Specific Prediction Bias ({_best_model_name.upper()} model)",
-                    labels={
-                        "bias": "Mean Signed Error (+ = over-predict, - = under-predict)",
-                        "position": "Position",
-                    },
-                    text="bias",
-                    color="bias",
-                    color_continuous_scale=["red", "white", "blue"],
-                    color_continuous_midpoint=0,
-                )
-                _fig_position_bias.update_traces(
-                    texttemplate="%{text:.2f}", textposition="outside"
-                )
-
-                position_analysis_display = mo.vstack(
-                    [
-                        mo.md("### 🎯 Position-Specific Error Breakdown"),
-                        mo.md(
-                            f"**Best Model:** {_best_model_name.upper()} (MAE: {cv_results[_best_model_name]['MAE_mean']:.2f})"
-                        ),
-                        mo.md(""),
-                        mo.ui.plotly(_fig_position_mae),
-                        mo.md("---"),
-                        mo.ui.plotly(_fig_position_bias),
-                        mo.md("---"),
-                        mo.md("### 📊 Position-Specific Metrics"),
-                        mo.ui.table(_position_stats.round(2), page_size=10),
-                        mo.md(""),
-                        mo.md("**Insights:**"),
-                        mo.md(
-                            f"- **Worst Position:** {_position_stats.iloc[0]['position']} (MAE: {_position_stats.iloc[0]['MAE']:.2f})"
-                        ),
-                        mo.md(
-                            f"- **Best Position:** {_position_stats.iloc[-1]['position']} (MAE: {_position_stats.iloc[-1]['MAE']:.2f})"
-                        ),
-                        mo.md(
-                            f"- **Most Over-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmax(), 'position']} (+{_position_stats['bias'].max():.2f} pts)"
-                        ),
-                        mo.md(
-                            f"- **Most Under-Predicted:** {_position_stats.loc[_position_stats['bias'].idxmin(), 'position']} ({_position_stats['bias'].min():.2f} pts)"
-                        ),
-                    ]
-                )
-            else:
-                position_analysis_display = mo.md(
-                    "❌ **Position data not available in CV data**"
-                )
+            )
         else:
-            position_analysis_display = mo.md("⚠️ **No CV results available**")
+            position_analysis_display = mo.md(
+                "❌ **Position data not available in CV data**"
+            )
     else:
-        position_analysis_display = mo.md("⚠️ **Train models first**")
+        position_analysis_display = mo.md("⚠️ **Load TPOT model first**")
 
     position_analysis_display
     return
@@ -1654,13 +1311,11 @@ def _(mo):
 
 
 @app.cell
-def _(X_cv, cv_data, cv_results, feature_cols, mo, pd, px, trained_models):
+def _(X_cv, cv_data, cv_results, feature_cols, mo, pd, px, tpot_model):
     # Detect systematic biases in predictions (price bands, team strength, etc.)
-    if trained_models and not cv_data.empty and feature_cols and cv_results:
-        _best_model_name_bias = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
-            0
-        ]
-        _best_model_bias = trained_models[_best_model_name_bias]
+    if tpot_model and not cv_data.empty and feature_cols and cv_results:
+        _best_model_name_bias = "tpot"
+        _best_model_bias = tpot_model
 
         # Generate predictions
         _y_pred_bias = _best_model_bias.predict(X_cv)
@@ -1785,15 +1440,13 @@ def _(
     np,
     pd,
     px,
-    trained_models,
+    tpot_model,
     xp_service,
 ):
     # Compare ML model against rule-based ExpectedPointsService
-    if trained_models and not cv_data.empty and feature_cols and cv_results:
-        _best_model_name_comp = min(cv_results.items(), key=lambda x: x[1]["MAE_mean"])[
-            0
-        ]
-        _best_model_comp = trained_models[_best_model_name_comp]
+    if tpot_model and not cv_data.empty and feature_cols and cv_results:
+        _best_model_name_comp = "tpot"
+        _best_model_comp = tpot_model
 
         # Generate ML predictions
         _ml_predictions = _best_model_comp.predict(X_cv)
