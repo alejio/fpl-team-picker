@@ -679,13 +679,53 @@ class MLExpectedPointsService:
                     X_transformed = X
 
                 # Handle additional pipeline steps before the model
-                if hasattr(model, "named_steps"):
+                # CRITICAL FIX: Check if model is a Pipeline first (handles nested pipelines like [RFE -> RandomForest])
+                # When RFE is nested in a Pipeline, we must iterate through Pipeline steps rather than
+                # calling transform directly on RFE, which would expect input in the original feature space.
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
                     # Model is a pipeline, transform through all steps except final
-                    for step_name, step_transformer in model.steps[:-1]:
-                        X_transformed = step_transformer.transform(X_transformed)
-                elif hasattr(model, "_transform"):
-                    # RFE or similar - use its transform
-                    X_transformed = model.transform(X_transformed)
+                    # This correctly handles nested pipelines like Pipeline([RFE, RandomForest])
+                    # Each step in the pipeline expects input from the previous step, not the original feature space
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            # Catch dimension mismatch errors and provide helpful context
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    # RFE.transform expects input in the feature space it was fitted on
+                    # Since X_transformed is already from feature_engineer (which outputs the features
+                    # that the full pipeline was trained on), this should work correctly
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            # Catch dimension mismatch errors for standalone RFE
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        # Fallback: if no transform method, skip transformation
+                        # This shouldn't happen for RFE, but handle it gracefully
+                        logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
 
                 # Get predictions from each tree
                 tree_predictions = np.array(
