@@ -35,6 +35,10 @@ from .ml_pipeline_factory import (
 
 warnings.filterwarnings("ignore")
 
+# Module-level flag to track if logger has been configured for debug mode
+# This prevents duplicate handlers when multiple service instances are created
+_logger_debug_configured = False
+
 
 class MLExpectedPointsService:
     """
@@ -81,21 +85,30 @@ class MLExpectedPointsService:
         self.debug = debug
 
         # Configure loguru to show DEBUG messages when debug mode is enabled
-        if self.debug:
-            # Remove default handler (id 0) and add one with DEBUG level
-            # This ensures debug messages are visible when debug mode is on
+        # According to loguru docs: https://loguru.readthedocs.io/en/stable/api/logger.html
+        # Loguru comes pre-configured with a default handler (id 0) that logs to sys.stderr
+        # We need to ensure DEBUG level is enabled for debug messages to be visible
+        # Using module-level flag to prevent duplicate handlers when multiple instances are created
+        global _logger_debug_configured
+        if self.debug and not _logger_debug_configured:
+            # Remove default handler (id 0) if it exists and add one with DEBUG level
             # This restores the functionality that was lost when migrating from standard logging
+            # Using try/except to handle cases where handler 0 was already removed
             try:
                 logger.remove(0)  # Remove default handler (id 0)
             except ValueError:
-                # Handler 0 doesn't exist, logger already configured - that's fine
+                # Handler 0 doesn't exist (logger already configured elsewhere) - that's fine
                 pass
+            # Add a new handler with DEBUG level to ensure debug messages are visible
+            # Using sys.stderr as sink (standard practice per loguru docs)
+            # Format matches loguru's default style but without milliseconds
             logger.add(
                 sys.stderr,
                 level="DEBUG",
                 format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
                 colorize=True,
             )
+            _logger_debug_configured = True
 
         # Pipeline components
         self.pipeline: Optional[Pipeline] = None
