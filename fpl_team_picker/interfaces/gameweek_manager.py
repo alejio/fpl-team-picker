@@ -672,7 +672,7 @@ def _(gameweek_data, mo, players_with_xp):
                 mo.md("**🎯 Top Performers (by Expected Points):**"),
                 mo.ui.table(
                     players_with_xp.nlargest(15, "xP")[
-                        ["web_name", "position", "xP", "price"]
+                        ["web_name", "position", "xP", "xP_uncertainty", "price"]
                     ].round(2),
                     page_size=10,
                 ),
@@ -1122,6 +1122,7 @@ def _(
                                     "name",
                                     "price",
                                     "xP",
+                                    "xP_uncertainty",
                                     "xP_5gw",
                                     "fixture_outlook",
                                 ]
@@ -1161,6 +1162,7 @@ def _(
                                         "name",
                                         "price",
                                         "xP",
+                                        "xP_uncertainty",
                                         "xP_5gw",
                                         "fixture_outlook",
                                     ]

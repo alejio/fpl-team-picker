@@ -19,8 +19,8 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib",
-        description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features)",
+        default="models/custom/random-forest_gw1-10_20251105_212950_pipeline.joblib",
+        description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features, trained on GW1-10)",
     )
     ml_ensemble_rule_weight: float = Field(
         default=0.0,

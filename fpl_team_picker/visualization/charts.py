@@ -1056,6 +1056,7 @@ def create_xp_results_display(
         # Add XP model outputs (both 1-GW and 5-GW)
         xp_columns = [
             "xP",
+            "xP_uncertainty",
             "xP_5gw",
             "xP_per_price",
             "xP_per_price_5gw",
@@ -1162,7 +1163,7 @@ def create_xp_results_display(
                     "**All Players - Strategic Comparison (Sorted by 5-GW XP):**"
                 ),
                 mo_ref.md(
-                    "*Showing: Season stats (total points, form, minutes, goals, assists, etc.), 1-GW vs 5-GW XP, fixture outlook, ICT components, expected stats, and more*"
+                    "*Showing: Season stats (total points, form, minutes, goals, assists, etc.), 1-GW vs 5-GW XP with uncertainty, fixture outlook, ICT components, expected stats, and more*"
                 ),
                 mo_ref.ui.table(display_df, page_size=25),
             ]

@@ -516,11 +516,44 @@ class MLExpectedPointsService:
             # Map predictions and uncertainty to correct player_ids
             prediction_map = dict(zip(target_player_ids, predictions))
             uncertainty_map = dict(zip(target_player_ids, uncertainty))
-            result["ml_xP"] = result["player_id"].map(prediction_map).fillna(0)
+            result["ml_xP"] = result["player_id"].map(prediction_map)
+            result["xP_uncertainty"] = result["player_id"].map(uncertainty_map)
+
+            # Validate that ALL players have ML predictions (fail fast, no silent fallbacks)
+            missing_predictions = result["ml_xP"].isna()
+            if missing_predictions.any():
+                missing_players = result.loc[
+                    missing_predictions, ["player_id", "web_name"]
+                ]
+                logger.error(
+                    f"ML prediction failed for {missing_predictions.sum()} players: "
+                    f"{missing_players['web_name'].tolist()}"
+                )
+                logger.error(
+                    "This indicates upstream data quality issues (missing features, "
+                    "insufficient historical data, or feature engineering failures)"
+                )
+                raise ValueError(
+                    f"Unable to generate ML predictions for {missing_predictions.sum()} players. "
+                    f"Missing: {missing_players['web_name'].tolist()}"
+                )
+
+            # Validate uncertainty extraction succeeded
+            missing_uncertainty = result["xP_uncertainty"].isna()
+            if missing_uncertainty.any():
+                missing_players = result.loc[
+                    missing_uncertainty, ["player_id", "web_name"]
+                ]
+                logger.error(
+                    f"Uncertainty extraction failed for {missing_uncertainty.sum()} players: "
+                    f"{missing_players['web_name'].tolist()}"
+                )
+                raise ValueError(
+                    f"Unable to extract uncertainty for {missing_uncertainty.sum()} players. "
+                    f"Missing: {missing_players['web_name'].tolist()}"
+                )
+
             result["xP"] = result["ml_xP"]
-            result["xP_uncertainty"] = (
-                result["player_id"].map(uncertainty_map).fillna(0)
-            )
 
             # Calculate expected_minutes using rule-based logic
             from .expected_points_service import ExpectedPointsService
@@ -671,8 +704,17 @@ class MLExpectedPointsService:
                 return uncertainty
 
             except Exception as e:
-                logger.warning(f"Failed to extract RF uncertainty: {e}")
-                return np.zeros(len(X))
+                logger.error(
+                    f"Failed to extract Random Forest uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for Random Forest model. "
+                    f"This should not happen with properly trained RF models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
 
         # No uncertainty available for non-ensemble models
         if self.debug:
