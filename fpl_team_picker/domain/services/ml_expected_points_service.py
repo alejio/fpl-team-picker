@@ -496,8 +496,14 @@ class MLExpectedPointsService:
             # Make predictions for ALL gameweeks (pipeline calculates rolling features correctly)
             all_predictions = self.pipeline.predict(prediction_data_all)
 
-            # Extract ONLY predictions for target gameweek (now properly aligned)
+            # Extract uncertainty estimates for target gameweek
             target_mask = prediction_data_all["gameweek"] == target_gameweek
+
+            # Extract uncertainty (will use RF tree variance if available)
+            all_uncertainty = self._extract_uncertainty(prediction_data_all)
+            uncertainty = all_uncertainty[target_mask]
+
+            # Extract ONLY predictions for target gameweek (now properly aligned)
             predictions = all_predictions[target_mask]
             predictions = np.clip(predictions, 0, 20)  # Reasonable bounds
 
@@ -507,10 +513,14 @@ class MLExpectedPointsService:
             # Create result DataFrame and align predictions with original players_data order
             result = players_data.copy()
 
-            # Map predictions to correct player_ids
+            # Map predictions and uncertainty to correct player_ids
             prediction_map = dict(zip(target_player_ids, predictions))
+            uncertainty_map = dict(zip(target_player_ids, uncertainty))
             result["ml_xP"] = result["player_id"].map(prediction_map).fillna(0)
             result["xP"] = result["ml_xP"]
+            result["xP_uncertainty"] = (
+                result["player_id"].map(uncertainty_map).fillna(0)
+            )
 
             # Calculate expected_minutes using rule-based logic
             from .expected_points_service import ExpectedPointsService
@@ -537,6 +547,11 @@ class MLExpectedPointsService:
                         ml_weight * result["ml_xP"]
                         + self.ensemble_rule_weight * rule_predictions["xP"]
                     )
+
+                    # Uncertainty remains from ML model (rule-based has no uncertainty)
+                    # Could theoretically combine uncertainties, but that's complex
+                    # For now, keep ML uncertainty scaled by its weight
+                    result["xP_uncertainty"] = ml_weight * result["xP_uncertainty"]
 
                     if self.debug:
                         logger.debug(
@@ -585,6 +600,86 @@ class MLExpectedPointsService:
 
         if self.debug:
             logger.debug(f"Loaded pipeline from {filepath}")
+
+    def _extract_uncertainty(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Extract prediction uncertainty from ensemble models (Random Forest, GradientBoosting).
+
+        For Random Forest: Uses tree-level predictions to calculate standard deviation.
+        For other models: Returns zeros (no uncertainty available).
+
+        Args:
+            X: Feature matrix for prediction
+
+        Returns:
+            Array of standard deviations (one per sample)
+        """
+        if self.pipeline is None:
+            return np.zeros(len(X))
+
+        # Get the underlying model
+        model = self.pipeline.named_steps.get("model")
+        if model is None:
+            return np.zeros(len(X))
+
+        # Check if this is a RandomForest-based model
+        from sklearn.ensemble import RandomForestRegressor
+
+        # Handle nested pipelines (e.g., RFE -> RandomForest)
+        actual_model = model
+        if hasattr(model, "named_steps"):
+            # It's a pipeline, extract the final estimator
+            if hasattr(model, "steps") and len(model.steps) > 0:
+                actual_model = model.steps[-1][1]
+        elif hasattr(model, "estimator_"):
+            # It's a meta-estimator (e.g., RFE)
+            actual_model = model.estimator_
+
+        # Extract tree predictions for Random Forest
+        if isinstance(actual_model, RandomForestRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                if hasattr(model, "named_steps"):
+                    # Model is a pipeline, transform through all steps except final
+                    for step_name, step_transformer in model.steps[:-1]:
+                        X_transformed = step_transformer.transform(X_transformed)
+                elif hasattr(model, "_transform"):
+                    # RFE or similar - use its transform
+                    X_transformed = model.transform(X_transformed)
+
+                # Get predictions from each tree
+                tree_predictions = np.array(
+                    [tree.predict(X_transformed) for tree in actual_model.estimators_]
+                )
+
+                # Calculate standard deviation across trees
+                uncertainty = np.std(tree_predictions, axis=0)
+
+                if self.debug:
+                    logger.debug(
+                        f"✅ Extracted uncertainty from {len(actual_model.estimators_)} RF trees. "
+                        f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+                    )
+
+                return uncertainty
+
+            except Exception as e:
+                logger.warning(f"Failed to extract RF uncertainty: {e}")
+                return np.zeros(len(X))
+
+        # No uncertainty available for non-ensemble models
+        if self.debug:
+            logger.debug(
+                f"Model type {type(actual_model).__name__} does not support uncertainty extraction"
+            )
+        return np.zeros(len(X))
 
     def get_feature_importance(self) -> pd.DataFrame:
         """

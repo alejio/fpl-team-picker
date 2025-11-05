@@ -58,9 +58,11 @@ Install: `uv sync`
 - Fixes pickle issues - properly importable from domain layer
 
 **Custom Pipeline Optimizer** (`scripts/custom_pipeline_optimizer.py`):
-- **Production Model**: `models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib`
+- **Production Model**: `models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib` ✅ IN USE
 - **Performance**: RandomForest with RFE-smart (60 features + penalties): MAE=0.632, Spearman=0.818
 - **64% better than TPOT** (MAE 0.632 vs 1.752, same scorer/data/CV)
+- **43.6% better on GW10 test data** (MAE 1.002 vs 1.777)
+- **Correctly predicted Haaland > Kudus** (GW10: prevented -24 point captain disaster)
 - 8 regressors: XGBoost, LightGBM, RandomForest, GradientBoosting, AdaBoost, Ridge, Lasso, ElasticNet
 - 4 feature selection strategies: none, correlation, permutation, rfe-smart
 - `--keep-penalty-features` flag to force-keep critical domain features
@@ -69,19 +71,42 @@ Install: `uv sync`
 
 **TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
 - MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)
-- Use for comparison/exploration, NOT production
+- **Not recommended for production** - inferior accuracy, predicted Kudus > Haaland (incorrect)
+- Use for comparison/exploration only
 - Quick start: `uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 9 --scorer fpl_weighted_huber --max-time-mins 480`
 
-**Model Comparison** (`experiments/FINAL_MODEL_COMPARISON.md`):
-- Custom RandomForest: 64% better MAE, 20% better top-15 overlap, 240x faster training
-- Key insight: Domain knowledge (preserving penalty features) > algorithmic complexity (8hr genetic search)
-- Always preserve domain-critical features (penalties, goals, assists)
+**GW10 Empirical Validation** (`experiments/GW10_MODEL_COMPARISON_REPORT.md`):
+- Custom RF vs TPOT tested on held-out GW10 data
+- Custom RF: 43.6% better MAE, correctly ranked Haaland > Kudus
+- TPOT: Systematically overestimated Kudus, leading to captain failure
+- Conclusion: Custom RF is production-ready, TPOT deprecated
 
 ## Expected Points Models
 
-**PRIMARY: ML-Based** (`MLExpectedPointsService`): Pre-trained sklearn pipelines (99 features), position-specific models, temporal validation. Requires .joblib artifact. Train using TPOT or ml_xp_experiment.py.
+**PRIMARY: ML-Based** (`MLExpectedPointsService`):
+- Pre-trained sklearn pipelines (99 features), position-specific models, temporal validation
+- **Uncertainty Quantification**: Random Forest tree-level variance (returns `xP_uncertainty` column)
+- Extracts per-player prediction uncertainty from ensemble disagreement
+- Requires .joblib artifact from custom_pipeline_optimizer.py
+- Config: `config.xp_model.ml_model_path = "models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib"`
 
-**Legacy: Rule-Based** (`ExpectedPointsService`): Form-weighted (70/30), live data, dynamic team strength. Used for GW1-5 (insufficient ML training data) and as ML benchmark only.
+**Legacy: Rule-Based** (`ExpectedPointsService`):
+- Form-weighted (70/30), live data, dynamic team strength
+- Used for GW1-5 (insufficient ML training data) and as ML benchmark only
+- No uncertainty quantification
+
+## Captain Selection (Uncertainty-Aware)
+
+**OptimizationService.get_captain_recommendation()** implements:
+1. **Uncertainty Penalty**: Prefers players with lower prediction variance (reliable picks)
+   - Formula: `risk_adjusted_score = (xP * 2) / (1 + uncertainty_penalty)`
+   - High uncertainty (>40% of xP) = reduced captain score
+2. **Template Protection**: High ownership (>50%) players get 5-10% bonus
+   - Protects against rank swings if template captain hauls
+3. **Risk Assessment**: Includes uncertainty in risk factors display
+4. **Full Transparency**: Returns uncertainty metrics in candidate analysis
+
+**Key Feature**: Would have prevented GW10 disaster (-24 points from Kudus captain)
 
 ## Historical xP Recomputation
 
