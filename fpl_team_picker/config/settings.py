@@ -19,12 +19,13 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-10_20251105_212950_pipeline.joblib",
-        description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features, trained on GW1-10)",
+        default="models/custom/random-forest_gw1-10_20251105_230609_pipeline.joblib",
+        description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
+        "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
     ml_ensemble_rule_weight: float = Field(
         default=0.0,
-        description="Weight for rule-based in ML ensemble (0=pure ML, 1=pure rule-based). Default 0.0 for TPOT auto-optimized model.",
+        description="Weight for rule-based in ML ensemble (0=pure ML, 1=pure rule-based). Default 0.0 for pure ML predictions.",
         ge=0.0,
         le=1.0,
     )

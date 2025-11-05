@@ -1112,34 +1112,41 @@ def run_train_mode(
         "ridge",
         "lasso",
         "elasticnet",
-    ] = typer.Option("xgboost", "--regressor", help="Regressor to use"),
+    ] = typer.Option(
+        "xgboost",
+        "--regressor",
+        help="Regressor to use (ignored if --use-best-params-from is provided, uses saved config)",
+    ),
     feature_selection: Literal["none", "correlation", "permutation", "rfe-smart"] = (
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (default: none = keep all 99 features)",
+            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 99 features",
         )
     ),
     keep_penalty_features: bool = typer.Option(
         False,
         "--keep-penalty-features",
-        help="Force keep penalty/set-piece features (is_primary_penalty_taker, etc.)",
+        help="Force keep penalty/set-piece features (ignored if --use-best-params-from is provided, uses saved config)",
     ),
     preprocessing: Literal["standard", "grouped", "robust"] = typer.Option(
         "standard",
         "--preprocessing",
         help=(
-            "Preprocessing strategy: 'standard' (StandardScaler for all features), "
+            "Preprocessing strategy (ignored if --use-best-params-from is provided, uses saved config): "
+            "'standard' (StandardScaler for all features), "
             "'grouped' (feature-type specific scalers), 'robust' (RobustScaler for all features)"
         ),
     ),
     n_trials: int = typer.Option(
         20,
         "--n-trials",
-        help="Number of hyperparameter trials",
+        help="Number of hyperparameter trials (ignored if --use-best-params-from is provided)",
     ),
     cv_folds: Optional[int] = typer.Option(
-        None, "--cv-folds", help="Number of CV folds (default: None = all available)"
+        None,
+        "--cv-folds",
+        help="Number of CV folds for hyperparameter search (default: None = all available, ignored if --use-best-params-from is provided)",
     ),
     scorer: Literal[
         "neg_mean_absolute_error",
@@ -1154,7 +1161,7 @@ def run_train_mode(
     ] = typer.Option(
         "fpl_weighted_huber",
         "--scorer",
-        help="Scoring metric. FPL scorers optimize for strategic objectives. Position-aware scorers require position data.",
+        help="Scoring metric (ignored if --use-best-params-from is provided, uses saved config). FPL scorers optimize for strategic objectives.",
     ),
     output_dir: str = typer.Option(
         "models/custom", "--output-dir", help="Output directory"
@@ -1171,9 +1178,45 @@ def run_train_mode(
     """
     Training mode: Train on all data and save model for deployment.
 
-    If --use-best-params-from is provided, uses those hyperparameters directly
-    instead of running RandomizedSearchCV again.
+    If --use-best-params-from is provided, loads saved configuration (regressor,
+    feature_selection, preprocessing, scorer, hyperparameters) from the JSON file.
+    Command-line arguments can override specific values if needed.
     """
+    # Load saved config from JSON if provided (before building config)
+    saved_config_data = None
+    if use_best_params_from:
+        params_path = Path(use_best_params_from)
+        if not params_path.is_absolute():
+            # If relative, check in output_dir first, then current directory
+            temp_output_dir = output_dir if output_dir else "models/custom"
+            params_path = Path(temp_output_dir) / params_path
+            if not params_path.exists():
+                params_path = Path(use_best_params_from)
+
+        if not params_path.exists():
+            typer.echo(
+                f"Error: Best params file not found: {params_path}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+        with open(params_path, "r") as f:
+            saved_config_data = json.load(f)
+
+        saved_config = saved_config_data.get("config", {})
+
+        # Use saved config values for model configuration (user can still override gameweeks)
+        if saved_config.get("regressor"):
+            regressor = saved_config["regressor"]
+        if saved_config.get("feature_selection"):
+            feature_selection = saved_config["feature_selection"]
+        if saved_config.get("preprocessing"):
+            preprocessing = saved_config["preprocessing"]
+        if saved_config.get("scorer"):
+            scorer = saved_config["scorer"]
+        if saved_config.get("keep_penalty_features") is not None:
+            keep_penalty_features = saved_config["keep_penalty_features"]
+
     # Build configuration dictionary
     config = build_config(
         start_gw,
@@ -1195,58 +1238,39 @@ def run_train_mode(
     print("🎯 TRAIN MODE: Full Training for Deployment")
     print("=" * 80)
     print("\nConfiguration:")
-    print(f"   Regressor: {config['regressor']}")
-    print(f"   Feature selection: {config['feature_selection']}")
-    print(f"   Preprocessing: {config['preprocessing']}")
-    print(f"   Keep penalty features: {config['keep_penalty_features']}")
-    print(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
 
     # Load best params if provided
     best_params = None
-    if use_best_params_from:
-        params_path = Path(use_best_params_from)
-        if not params_path.is_absolute():
-            # If relative, check in output_dir first, then current directory
-            params_path = Path(config["output_dir"]) / params_path
-            if not params_path.exists():
-                params_path = Path(use_best_params_from)
+    selected_features_from_json = None
 
-        if not params_path.exists():
-            typer.echo(
-                f"Error: Best params file not found: {params_path}",
-                err=True,
-            )
-            raise typer.Exit(code=1)
+    if use_best_params_from and saved_config_data:
+        saved_config = saved_config_data.get("config", {})
+        best_params = saved_config_data["best_params"]
+        selected_features_from_json = saved_config_data.get("selected_features")
 
-        print(f"   Loading best hyperparameters from: {params_path.name}")
-        with open(params_path, "r") as f:
-            params_data = json.load(f)
-
-        best_params = params_data["best_params"]
-        saved_config = params_data.get("config", {})
-
-        # Verify config matches (at least critical parts)
-        if saved_config.get("regressor") != config["regressor"]:
-            typer.echo(
-                f"Warning: Regressor mismatch. Saved: {saved_config.get('regressor')}, "
-                f"Current: {config['regressor']}",
-                err=True,
-            )
-        if saved_config.get("preprocessing") != config["preprocessing"]:
-            typer.echo(
-                f"Warning: Preprocessing mismatch. Saved: {saved_config.get('preprocessing')}, "
-                f"Current: {config['preprocessing']}",
-                err=True,
-            )
-
+        print(f"   📁 Loaded from: {Path(use_best_params_from).name}")
+        print(f"   Regressor: {config['regressor']} (from saved config)")
+        print(
+            f"   Feature selection: {config['feature_selection']} (from saved config)"
+        )
+        print(f"   Preprocessing: {config['preprocessing']} (from saved config)")
+        print(f"   Scorer: {config['scorer']} (from saved config)")
+        print(
+            f"   Keep penalty features: {config['keep_penalty_features']} (from saved config)"
+        )
+        print(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
         print("   Using saved hyperparameters (skipping search)")
         print(
-            f"   Best CV score from evaluation: {params_data.get('best_score', 'N/A'):.4f}"
+            f"   Best CV score from evaluation: {saved_config_data.get('best_score', 'N/A'):.4f}"
         )
     else:
+        print(f"   Regressor: {config['regressor']}")
+        print(f"   Feature selection: {config['feature_selection']}")
+        print(f"   Preprocessing: {config['preprocessing']}")
+        print(f"   Keep penalty features: {config['keep_penalty_features']}")
+        print(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
         print(f"   Hyperparameter trials: {config['n_trials']}")
-
-    print(f"   Scorer: {config['scorer']}")
+        print(f"   Scorer: {config['scorer']}")
 
     # 1. Load data (reusable utility)
     data = load_training_data(config["start_gw"], config["end_gw"], verbose=True)
@@ -1274,52 +1298,196 @@ def run_train_mode(
         verbose=True,
     )
 
-    # 3. Create CV splits (reusable utility)
-    cv_splits, cv_data = create_temporal_cv_splits(
-        features_df, max_folds=config["cv_folds"], verbose=True
-    )
-
-    # Prepare training data
-    X = cv_data[all_feature_names].copy()
-    # Use original index to get correct target values
-    y = target[cv_data["_original_index"].values]
+    # 3. Prepare training data (use ALL data, no CV splits)
+    X = features_df[all_feature_names].copy()
+    y = target
 
     # 4. Feature selection
     print("\n🔧 Feature Selection...")
-    selected_features = select_features(
-        X,
-        y,
-        all_feature_names,
-        config["feature_selection"],
-        config["keep_penalty_features"],
-        verbose=True,
-    )
 
-    # 5. Optimize pipeline (or use provided best params)
-    best_pipeline, search_results = optimize_pipeline(
-        X,
-        y,
-        cv_splits,
-        selected_features,
-        config,
-        cv_data=cv_data,
-        best_params=best_params,
-    )
+    # Use saved selected_features from JSON if available (to ensure exact same features)
+    if selected_features_from_json is not None:
+        print(
+            f"   Using saved feature selection from JSON ({len(selected_features_from_json)} features)"
+        )
+        # Verify all saved features exist
+        missing_features = set(selected_features_from_json) - set(all_feature_names)
+        if missing_features:
+            typer.echo(
+                f"Warning: {len(missing_features)} saved features not found in current data. "
+                f"Will re-run feature selection.",
+                err=True,
+            )
+            selected_features = select_features(
+                X,
+                y,
+                all_feature_names,
+                config["feature_selection"],
+                config["keep_penalty_features"],
+                verbose=True,
+            )
+        else:
+            selected_features = selected_features_from_json
+    else:
+        selected_features = select_features(
+            X,
+            y,
+            all_feature_names,
+            config["feature_selection"],
+            config["keep_penalty_features"],
+            verbose=True,
+        )
 
-    # 6. Evaluate on full CV data
-    print("\n📊 Final Evaluation on CV data...")
-    # Pass ALL features - the FeatureSelector inside the pipeline will select the ones it needs
-    y_pred = best_pipeline.predict(X)
+    # 5. Build and train pipeline
+    X_final = features_df[all_feature_names].copy()
+    y_final = target
 
-    # Use comprehensive FPL evaluation
-    metrics = evaluate_fpl_comprehensive(
-        y_true=y,
-        y_pred=y_pred,
-        cv_data=cv_data,
-        verbose=True,
-    )
+    if best_params is None:
+        # Need to run hyperparameter search (uses CV internally)
+        print("\n🔍 Running hyperparameter optimization...")
+        cv_splits_for_search, cv_data_for_search = create_temporal_cv_splits(
+            features_df, max_folds=config["cv_folds"], verbose=True
+        )
+        X_search = cv_data_for_search[all_feature_names].copy()
+        y_search = target[cv_data_for_search["_original_index"].values]
 
-    # 7. Save pipeline
+        best_pipeline, search_results = optimize_pipeline(
+            X_search,
+            y_search,
+            cv_splits_for_search,
+            selected_features,
+            config,
+            cv_data=cv_data_for_search,
+            best_params=None,
+        )
+
+        # Now train final pipeline on ALL data with best params
+        print("\n🎯 Training final pipeline on 100% of available data...")
+        best_pipeline.set_params(**search_results["best_params"])
+        best_pipeline.fit(X_final, y_final)
+    else:
+        # Use provided best params, skip search entirely
+        print(
+            "\n🎯 Training pipeline on 100% of available data with provided hyperparameters..."
+        )
+        # Build pipeline directly
+        regressor, _ = get_regressor_and_param_grid(
+            config["regressor"], config["random_seed"]
+        )
+        preprocessor = create_preprocessor(config["preprocessing"], selected_features)
+
+        best_pipeline = Pipeline(
+            [
+                ("feature_selector", FeatureSelector(selected_features)),
+                ("preprocessor", preprocessor),
+                ("regressor", regressor),
+            ]
+        )
+
+        # Set and fit with best params
+        best_pipeline.set_params(**best_params)
+        best_pipeline.fit(X_final, y_final)
+
+        search_results = {
+            "best_params": best_params,
+            "best_score": None,
+            "cv_results": None,
+        }
+
+    # Get predictions on all training data
+    y_pred = best_pipeline.predict(X_final)
+
+    # 8. Diagnostics (instead of evaluation)
+    print("\n" + "=" * 80)
+    print("📊 MODEL DIAGNOSTICS")
+    print("=" * 80)
+
+    diagnostics = {}
+
+    # Overall predicted xP distribution
+    print("\n📈 Predicted xP Distribution:")
+    print(f"   Min:    {y_pred.min():.2f}")
+    print(f"   Max:    {y_pred.max():.2f}")
+    print(f"   Mean:   {y_pred.mean():.2f}")
+    print(f"   Median: {np.median(y_pred):.2f}")
+    print(f"   Std:    {y_pred.std():.2f}")
+
+    diagnostics["pred_xp"] = {
+        "min": float(y_pred.min()),
+        "max": float(y_pred.max()),
+        "mean": float(y_pred.mean()),
+        "median": float(np.median(y_pred)),
+        "std": float(y_pred.std()),
+    }
+
+    # Percentiles
+    percentiles = [10, 25, 50, 75, 90, 95, 99]
+    print("\n📊 Predicted xP Percentiles:")
+    for p in percentiles:
+        val = np.percentile(y_pred, p)
+        print(f"   {p:2d}th: {val:.2f}")
+        diagnostics["pred_xp"][f"p{p}"] = float(val)
+
+    # High-scoring predictions
+    high_scores = {
+        ">=10": (y_pred >= 10).sum(),
+        ">=12": (y_pred >= 12).sum(),
+        ">=15": (y_pred >= 15).sum(),
+        ">=20": (y_pred >= 20).sum(),
+    }
+    print("\n🎯 High-Scoring Predictions:")
+    for threshold, count in high_scores.items():
+        pct = 100 * count / len(y_pred)
+        print(f"   {threshold:>4s} xP: {count:>5d} players ({pct:>5.1f}%)")
+        diagnostics[f"high_score_{threshold}"] = int(count)
+
+    # By position (if available)
+    if "position" in features_df.columns:
+        print("\n📊 Predicted xP by Position:")
+        for pos in ["GKP", "DEF", "MID", "FWD"]:
+            pos_mask = features_df["position"] == pos
+            if pos_mask.sum() > 0:
+                pos_pred = y_pred[pos_mask]
+                print(
+                    f"   {pos}: Mean {pos_pred.mean():.2f} | "
+                    f"Max {pos_pred.max():.2f} | "
+                    f"Count {pos_mask.sum()}"
+                )
+                diagnostics[f"{pos}_pred_xp"] = {
+                    "mean": float(pos_pred.mean()),
+                    "max": float(pos_pred.max()),
+                    "count": int(pos_mask.sum()),
+                }
+
+    # By gameweek
+    if "gameweek" in features_df.columns:
+        print("\n📅 Predicted xP by Gameweek:")
+        gw_stats = []
+        for gw in sorted(features_df["gameweek"].unique()):
+            gw_mask = features_df["gameweek"] == gw
+            gw_pred = y_pred[gw_mask]
+            gw_stats.append(
+                {
+                    "gameweek": int(gw),
+                    "mean": float(gw_pred.mean()),
+                    "max": float(gw_pred.max()),
+                    "count": int(gw_mask.sum()),
+                }
+            )
+            print(
+                f"   GW{gw:2d}: Mean {gw_pred.mean():.2f} | "
+                f"Max {gw_pred.max():.2f} | "
+                f"Players {gw_mask.sum()}"
+            )
+        diagnostics["by_gameweek"] = gw_stats
+
+    # Correlation with actual points (for reference, not evaluation)
+    if len(y) == len(y_pred):
+        corr = np.corrcoef(y, y_pred)[0, 1]
+        print(f"\n📈 Correlation with actual points: {corr:.3f}")
+        diagnostics["correlation_actual"] = float(corr)
+
+    # 9. Save pipeline
     output_dir = Path(config["output_dir"])
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1338,9 +1506,10 @@ def run_train_mode(
         {
             "pipeline": best_pipeline,
             "feature_names": selected_features,
-            "metrics": metrics,
+            "diagnostics": diagnostics,
             "search_results": search_results,
             "config": config,
+            "training_samples": len(y_final),
         },
         metadata_path,
     )
@@ -1349,15 +1518,13 @@ def run_train_mode(
     print(f"   Pipeline (for deployment): {pipeline_path.name}")
     print(f"   Metadata (for analysis): {metadata_path.name}")
     print(f"   Features: {len(selected_features)}/99")
-    print(f"   MAE: {metrics['mae']:.3f}")
-    print(f"   RMSE: {metrics['rmse']:.3f}")
-    print(f"   Spearman: {metrics['spearman_correlation']:.3f}")
+    print(f"   Training samples: {len(y_final):,}")
 
     print("\n" + "=" * 80)
-    print("✅ PIPELINE OPTIMIZATION COMPLETE!")
+    print("✅ PIPELINE TRAINING COMPLETE!")
     print("=" * 80)
 
-    return best_pipeline, selected_features, metrics
+    return best_pipeline, selected_features, diagnostics
 
 
 def main():
