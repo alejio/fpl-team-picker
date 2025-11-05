@@ -586,6 +586,85 @@ fpl_captain_scorer_sklearn = make_scorer(
 
 
 # ==============================================================================
+# POSITION-AWARE FPL SCORERS
+# ==============================================================================
+
+
+def make_position_aware_scorer_sklearn(
+    scorer_func, cv_data: pd.DataFrame, formation: str = "4-4-2"
+):
+    """
+    Create sklearn-compatible scorer for position-aware FPL scorers.
+
+    Position-aware scorers need access to position labels from cv_data.
+    This wrapper extracts position based on the indices in X during CV splits.
+
+    Args:
+        scorer_func: Position-aware scorer function (e.g., fpl_position_aware_scorer)
+        cv_data: DataFrame with 'position' column (must have index matching X)
+        formation: Formation string for XI-based scorers (default: "4-4-2")
+
+    Returns:
+        sklearn-compatible scorer function
+    """
+
+    def scorer(estimator, X, y):
+        # X is a subset of cv_data[feature_names] after CV split
+        # Extract position labels from cv_data using X's index
+        if isinstance(X, pd.DataFrame):
+            # Get indices from X's index (should match cv_data index for the split)
+            position_labels = cv_data.loc[X.index, "position"].values
+        else:
+            raise ValueError(
+                "Position-aware scorers require DataFrame input with index matching cv_data"
+            )
+
+        # Get predictions
+        y_pred = estimator.predict(X)
+
+        # Call the position-aware scorer
+        return scorer_func(y, y_pred, position_labels, formation=formation)
+
+    return scorer
+
+
+# Factory functions for position-aware scorers (to be called with cv_data)
+def create_fpl_position_aware_scorer_sklearn(cv_data: pd.DataFrame):
+    """Create sklearn-compatible position-aware top-K overlap scorer."""
+    # Import here to avoid circular imports
+    sys.path.insert(0, str(Path(__file__).parent))
+    from position_aware_scorer import fpl_position_aware_scorer  # noqa: E402
+
+    return make_position_aware_scorer_sklearn(fpl_position_aware_scorer, cv_data)
+
+
+def create_fpl_starting_xi_scorer_sklearn(
+    cv_data: pd.DataFrame, formation: str = "4-4-2"
+):
+    """Create sklearn-compatible starting XI efficiency scorer."""
+    # Import here to avoid circular imports
+    sys.path.insert(0, str(Path(__file__).parent))
+    from position_aware_scorer import fpl_starting_xi_scorer  # noqa: E402
+
+    return make_position_aware_scorer_sklearn(
+        fpl_starting_xi_scorer, cv_data, formation
+    )
+
+
+def create_fpl_comprehensive_scorer_sklearn(
+    cv_data: pd.DataFrame, formation: str = "4-4-2"
+):
+    """Create sklearn-compatible comprehensive team scorer."""
+    # Import here to avoid circular imports
+    sys.path.insert(0, str(Path(__file__).parent))
+    from position_aware_scorer import fpl_comprehensive_team_scorer  # noqa: E402
+
+    return make_position_aware_scorer_sklearn(
+        fpl_comprehensive_team_scorer, cv_data, formation
+    )
+
+
+# ==============================================================================
 # COMPREHENSIVE FPL EVALUATION
 # ==============================================================================
 

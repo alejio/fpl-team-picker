@@ -496,8 +496,14 @@ class MLExpectedPointsService:
             # Make predictions for ALL gameweeks (pipeline calculates rolling features correctly)
             all_predictions = self.pipeline.predict(prediction_data_all)
 
-            # Extract ONLY predictions for target gameweek (now properly aligned)
+            # Extract uncertainty estimates for target gameweek
             target_mask = prediction_data_all["gameweek"] == target_gameweek
+
+            # Extract uncertainty (will use RF tree variance if available)
+            all_uncertainty = self._extract_uncertainty(prediction_data_all)
+            uncertainty = all_uncertainty[target_mask]
+
+            # Extract ONLY predictions for target gameweek (now properly aligned)
             predictions = all_predictions[target_mask]
             predictions = np.clip(predictions, 0, 20)  # Reasonable bounds
 
@@ -507,9 +513,46 @@ class MLExpectedPointsService:
             # Create result DataFrame and align predictions with original players_data order
             result = players_data.copy()
 
-            # Map predictions to correct player_ids
+            # Map predictions and uncertainty to correct player_ids
             prediction_map = dict(zip(target_player_ids, predictions))
-            result["ml_xP"] = result["player_id"].map(prediction_map).fillna(0)
+            uncertainty_map = dict(zip(target_player_ids, uncertainty))
+            result["ml_xP"] = result["player_id"].map(prediction_map)
+            result["xP_uncertainty"] = result["player_id"].map(uncertainty_map)
+
+            # Validate that ALL players have ML predictions (fail fast, no silent fallbacks)
+            missing_predictions = result["ml_xP"].isna()
+            if missing_predictions.any():
+                missing_players = result.loc[
+                    missing_predictions, ["player_id", "web_name"]
+                ]
+                logger.error(
+                    f"ML prediction failed for {missing_predictions.sum()} players: "
+                    f"{missing_players['web_name'].tolist()}"
+                )
+                logger.error(
+                    "This indicates upstream data quality issues (missing features, "
+                    "insufficient historical data, or feature engineering failures)"
+                )
+                raise ValueError(
+                    f"Unable to generate ML predictions for {missing_predictions.sum()} players. "
+                    f"Missing: {missing_players['web_name'].tolist()}"
+                )
+
+            # Validate uncertainty extraction succeeded
+            missing_uncertainty = result["xP_uncertainty"].isna()
+            if missing_uncertainty.any():
+                missing_players = result.loc[
+                    missing_uncertainty, ["player_id", "web_name"]
+                ]
+                logger.error(
+                    f"Uncertainty extraction failed for {missing_uncertainty.sum()} players: "
+                    f"{missing_players['web_name'].tolist()}"
+                )
+                raise ValueError(
+                    f"Unable to extract uncertainty for {missing_uncertainty.sum()} players. "
+                    f"Missing: {missing_players['web_name'].tolist()}"
+                )
+
             result["xP"] = result["ml_xP"]
 
             # Calculate expected_minutes using rule-based logic
@@ -537,6 +580,11 @@ class MLExpectedPointsService:
                         ml_weight * result["ml_xP"]
                         + self.ensemble_rule_weight * rule_predictions["xP"]
                     )
+
+                    # Uncertainty remains from ML model (rule-based has no uncertainty)
+                    # Could theoretically combine uncertainties, but that's complex
+                    # For now, keep ML uncertainty scaled by its weight
+                    result["xP_uncertainty"] = ml_weight * result["xP_uncertainty"]
 
                     if self.debug:
                         logger.debug(
@@ -585,6 +633,135 @@ class MLExpectedPointsService:
 
         if self.debug:
             logger.debug(f"Loaded pipeline from {filepath}")
+
+    def _extract_uncertainty(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Extract prediction uncertainty from ensemble models (Random Forest, GradientBoosting).
+
+        For Random Forest: Uses tree-level predictions to calculate standard deviation.
+        For other models: Returns zeros (no uncertainty available).
+
+        Args:
+            X: Feature matrix for prediction
+
+        Returns:
+            Array of standard deviations (one per sample)
+        """
+        if self.pipeline is None:
+            return np.zeros(len(X))
+
+        # Get the underlying model
+        model = self.pipeline.named_steps.get("model")
+        if model is None:
+            return np.zeros(len(X))
+
+        # Check if this is a RandomForest-based model
+        from sklearn.ensemble import RandomForestRegressor
+
+        # Handle nested pipelines (e.g., RFE -> RandomForest)
+        actual_model = model
+        if hasattr(model, "named_steps"):
+            # It's a pipeline, extract the final estimator
+            if hasattr(model, "steps") and len(model.steps) > 0:
+                actual_model = model.steps[-1][1]
+        elif hasattr(model, "estimator_"):
+            # It's a meta-estimator (e.g., RFE)
+            actual_model = model.estimator_
+
+        # Extract tree predictions for Random Forest
+        if isinstance(actual_model, RandomForestRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                # CRITICAL FIX: Check if model is a Pipeline first (handles nested pipelines like [RFE -> RandomForest])
+                # When RFE is nested in a Pipeline, we must iterate through Pipeline steps rather than
+                # calling transform directly on RFE, which would expect input in the original feature space.
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
+                    # Model is a pipeline, transform through all steps except final
+                    # This correctly handles nested pipelines like Pipeline([RFE, RandomForest])
+                    # Each step in the pipeline expects input from the previous step, not the original feature space
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            # Catch dimension mismatch errors and provide helpful context
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    # RFE.transform expects input in the feature space it was fitted on
+                    # Since X_transformed is already from feature_engineer (which outputs the features
+                    # that the full pipeline was trained on), this should work correctly
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            # Catch dimension mismatch errors for standalone RFE
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        # Fallback: if no transform method, skip transformation
+                        # This shouldn't happen for RFE, but handle it gracefully
+                        logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
+
+                # Get predictions from each tree
+                tree_predictions = np.array(
+                    [tree.predict(X_transformed) for tree in actual_model.estimators_]
+                )
+
+                # Calculate standard deviation across trees
+                uncertainty = np.std(tree_predictions, axis=0)
+
+                if self.debug:
+                    logger.debug(
+                        f"✅ Extracted uncertainty from {len(actual_model.estimators_)} RF trees. "
+                        f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+                    )
+
+                return uncertainty
+
+            except Exception as e:
+                logger.error(
+                    f"Failed to extract Random Forest uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for Random Forest model. "
+                    f"This should not happen with properly trained RF models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
+
+        # No uncertainty available for non-ensemble models
+        if self.debug:
+            logger.debug(
+                f"Model type {type(actual_model).__name__} does not support uncertainty extraction"
+            )
+        return np.zeros(len(X))
 
     def get_feature_importance(self) -> pd.DataFrame:
         """

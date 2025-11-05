@@ -266,6 +266,11 @@ class OptimizationService:
 
         Returns structured data only - no UI generation.
 
+        Implements uncertainty-aware + ownership-adjusted captain selection:
+        1. Considers prediction uncertainty (xP_uncertainty) to prefer reliable picks
+        2. Template protection: High ownership (>50%) players favored if within 10% xP of leader
+        3. Risk-adjusted scoring: xP / (1 + uncertainty_penalty)
+
         Args:
             players: DataFrame of players to consider (squad or all players)
             top_n: Number of top candidates to analyze (default 5)
@@ -292,9 +297,47 @@ class OptimizationService:
         # Convert to list of dicts for easier processing
         players_list = players.to_dict("records")
 
-        # Sort by XP (immediate gameweek captain choice)
+        # Enhanced captain scoring with uncertainty and ownership
+        has_uncertainty = "xP_uncertainty" in players.columns
+        has_ownership = "selected_by_percent" in players.columns
+
+        for player in players_list:
+            xp_value = player.get(xp_column, 0)
+            uncertainty = player.get("xP_uncertainty", 0)
+            ownership_pct = player.get("selected_by_percent", 0)
+
+            # Base captain score (xP * 2)
+            base_score = xp_value * 2
+
+            # Apply uncertainty penalty if available
+            # Higher uncertainty = lower score (prefer reliable players)
+            uncertainty_penalty = 0
+            if has_uncertainty and uncertainty > 0:
+                # Penalty scales with uncertainty relative to xP
+                # If uncertainty is 50% of xP, reduce score by ~15%
+                uncertainty_ratio = uncertainty / max(xp_value, 0.1)
+                uncertainty_penalty = uncertainty_ratio * 0.3  # Max 30% penalty
+
+            risk_adjusted_score = base_score / (1 + uncertainty_penalty)
+
+            # Template protection: Boost high ownership players (>50%)
+            ownership_bonus = 0
+            if has_ownership and ownership_pct > 50:
+                # Template captain (>50% owned) gets 5-10% bonus
+                # This protects against big rank swings if they haul
+                ownership_bonus = min((ownership_pct - 50) / 100, 0.10)  # Max 10% bonus
+
+            final_score = risk_adjusted_score * (1 + ownership_bonus)
+
+            # Store scoring components for analysis
+            player["_captain_score"] = final_score
+            player["_base_score"] = base_score
+            player["_uncertainty_penalty"] = uncertainty_penalty
+            player["_ownership_bonus"] = ownership_bonus
+
+        # Sort by enhanced captain score
         captain_candidates = sorted(
-            players_list, key=lambda p: p.get(xp_column, 0), reverse=True
+            players_list, key=lambda p: p.get("_captain_score", 0), reverse=True
         )
 
         if not captain_candidates:
@@ -306,10 +349,20 @@ class OptimizationService:
         for i, player in enumerate(captain_candidates[:top_n]):
             xp_value = player.get(xp_column, 0)
             fixture_outlook = player.get("fixture_outlook", "🟡 Average")
+            uncertainty = player.get("xP_uncertainty", 0)
+            ownership_pct = player.get("selected_by_percent", 0)
 
             # Enhanced risk assessment
             risk_factors = []
             risk_level = "🟢 Low"
+
+            # Prediction uncertainty risk
+            if has_uncertainty and uncertainty > 0:
+                uncertainty_ratio = uncertainty / max(xp_value, 0.1)
+                if uncertainty_ratio > 0.4:  # High uncertainty (>40% of xP)
+                    risk_factors.append(f"high variance ({uncertainty:.2f})")
+                    if risk_level == "🟢 Low":
+                        risk_level = "🟡 Medium"
 
             # Injury/availability risk
             if player.get("status") in ["i", "d"]:
@@ -340,23 +393,38 @@ class OptimizationService:
             # Calculate captaincy potential (XP * 2 for double points)
             captain_potential = xp_value * 2
 
-            top_candidates.append(
-                {
-                    "rank": i + 1,
-                    "player_id": player.get("player_id"),
-                    "web_name": player["web_name"],
-                    "position": player["position"],
-                    "price": player.get("price", 0),
-                    "xP": xp_value,
-                    "captain_points": captain_potential,
-                    "expected_minutes": expected_mins,
-                    "fixture_outlook": fixture_outlook,
-                    "risk_level": risk_level,
-                    "risk_factors": risk_factors,
-                    "risk_description": risk_desc,
-                    "status": player.get("status", "a"),
-                }
-            )
+            # Build candidate dict with new scoring components
+            candidate = {
+                "rank": i + 1,
+                "player_id": player.get("player_id"),
+                "web_name": player["web_name"],
+                "position": player["position"],
+                "price": player.get("price", 0),
+                "xP": xp_value,
+                "captain_points": captain_potential,
+                "expected_minutes": expected_mins,
+                "fixture_outlook": fixture_outlook,
+                "risk_level": risk_level,
+                "risk_factors": risk_factors,
+                "risk_description": risk_desc,
+                "status": player.get("status", "a"),
+            }
+
+            # Add uncertainty and ownership metrics if available
+            if has_uncertainty:
+                candidate["xP_uncertainty"] = uncertainty
+                candidate["uncertainty_penalty"] = player.get("_uncertainty_penalty", 0)
+
+            if has_ownership:
+                candidate["ownership_pct"] = ownership_pct
+                candidate["ownership_bonus"] = player.get("_ownership_bonus", 0)
+                # Add template flag
+                candidate["is_template"] = ownership_pct > 50
+
+            # Add risk-adjusted score
+            candidate["captain_score"] = player.get("_captain_score", captain_potential)
+
+            top_candidates.append(candidate)
 
         # Select captain and vice captain
         captain = top_candidates[0]

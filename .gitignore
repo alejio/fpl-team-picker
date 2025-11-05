@@ -12,3 +12,4 @@ wheels/
 .pytest_cache/
 __marimo__/
 launch.json
+.DS_Store

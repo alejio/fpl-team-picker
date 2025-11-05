@@ -428,17 +428,45 @@ def _(gameweek_data, mo):
 
         if use_ml:
             # Use pre-trained ML model specified in config
-            # Default: TPOT auto-optimized pipeline with 99 features
+            # Default: Custom pipeline optimizer trained model
             # Override via config.json or env var: FPL_XP_MODEL_ML_MODEL_PATH
             model_path = Path(config.xp_model.ml_model_path)
+
+            # If relative path, check common model directories
+            if not model_path.is_absolute():
+                original_path = model_path
+                # Check if path already includes models/ directory
+                if str(original_path).startswith("models/"):
+                    # Already has models/ prefix, just check if it exists
+                    if not original_path.exists():
+                        # Try as-is for error message
+                        model_path = original_path
+                else:
+                    # Try models/custom first (where custom_pipeline_optimizer saves)
+                    custom_path = Path("models/custom") / original_path
+                    if custom_path.exists():
+                        model_path = custom_path
+                    # Then try models/tpot (for TPOT models)
+                    elif not original_path.exists():
+                        tpot_path = Path("models/tpot") / original_path
+                        if tpot_path.exists():
+                            model_path = tpot_path
+                    # Finally try current directory
+                    elif original_path.exists():
+                        model_path = original_path
+                    else:
+                        # Keep original for error message
+                        model_path = original_path
 
             if not model_path.exists():
                 raise FileNotFoundError(
                     f"❌ ML model not found: {model_path}\n"
                     f"   Train a model first using:\n"
-                    f"   - TPOT (recommended): uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
-                    f"   - Or: Use ml_xp_experiment.py to train and export a model\n"
-                    f"   Then set config.xp_model.ml_model_path to the trained .joblib file"
+                    f"   - Custom Pipeline Optimizer (recommended): "
+                    f"uv run python scripts/custom_pipeline_optimizer.py train --end-gw <gw> --use-best-params-from <json>\n"
+                    f"   - Or fresh search: uv run python scripts/custom_pipeline_optimizer.py train --regressor random-forest --end-gw <gw>\n"
+                    f"   - Or TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
+                    f"   Then set config.xp_model.ml_model_path to the trained .joblib file (e.g., models/custom/random-forest_gw1-10_*.joblib)"
                 )
 
             # Determine model type from path for display
@@ -672,7 +700,7 @@ def _(gameweek_data, mo, players_with_xp):
                 mo.md("**🎯 Top Performers (by Expected Points):**"),
                 mo.ui.table(
                     players_with_xp.nlargest(15, "xP")[
-                        ["web_name", "position", "xP", "price"]
+                        ["web_name", "position", "xP", "xP_uncertainty", "price"]
                     ].round(2),
                     page_size=10,
                 ),
@@ -1122,6 +1150,7 @@ def _(
                                     "name",
                                     "price",
                                     "xP",
+                                    "xP_uncertainty",
                                     "xP_5gw",
                                     "fixture_outlook",
                                 ]
@@ -1161,6 +1190,7 @@ def _(
                                         "name",
                                         "price",
                                         "xP",
+                                        "xP_uncertainty",
                                         "xP_5gw",
                                         "fixture_outlook",
                                     ]
