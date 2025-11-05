@@ -410,7 +410,7 @@ class TestWildcardOptimizationQuality:
         )
 
         total_cost = squad_df["price"].sum()
-        remaining_budget = metadata["available_budget"]
+        remaining_budget = metadata["remaining_budget"]
 
         # Should use most of the budget (at least 80% for test data)
         assert total_cost >= 80.0, f"Should use at least £80m, used £{total_cost:.1f}m"
