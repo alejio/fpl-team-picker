@@ -15,6 +15,7 @@ FPL team selection scenarios.
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 
 
 def fpl_position_aware_scorer(
@@ -391,10 +392,10 @@ if __name__ == "__main__":
     y_pred = y_true + np.random.normal(0, 1.5, n_players)
 
     # Evaluate
-    print("Position-Aware FPL Scorer Demo")
-    print("=" * 60)
+    logger.info("Position-Aware FPL Scorer Demo")
+    logger.info("=" * 60)
 
     metrics = evaluate_position_aware_metrics(y_true, y_pred, positions)
 
     for metric, score in metrics.items():
-        print(f"{metric:30s}: {score:.3f}")
+        logger.info(f"{metric:30s}: {score:.3f}")

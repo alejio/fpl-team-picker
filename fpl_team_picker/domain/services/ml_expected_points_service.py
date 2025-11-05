@@ -20,6 +20,7 @@ Train models using:
 import pandas as pd
 import numpy as np
 import warnings
+import sys
 from typing import Dict, Optional
 from pathlib import Path
 from loguru import logger
@@ -78,6 +79,23 @@ class MLExpectedPointsService:
         )  # Minimum 5 GW for rolling features
         self.ensemble_rule_weight = ensemble_rule_weight
         self.debug = debug
+
+        # Configure loguru to show DEBUG messages when debug mode is enabled
+        if self.debug:
+            # Remove default handler (id 0) and add one with DEBUG level
+            # This ensures debug messages are visible when debug mode is on
+            # This restores the functionality that was lost when migrating from standard logging
+            try:
+                logger.remove(0)  # Remove default handler (id 0)
+            except ValueError:
+                # Handler 0 doesn't exist, logger already configured - that's fine
+                pass
+            logger.add(
+                sys.stderr,
+                level="DEBUG",
+                format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+                colorize=True,
+            )
 
         # Pipeline components
         self.pipeline: Optional[Pipeline] = None
