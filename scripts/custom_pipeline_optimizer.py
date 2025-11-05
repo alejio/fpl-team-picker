@@ -1049,11 +1049,11 @@ def run_evaluate_mode(
         )
 
     # 8. Summary comparison
-    logger.info("\n" + "=" * 80)
-    logger.info("📊 EVALUATION SUMMARY")
-    logger.info("=" * 80)
-    logger.info(f"\n{'Metric':<25} {'Training (CV)':<20} {'Holdout':<20}")
-    logger.info("-" * 80)
+    print("\n" + "=" * 80)
+    print("📊 EVALUATION SUMMARY")
+    print("=" * 80)
+    print(f"\n{'Metric':<25} {'Training (CV)':<20} {'Holdout':<20}")
+    print("-" * 80)
 
     metrics_to_compare = ["mae", "rmse", "spearman_correlation"]
     for metric in metrics_to_compare:
@@ -1061,9 +1061,9 @@ def run_evaluate_mode(
         holdout_val = holdout_metrics.get(metric, 0) if holdout_metrics else 0
 
         if metric == "spearman_correlation":
-            logger.info(f"{metric:<25} {train_val:>19.3f} {holdout_val:>19.3f}")
+            print(f"{metric:<25} {train_val:>19.3f} {holdout_val:>19.3f}")
         else:
-            logger.info(f"{metric:<25} {train_val:>19.3f} {holdout_val:>19.3f}")
+            print(f"{metric:<25} {train_val:>19.3f} {holdout_val:>19.3f}")
 
     # 9. Save best hyperparameters for use in train mode
     output_dir = Path(config["output_dir"])
@@ -1403,19 +1403,19 @@ def run_train_mode(
     y_pred = best_pipeline.predict(X_final)
 
     # 8. Diagnostics (instead of evaluation)
-    logger.info("\n" + "=" * 80)
-    logger.info("📊 MODEL DIAGNOSTICS")
-    logger.info("=" * 80)
+    print("\n" + "=" * 80)
+    print("📊 MODEL DIAGNOSTICS")
+    print("=" * 80)
 
     diagnostics = {}
 
     # Overall predicted xP distribution
-    logger.info("\n📈 Predicted xP Distribution:")
-    logger.info(f"   Min:    {y_pred.min():.2f}")
-    logger.info(f"   Max:    {y_pred.max():.2f}")
-    logger.info(f"   Mean:   {y_pred.mean():.2f}")
-    logger.info(f"   Median: {np.median(y_pred):.2f}")
-    logger.info(f"   Std:    {y_pred.std():.2f}")
+    print("\n📈 Predicted xP Distribution:")
+    print(f"   Min:    {y_pred.min():.2f}")
+    print(f"   Max:    {y_pred.max():.2f}")
+    print(f"   Mean:   {y_pred.mean():.2f}")
+    print(f"   Median: {np.median(y_pred):.2f}")
+    print(f"   Std:    {y_pred.std():.2f}")
 
     diagnostics["pred_xp"] = {
         "min": float(y_pred.min()),
@@ -1427,10 +1427,10 @@ def run_train_mode(
 
     # Percentiles
     percentiles = [10, 25, 50, 75, 90, 95, 99]
-    logger.info("\n📊 Predicted xP Percentiles:")
+    print("\n📊 Predicted xP Percentiles:")
     for p in percentiles:
         val = np.percentile(y_pred, p)
-        logger.info(f"   {p:2d}th: {val:.2f}")
+        print(f"   {p:2d}th: {val:.2f}")
         diagnostics["pred_xp"][f"p{p}"] = float(val)
 
     # High-scoring predictions
@@ -1440,20 +1440,20 @@ def run_train_mode(
         ">=15": (y_pred >= 15).sum(),
         ">=20": (y_pred >= 20).sum(),
     }
-    logger.info("\n🎯 High-Scoring Predictions:")
+    print("\n🎯 High-Scoring Predictions:")
     for threshold, count in high_scores.items():
         pct = 100 * count / len(y_pred)
-        logger.info(f"   {threshold:>4s} xP: {count:>5d} players ({pct:>5.1f}%)")
+        print(f"   {threshold:>4s} xP: {count:>5d} players ({pct:>5.1f}%)")
         diagnostics[f"high_score_{threshold}"] = int(count)
 
     # By position (if available)
     if "position" in features_df.columns:
-        logger.info("\n📊 Predicted xP by Position:")
+        print("\n📊 Predicted xP by Position:")
         for pos in ["GKP", "DEF", "MID", "FWD"]:
             pos_mask = features_df["position"] == pos
             if pos_mask.sum() > 0:
                 pos_pred = y_pred[pos_mask]
-                logger.info(
+                print(
                     f"   {pos}: Mean {pos_pred.mean():.2f} | "
                     f"Max {pos_pred.max():.2f} | "
                     f"Count {pos_mask.sum()}"
@@ -1466,7 +1466,7 @@ def run_train_mode(
 
     # By gameweek
     if "gameweek" in features_df.columns:
-        logger.info("\n📅 Predicted xP by Gameweek:")
+        print("\n📅 Predicted xP by Gameweek:")
         gw_stats = []
         for gw in sorted(features_df["gameweek"].unique()):
             gw_mask = features_df["gameweek"] == gw
@@ -1479,7 +1479,7 @@ def run_train_mode(
                     "count": int(gw_mask.sum()),
                 }
             )
-            logger.info(
+            print(
                 f"   GW{gw:2d}: Mean {gw_pred.mean():.2f} | "
                 f"Max {gw_pred.max():.2f} | "
                 f"Players {gw_mask.sum()}"
@@ -1489,7 +1489,7 @@ def run_train_mode(
     # Correlation with actual points (for reference, not evaluation)
     if len(y) == len(y_pred):
         corr = np.corrcoef(y, y_pred)[0, 1]
-        logger.info(f"\n📈 Correlation with actual points: {corr:.3f}")
+        print(f"\n📈 Correlation with actual points: {corr:.3f}")
         diagnostics["correlation_actual"] = float(corr)
 
     # 9. Save pipeline
