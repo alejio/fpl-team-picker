@@ -525,11 +525,11 @@ class MLExpectedPointsService:
                 missing_players = result.loc[
                     missing_predictions, ["player_id", "web_name"]
                 ]
-                logger.error(
+                _service_logger.error(
                     f"ML prediction failed for {missing_predictions.sum()} players: "
                     f"{missing_players['web_name'].tolist()}"
                 )
-                logger.error(
+                _service_logger.error(
                     "This indicates upstream data quality issues (missing features, "
                     "insufficient historical data, or feature engineering failures)"
                 )
@@ -544,7 +544,7 @@ class MLExpectedPointsService:
                 missing_players = result.loc[
                     missing_uncertainty, ["player_id", "web_name"]
                 ]
-                logger.error(
+                _service_logger.error(
                     f"Uncertainty extraction failed for {missing_uncertainty.sum()} players: "
                     f"{missing_players['web_name'].tolist()}"
                 )
@@ -591,7 +591,9 @@ class MLExpectedPointsService:
                     )
 
                 except Exception as e:
-                    logger.warning(f"Rule-based ensemble failed, using pure ML: {e}")
+                    _service_logger.warning(
+                        f"Rule-based ensemble failed, using pure ML: {e}"
+                    )
 
             self._log_debug(f"Generated ML predictions for {len(result)} players")
             self._log_debug(
@@ -601,7 +603,7 @@ class MLExpectedPointsService:
             return result
 
         except Exception as e:
-            logger.error(f"ML XP calculation failed: {str(e)}")
+            _service_logger.error(f"ML XP calculation failed: {str(e)}")
             raise
 
     def save_models(self, filepath: str):
@@ -718,7 +720,7 @@ class MLExpectedPointsService:
                     else:
                         # Fallback: if no transform method, skip transformation
                         # This shouldn't happen for RFE, but handle it gracefully
-                        logger.warning(
+                        _service_logger.warning(
                             f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
                             "Skipping transformation step."
                         )
@@ -739,7 +741,7 @@ class MLExpectedPointsService:
                 return uncertainty
 
             except Exception as e:
-                logger.error(
+                _service_logger.error(
                     f"Failed to extract Random Forest uncertainty. "
                     f"Model type: {type(actual_model).__name__}, "
                     f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
