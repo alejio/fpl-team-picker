@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import warnings
 from typing import Dict, List, Optional
+from loguru import logger
 
 from fpl_team_picker.config import config
 
@@ -76,7 +77,7 @@ class TeamAnalyticsService:
         self.ROLLING_WINDOW_SIZE = config.team_strength.rolling_window_size
 
         if self.debug:
-            print(
+            logger.debug(
                 f"🏟️ TeamAnalyticsService initialized - Transition at GW{self.HISTORICAL_TRANSITION_GW}"
             )
 
@@ -145,7 +146,7 @@ class TeamAnalyticsService:
     ) -> Dict[str, float]:
         """Calculate team strength using current season multi-factor approach (GW8+)."""
         if self.debug:
-            print(
+            logger.debug(
                 f"🔄 Calculating current season multi-factor strength for GW{target_gameweek}"
             )
 
@@ -155,7 +156,7 @@ class TeamAnalyticsService:
             )
 
             if self.debug:
-                print(
+                logger.debug(
                     f"✅ Current season multi-factor strength calculated for GW{target_gameweek}"
                 )
 
@@ -163,7 +164,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(
+                logger.debug(
                     f"⚠️ Error in current season calculation, falling back to historical: {e}"
                 )
             return self._get_historical_baseline(teams_data)
@@ -176,7 +177,7 @@ class TeamAnalyticsService:
     ) -> Dict[str, float]:
         """Calculate early season team strength using multi-factor approach."""
         if self.debug:
-            print(
+            logger.debug(
                 f"🔄 Calculating early season multi-factor strength for GW{target_gameweek}"
             )
 
@@ -186,7 +187,7 @@ class TeamAnalyticsService:
             )
 
             if self.debug:
-                print(
+                logger.debug(
                     f"✅ Early season multi-factor strength calculated for GW{target_gameweek}"
                 )
 
@@ -194,7 +195,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(
+                logger.debug(
                     f"⚠️ Error in early season calculation, falling back to historical: {e}"
                 )
             return self._get_historical_baseline(teams_data)
@@ -212,19 +213,19 @@ class TeamAnalyticsService:
             self._historical_cache["historical_baseline"] = strength_ratings
 
             if self.debug:
-                print(
+                logger.debug(
                     f"✅ Multi-factor team strength calculated for {len(strength_ratings)} teams"
                 )
                 strongest = max(strength_ratings.items(), key=lambda x: x[1])
                 weakest = min(strength_ratings.items(), key=lambda x: x[1])
-                print(f"🏆 Strongest: {strongest[0]} ({strongest[1]})")
-                print(f"📉 Weakest: {weakest[0]} ({weakest[1]})")
+                logger.debug(f"🏆 Strongest: {strongest[0]} ({strongest[1]})")
+                logger.debug(f"📉 Weakest: {weakest[0]} ({weakest[1]})")
 
             return strength_ratings
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error in multi-factor calculation: {e}")
+                logger.warning(f"⚠️ Error in multi-factor calculation: {e}")
 
             return self._get_static_fallback_ratings()
 
@@ -240,7 +241,7 @@ class TeamAnalyticsService:
         4) Recent Form (20% weight) - Last 6 gameweeks performance
         """
         if self.debug:
-            print(
+            logger.debug(
                 f"🔍 Calculating multi-factor team strength for GW{target_gameweek or 'current'}"
             )
 
@@ -295,9 +296,11 @@ class TeamAnalyticsService:
                 )
 
             if self.debug:
-                print(f"✅ Multi-factor calculation complete with weights: {weights}")
+                logger.debug(
+                    f"✅ Multi-factor calculation complete with weights: {weights}"
+                )
                 sample_team = next(iter(final_strengths.keys()))
-                print(
+                logger.debug(
                     f"📊 Example ({sample_team}): pos={position_strengths.get(sample_team, 1.0):.3f}, "
                     f"quality={quality_strengths.get(sample_team, 1.0):.3f}, "
                     f"rep={reputation_strengths.get(sample_team, 1.0):.3f}, "
@@ -308,7 +311,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error in multi-factor calculation: {e}")
+                logger.warning(f"⚠️ Error in multi-factor calculation: {e}")
             return self._get_static_fallback_ratings()
 
     def _get_all_team_names(
@@ -362,7 +365,7 @@ class TeamAnalyticsService:
                 position_strengths[team_name] = round(np.clip(strength, 0.7, 1.3), 3)
 
             if self.debug:
-                print(
+                logger.debug(
                     f"📊 Position strengths calculated for {len(position_strengths)} teams"
                 )
 
@@ -370,7 +373,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error calculating position strength: {e}")
+                logger.warning(f"⚠️ Error calculating position strength: {e}")
             return {team: 1.0 for team in all_teams}
 
     def _calculate_player_quality_strength(
@@ -424,10 +427,10 @@ class TeamAnalyticsService:
                 quality_strengths[team_name] = round(np.clip(strength, 0.7, 1.3), 3)
 
             if self.debug:
-                print(
+                logger.debug(
                     f"💎 Player quality strengths calculated for {len(quality_strengths)} teams"
                 )
-                print(
+                logger.debug(
                     f"💰 League avg value: £{league_avg_value:.1f}m, avg points: {league_avg_points:.0f}"
                 )
 
@@ -435,7 +438,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error calculating player quality: {e}")
+                logger.warning(f"⚠️ Error calculating player quality: {e}")
             return {team: 1.0 for team in all_teams}
 
     def _calculate_reputation_strength(self, all_teams: List[str]) -> Dict[str, float]:
@@ -487,7 +490,7 @@ class TeamAnalyticsService:
             reputation_strengths[team_name] = reputation_ratings.get(lookup_name, 0.9)
 
         if self.debug:
-            print(
+            logger.debug(
                 f"🏆 Reputation strengths assigned for {len(reputation_strengths)} teams"
             )
 
@@ -506,7 +509,7 @@ class TeamAnalyticsService:
 
             if target_gameweek <= 6:
                 if self.debug:
-                    print(
+                    logger.debug(
                         f"⚡ Using neutral form for early season (GW{target_gameweek})"
                     )
                 return {team: 1.0 for team in all_teams}
@@ -522,14 +525,14 @@ class TeamAnalyticsService:
 
             if not recent_gws:
                 if self.debug:
-                    print("⚡ No recent form data available, using neutral form")
+                    logger.debug("⚡ No recent form data available, using neutral form")
                 return {team: 1.0 for team in all_teams}
 
             for team_name in all_teams:
                 form_strengths[team_name] = 1.0
 
             if self.debug:
-                print(
+                logger.debug(
                     f"⚡ Recent form calculated for {len(form_strengths)} teams over {len(recent_gws)} gameweeks"
                 )
 
@@ -537,7 +540,7 @@ class TeamAnalyticsService:
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Error calculating recent form: {e}")
+                logger.warning(f"⚠️ Error calculating recent form: {e}")
             return {team: 1.0 for team in all_teams}
 
     def _get_seasonal_weights(self, target_gameweek: int) -> Dict[str, float]:
@@ -573,6 +576,6 @@ class TeamAnalyticsService:
             strength_ratings[team] = round(strength, 3)
 
         if self.debug:
-            print("⚠️ Using static fallback ratings")
+            logger.warning("⚠️ Using static fallback ratings")
 
         return strength_ratings

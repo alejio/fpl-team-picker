@@ -15,6 +15,7 @@ import pandas as pd
 import random
 import math
 from pydantic import BaseModel, Field, field_validator
+from loguru import logger
 from fpl_team_picker.config import config
 
 
@@ -183,7 +184,7 @@ class OptimizationService:
             unavailable_mask = available_squad["status"].isin(["i", "s", "u"])
             if unavailable_mask.any():
                 unavailable_players = available_squad[unavailable_mask]
-                print(
+                logger.debug(
                     f"🚫 Excluding {len(unavailable_players)} unavailable players from starting 11:"
                 )
                 for _, player in unavailable_players.iterrows():
@@ -192,12 +193,14 @@ class OptimizationService:
                         "s": "suspended",
                         "u": "unavailable",
                     }[player["status"]]
-                    print(f"   - {player.get('web_name', 'Unknown')} ({status_desc})")
+                    logger.debug(
+                        f"   - {player.get('web_name', 'Unknown')} ({status_desc})"
+                    )
 
                 available_squad = available_squad[~unavailable_mask]
 
         if len(available_squad) < 11:
-            print(
+            logger.warning(
                 f"⚠️ Warning: Only {len(available_squad)} available players in squad (need 11)"
             )
             return [], "", 0
@@ -621,7 +624,7 @@ class OptimizationService:
             if free_transfers_override >= 15:
                 team_data["bank"] = 100.0
                 # Note: Selling prices will be ignored since we can replace all 15 players
-                print(
+                logger.info(
                     f"🃏 Wildcard/Chip Active: {free_transfers_override} free transfers, "
                     f"£{team_data['bank']:.1f}m budget"
                 )
@@ -666,7 +669,7 @@ class OptimizationService:
         if len(current_squad) == 0 or players_with_xp.empty or not team_data:
             return pd.DataFrame(), {}, {"error": "Load team and calculate XP first"}
 
-        print(
+        logger.info(
             f"🧠 Strategic Optimization: Simulated Annealing ({config.optimization.sa_iterations} iterations)..."
         )
 
@@ -675,9 +678,9 @@ class OptimizationService:
         must_exclude_ids = must_exclude_ids or set()
 
         if must_include_ids:
-            print(f"🎯 Must include {len(must_include_ids)} players")
+            logger.debug(f"🎯 Must include {len(must_include_ids)} players")
         if must_exclude_ids:
-            print(f"🚫 Must exclude {len(must_exclude_ids)} players")
+            logger.debug(f"🚫 Must exclude {len(must_exclude_ids)} players")
 
         # Get optimization column based on configuration
         xp_column = self.get_optimization_xp_column()
@@ -733,13 +736,13 @@ class OptimizationService:
                 "non_sellable_value": 0.0,
                 "must_include_value": 0.0,
             }
-            print("🃏 Wildcard Budget: £100.0m (budget reset)")
+            logger.info("🃏 Wildcard Budget: £100.0m (budget reset)")
         else:
             # Normal transfers: bank + sellable squad value
             budget_pool_info = self.calculate_budget_pool(
                 current_squad_with_xp, available_budget, must_include_ids
             )
-            print(
+            logger.info(
                 f"💰 Budget: Bank £{available_budget:.1f}m | Sellable £{budget_pool_info['sellable_value']:.1f}m | Total £{budget_pool_info['total_budget']:.1f}m"
             )
 
@@ -756,7 +759,7 @@ class OptimizationService:
                 & players_with_xp["xP"].notna()
             ]
             if not excluded_players.empty:
-                print(f"🚫 Filtered {len(excluded_players)} unavailable players")
+                logger.debug(f"🚫 Filtered {len(excluded_players)} unavailable players")
 
         if must_exclude_ids:
             all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
@@ -766,13 +769,13 @@ class OptimizationService:
             current_squad_with_xp, xp_column
         )
 
-        print(
+        logger.info(
             f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
         )
 
         # For wildcard (15 free transfers), use initial squad generation instead of transfer-based SA
         if is_wildcard:
-            print(
+            logger.info(
                 "🃏 Wildcard mode: Building optimal squad from scratch (ignoring current squad)"
             )
             wildcard_result = self.optimize_initial_squad(
@@ -805,7 +808,7 @@ class OptimizationService:
         else:
             # Normal transfers: Run multiple SA restarts to find global optimum
             num_restarts = config.optimization.sa_restarts
-            print(
+            logger.info(
                 f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
             )
 
@@ -814,7 +817,7 @@ class OptimizationService:
 
             for restart in range(num_restarts):
                 if num_restarts > 1:
-                    print(f"  Restart {restart + 1}/{num_restarts}...")
+                    logger.debug(f"  Restart {restart + 1}/{num_restarts}...")
 
                 sa_result = self._run_transfer_sa(
                     current_squad=current_squad_with_xp,
@@ -843,12 +846,12 @@ class OptimizationService:
                     best_net_xp = net_xp
                     best_sa_result = sa_result
                     if num_restarts > 1:
-                        print(
+                        logger.debug(
                             f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
                         )
 
             sa_result = best_sa_result
-            print(f"✅ Best result: {best_net_xp:.2f} net xP")
+            logger.info(f"✅ Best result: {best_net_xp:.2f} net xP")
 
         # Create best scenario from SA result
         best_squad = sa_result["optimal_squad"]
@@ -905,7 +908,7 @@ class OptimizationService:
             "is_wildcard": is_wildcard,
         }
 
-        print(
+        logger.info(
             f"✅ Best strategy: {num_transfers} transfers, {net_xp:.2f} net XP "
             f"({sa_result['iterations_improved']} improvements in {sa_result['total_iterations']} iterations)"
         )
@@ -1003,7 +1006,7 @@ class OptimizationService:
 
         improvements = 0
 
-        print(f"Initial squad: {current_objective:.2f} xP")
+        logger.debug(f"Initial squad: {current_objective:.2f} xP")
 
         # SA loop
         for iteration in range(iterations):
@@ -1057,7 +1060,7 @@ class OptimizationService:
                     improvements += 1
 
                     if improvements % 10 == 0:
-                        print(
+                        logger.debug(
                             f"Iteration {iteration}: New best {best_objective:.2f} xP ({num_transfers_from_original} transfers)"
                         )
 
@@ -1067,7 +1070,7 @@ class OptimizationService:
             self._group_by_position(best_starting_11), xp_column
         )
 
-        print(f"Final: {best_objective:.2f} xP ({improvements} improvements)")
+        logger.info(f"Final: {best_objective:.2f} xP ({improvements} improvements)")
 
         return {
             "optimal_squad": best_team,
@@ -1205,7 +1208,9 @@ class OptimizationService:
         Returns:
             Tuple of (optimal_squad_df, result_summary_dict, optimization_metadata_dict)
         """
-        print("🃏 Wildcard Chip: Using unified optimization with 15 free transfers...")
+        logger.info(
+            "🃏 Wildcard Chip: Using unified optimization with 15 free transfers..."
+        )
 
         # Delegate to unified transfer optimization with 15 free transfers
         return self.optimize_transfers(

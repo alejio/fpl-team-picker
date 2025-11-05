@@ -22,7 +22,7 @@ import numpy as np
 import warnings
 from typing import Dict, Optional
 from pathlib import Path
-import logging
+from loguru import logger
 
 from sklearn.pipeline import Pipeline
 from .ml_pipeline_factory import (
@@ -33,9 +33,6 @@ from .ml_pipeline_factory import (
 
 
 warnings.filterwarnings("ignore")
-
-# Set up logging
-logger = logging.getLogger(__name__)
 
 
 class MLExpectedPointsService:
@@ -91,7 +88,6 @@ class MLExpectedPointsService:
             self._load_pretrained_model()
 
         if self.debug:
-            logger.setLevel(logging.DEBUG)
             logger.debug(
                 f"Initialized ML XP Service: model_type={model_type}, ensemble_weight={ensemble_rule_weight}"
             )
@@ -232,11 +228,13 @@ class MLExpectedPointsService:
         ].copy()
 
         if self.debug:
-            print(
+            logger.debug(
                 f"🔧 ML Training: {len(historical_df)} records → {len(train_features)} after GW6+ filter"
             )
-            print(f"   Training GWs: {sorted(train_features['gameweek'].unique())}")
-            print(
+            logger.debug(
+                f"   Training GWs: {sorted(train_features['gameweek'].unique())}"
+            )
+            logger.debug(
                 f"   Target stats: mean={train_features['total_points'].mean():.2f}, max={train_features['total_points'].max()}"
             )
 

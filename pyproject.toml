@@ -30,6 +30,7 @@ dependencies = [
     "altair>=5.5.0",
     "shap>=0.49.1",
     "typer>=0.20.0",
+    "loguru==0.7.3",
 ]
 
 [dependency-groups]
