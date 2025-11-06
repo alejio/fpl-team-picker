@@ -278,6 +278,7 @@ class ExpectedPointsService:
                     "xP_per_price",
                     "fixture_difficulty",
                     "expected_minutes",
+                    "xP_uncertainty",
                 ]
                 if col in players_5gw.columns
             ]
@@ -313,6 +314,7 @@ class ExpectedPointsService:
             "fixture_difficulty_5gw",
             "expected_minutes",
             "expected_minutes_5gw",
+            "xP_uncertainty",
         ]
         for col in numeric_cols:
             if col in players_merged.columns:

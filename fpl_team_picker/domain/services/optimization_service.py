@@ -740,6 +740,8 @@ class OptimizationService:
 
         # Update current squad with both 1-GW and 5-GW XP data
         merge_columns = ["player_id", "xP", "xP_5gw"]
+        if "xP_uncertainty" in players_with_xp.columns:
+            merge_columns.append("xP_uncertainty")
         if "fixture_outlook" in players_with_xp.columns:
             merge_columns.append("fixture_outlook")
         if "expected_minutes" in players_with_xp.columns:
