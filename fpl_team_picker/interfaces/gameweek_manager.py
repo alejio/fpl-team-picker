@@ -494,11 +494,12 @@ def _(gameweek_data, mo):
                 )
 
             # Calculate xP using ML service (no fallback - fail explicitly)
-            # Note: ML service currently only does 1GW predictions
             if config.xp_model.debug:
                 print(
                     f"🚀 Calculating ML xP for GW{gameweek_data['target_gameweek']} with betting features..."
                 )
+
+            # Calculate 1GW predictions
             players_with_xp = ml_xp_service.calculate_expected_points(
                 players_data=gameweek_data.get("players", _pd.DataFrame()),
                 teams_data=gameweek_data.get("teams", _pd.DataFrame()),
@@ -514,25 +515,65 @@ def _(gameweek_data, mo):
                 betting_features_df=gameweek_data.get("betting_features"),
             )
 
+            # Calculate 5GW predictions using cascading predictions
+            # This properly accounts for fixture difficulty changes across gameweeks
+            if config.xp_model.debug:
+                print("🔄 Calculating 5GW ML xP using cascading predictions...")
+            players_5gw = ml_xp_service.calculate_5gw_expected_points(
+                players_data=gameweek_data.get("players", _pd.DataFrame()),
+                teams_data=gameweek_data.get("teams", _pd.DataFrame()),
+                xg_rates_data=gameweek_data.get("xg_rates", _pd.DataFrame()),
+                fixtures_data=gameweek_data.get("fixtures", _pd.DataFrame()),
+                target_gameweek=gameweek_data["target_gameweek"],
+                live_data=gameweek_data.get("live_data_historical", _pd.DataFrame()),
+                ownership_trends_df=gameweek_data.get("ownership_trends"),
+                value_analysis_df=gameweek_data.get("value_analysis"),
+                fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
+                raw_players_df=gameweek_data.get("raw_players"),
+                betting_features_df=gameweek_data.get("betting_features"),
+            )
+
+            # Merge 5GW predictions into main dataframe
+            if "player_id" in players_5gw.columns:
+                merge_cols = ["player_id", "ml_xP", "xP_uncertainty"]
+                # Also include per-gameweek predictions if available
+                for col in players_5gw.columns:
+                    if col.startswith("xP_gw") or col.startswith("uncertainty_gw"):
+                        merge_cols.append(col)
+
+                players_5gw_subset = players_5gw[merge_cols].copy()
+                players_5gw_subset = players_5gw_subset.rename(
+                    columns={"ml_xP": "xP_5gw", "xP_uncertainty": "xP_uncertainty_5gw"}
+                )
+                players_with_xp = players_with_xp.merge(
+                    players_5gw_subset,
+                    on="player_id",
+                    how="left",
+                    suffixes=("", "_5gw"),
+                )
+                # Fill any missing 5gw values with 1gw * 5 as fallback
+                players_with_xp["xP_5gw"] = players_with_xp["xP_5gw"].fillna(
+                    players_with_xp["xP"] * 5
+                )
+            else:
+                # Fallback if merge fails
+                players_with_xp["xP_5gw"] = players_with_xp["xP"] * 5
+
             # Enrich with additional season statistics FIRST
             rule_service = ExpectedPointsService()
             players_with_xp = rule_service.enrich_players_with_season_stats(
                 players_with_xp
             )
-
-            # TODO: Implement proper 5GW lookahead with fixture-specific predictions
-            # At the moment this is too naïve.
-            # Create 5GW approximation and derived metrics (simple: 1GW * 5)
-            # This is a placeholder until proper multi-gameweek ML predictions are implemented
-            players_with_xp["xP_5gw"] = players_with_xp["xP"] * 5
             players_with_xp["xP_per_price"] = (
                 players_with_xp["xP"] / players_with_xp["price"]
             )
             players_with_xp["xP_per_price_5gw"] = (
                 players_with_xp["xP_5gw"] / players_with_xp["price"]
             )
-            players_with_xp["xP_horizon_advantage"] = (
-                0.0  # Placeholder - would measure 5GW vs 1GW difference
+            # Calculate horizon advantage: difference between 5GW total and 1GW * 5
+            # Positive means 5GW fixtures are better on average, negative means worse
+            players_with_xp["xP_horizon_advantage"] = players_with_xp["xP_5gw"] - (
+                players_with_xp["xP"] * 5
             )
             players_with_xp["fixture_difficulty"] = 1.0  # Neutral
             players_with_xp["fixture_difficulty_5gw"] = 1.0  # Neutral

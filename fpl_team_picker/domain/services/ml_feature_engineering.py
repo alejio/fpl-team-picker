@@ -972,8 +972,71 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 df.loc[gw1_mask, "ownership_velocity"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
-            # Check if there are still missing gameweeks (after handling GW1)
-            # Note: With dataset-builder backfill, this should never happen
+            # Handle missing ownership for future gameweeks (cascading predictions)
+            # Forward-fill using last known ownership value per player
+            if missing_gws:
+                max_known_gw = max_ownership_gw + 1  # +1 because of shift(1)
+                # Forward-fill for gameweeks >= max_known_gw (GW11 if data through GW10)
+                future_gws = [gw for gw in missing_gws if gw >= max_known_gw]
+
+                if future_gws:
+                    # Forward-fill ownership data for future gameweeks
+                    # Sort by player_id and gameweek to enable forward fill
+                    df_sorted = df.sort_values(["player_id", "gameweek"])
+
+                    # Forward-fill ownership columns using last known value per player
+                    ownership_fill_cols = [
+                        "selected_by_percent",
+                        "net_transfers_gw",
+                        "avg_net_transfers_5gw",
+                        "bandwagon_score",
+                        "ownership_velocity",
+                    ]
+                    for col in ownership_fill_cols:
+                        if col in df_sorted.columns:
+                            df_sorted[col] = df_sorted.groupby("player_id")[col].ffill()
+
+                    # Forward-fill categorical columns with last known value
+                    if "transfer_momentum" in df_sorted.columns:
+                        df_sorted["transfer_momentum"] = df_sorted.groupby("player_id")[
+                            "transfer_momentum"
+                        ].ffill()
+                    if "ownership_tier" in df_sorted.columns:
+                        df_sorted["ownership_tier"] = df_sorted.groupby("player_id")[
+                            "ownership_tier"
+                        ].ffill()
+
+                    # Fill any remaining NaN values (for new players with no historical ownership)
+                    for col in ownership_fill_cols:
+                        if col in df_sorted.columns:
+                            if col == "selected_by_percent":
+                                df_sorted[col] = df_sorted[col].fillna(
+                                    5.0
+                                )  # Median ownership
+                            elif col in [
+                                "net_transfers_gw",
+                                "avg_net_transfers_5gw",
+                                "bandwagon_score",
+                                "ownership_velocity",
+                            ]:
+                                df_sorted[col] = df_sorted[col].fillna(0)
+
+                    if "transfer_momentum" in df_sorted.columns:
+                        df_sorted["transfer_momentum"] = df_sorted[
+                            "transfer_momentum"
+                        ].fillna("neutral")
+                    if "ownership_tier" in df_sorted.columns:
+                        df_sorted["ownership_tier"] = df_sorted[
+                            "ownership_tier"
+                        ].fillna("budget")
+
+                    # Restore original order
+                    df = df_sorted.sort_index()
+
+                    # Update missing_gws to only include non-future gameweeks
+                    missing_gws = [gw for gw in missing_gws if gw <= max_known_gw]
+
+            # Check if there are still missing gameweeks (should only be historical gaps)
             if missing_gws:
                 raise ValueError(
                     f"Missing ownership data for gameweeks {missing_gws}. "
@@ -1061,8 +1124,53 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 df.loc[gw1_mask, "price_risk"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
-            # Check if there are still missing gameweeks (after handling GW1)
-            # Note: With dataset-builder backfill, this should never happen
+            # Handle missing value data for future gameweeks (cascading predictions)
+            # Forward-fill using last known value per player
+            if missing_gws:
+                max_known_gw = max_value_gw + 1  # +1 because of shift(1)
+                # Forward-fill for gameweeks >= max_known_gw (GW11 if data through GW10)
+                future_gws = [gw for gw in missing_gws if gw >= max_known_gw]
+
+                if future_gws:
+                    # Forward-fill value data for future gameweeks
+                    df_sorted = df.sort_values(["player_id", "gameweek"])
+
+                    # Forward-fill value columns using last known value per player
+                    value_fill_cols = [
+                        "points_per_pound",
+                        "value_vs_position",
+                        "predicted_price_change_1gw",
+                        "price_volatility",
+                        "price_risk",
+                    ]
+                    for col in value_fill_cols:
+                        if col in df_sorted.columns:
+                            df_sorted[col] = df_sorted.groupby("player_id")[col].ffill()
+
+                    # Fill any remaining NaN values with neutral defaults
+                    if "points_per_pound" in df_sorted.columns:
+                        df_sorted["points_per_pound"] = df_sorted[
+                            "points_per_pound"
+                        ].fillna(0.5)
+                    if "value_vs_position" in df_sorted.columns:
+                        df_sorted["value_vs_position"] = df_sorted[
+                            "value_vs_position"
+                        ].fillna(1.0)
+                    for col in [
+                        "predicted_price_change_1gw",
+                        "price_volatility",
+                        "price_risk",
+                    ]:
+                        if col in df_sorted.columns:
+                            df_sorted[col] = df_sorted[col].fillna(0)
+
+                    # Restore original order
+                    df = df_sorted.sort_index()
+
+                    # Update missing_gws to only include non-future gameweeks
+                    missing_gws = [gw for gw in missing_gws if gw <= max_known_gw]
+
+            # Check if there are still missing gameweeks (should only be historical gaps)
             if missing_gws:
                 raise ValueError(
                     f"Missing value analysis data for gameweeks {missing_gws}. "

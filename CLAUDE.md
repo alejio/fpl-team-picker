@@ -168,6 +168,6 @@ See `fpl_rules.md`. Key: 2 GKP, 5 DEF, 5 MID, 3 FWD; £100m budget; max 3 player
 
 ## Tech Stack
 
-Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
+uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
 
 **Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models, repository pattern, 29/29 tests passing
