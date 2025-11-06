@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Fantasy Premier League (FPL) analysis suite with season-start team building and weekly gameweek management. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
+Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-start team building and weekly gameweek management. 2025-2026 season is in progress. We are competing in the FPL league and are using this tool to help us win. The tool is underperforming and needs to be improved. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
 
 ## Architecture
 
