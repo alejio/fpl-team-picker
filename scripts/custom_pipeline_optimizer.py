@@ -751,9 +751,9 @@ def optimize_pipeline(
     # Pass ALL features - the FeatureSelector inside the pipeline will select the ones it needs
     search.fit(X, y)
 
-    logger.info("\n✅ Hyperparameter optimization complete!")
-    logger.info(f"   Best CV score: {search.best_score_:.4f}")
-    logger.info(f"   Best params: {search.best_params_}")
+    print("\n✅ Hyperparameter optimization complete!")
+    print(f"   Best CV score: {search.best_score_:.4f}")
+    print(f"   Best params: {search.best_params_}")
 
     return search.best_estimator_, {
         "best_score": search.best_score_,
@@ -895,15 +895,15 @@ def run_evaluate_mode(
         )
         raise typer.Exit(code=1)
 
-    logger.info("=" * 80)
-    logger.info("🔬 EVALUATE MODE: Testing Configuration on Holdout Set")
-    logger.info("=" * 80)
-    logger.info("\nConfiguration:")
-    logger.info(f"   Regressor: {config['regressor']}")
-    logger.info(f"   Feature selection: {config['feature_selection']}")
-    logger.info(f"   Preprocessing: {config['preprocessing']}")
-    logger.info(f"   Keep penalty features: {config['keep_penalty_features']}")
-    logger.info(
+    print("=" * 80)
+    print("🔬 EVALUATE MODE: Testing Configuration on Holdout Set")
+    print("=" * 80)
+    print("\nConfiguration:")
+    print(f"   Regressor: {config['regressor']}")
+    print(f"   Feature selection: {config['feature_selection']}")
+    print(f"   Preprocessing: {config['preprocessing']}")
+    print(f"   Keep penalty features: {config['keep_penalty_features']}")
+    print(
         f"   Training GWs: {config['start_gw']}-{train_end_gw} ({train_end_gw - config['start_gw'] + 1} weeks)"
     )
 
