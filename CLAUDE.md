@@ -43,8 +43,6 @@ Install: `uv sync`
 
 ## ML Pipeline Training
 
-**⚠️ CRITICAL**: TPOT's auto-ML RFE drops penalty features (ranks 4-8 by permutation importance) due to MDI bias. Use custom pipeline instead.
-
 **Reusable Training Infrastructure** (`scripts/ml_training_utils.py`):
 - `load_training_data()` - Load all 8 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players)
 - `engineer_features()` - FPLFeatureEngineer with leak-free per-GW team strength (FIXED: data alignment bug)
