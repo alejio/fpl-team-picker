@@ -37,6 +37,7 @@ from typing import Dict, List, Tuple, Optional, Literal
 import numpy as np
 import pandas as pd
 import typer
+from loguru import logger
 from sklearn.ensemble import (
     RandomForestRegressor,
     GradientBoostingRegressor,
@@ -253,7 +254,7 @@ def select_features(
     """
     if strategy == "none":
         if verbose:
-            print(f"   ℹ️  Using all {len(feature_names)} features (no selection)")
+            logger.info(f"   ℹ️  Using all {len(feature_names)} features (no selection)")
         return feature_names
 
     penalty_features = [
@@ -266,7 +267,7 @@ def select_features(
     if strategy == "correlation":
         # Remove highly correlated features (keep one from each pair)
         if verbose:
-            print("   🔍 Removing highly correlated features (|r| > 0.95)...")
+            logger.info("   🔍 Removing highly correlated features (|r| > 0.95)...")
 
         corr_matrix = X[feature_names].corr().abs()
         upper_tri = corr_matrix.where(
@@ -287,7 +288,7 @@ def select_features(
         selected = [f for f in feature_names if f not in to_drop]
 
         if verbose:
-            print(
+            logger.info(
                 f"   ✅ Removed {len(to_drop)} correlated features, kept {len(selected)}"
             )
 
@@ -298,7 +299,7 @@ def select_features(
         from sklearn.inspection import permutation_importance
 
         if verbose:
-            print("   🔍 Computing permutation importance...")
+            logger.info("   🔍 Computing permutation importance...")
 
         rf = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
         rf.fit(X[feature_names], y)
@@ -327,7 +328,7 @@ def select_features(
         selected = top_features
 
         if verbose:
-            print(
+            logger.info(
                 f"   ✅ Selected top {len(selected)} features by permutation importance"
             )
 
@@ -337,7 +338,7 @@ def select_features(
         from sklearn.ensemble import ExtraTreesRegressor
 
         if verbose:
-            print("   🔍 Running smart RFE (keeps penalty features)...")
+            logger.info("   🔍 Running smart RFE (keeps penalty features)...")
 
         # Use ExtraTreesRegressor for feature ranking
         estimator = ExtraTreesRegressor(n_estimators=100, random_state=42, n_jobs=-1)
@@ -365,9 +366,11 @@ def select_features(
             selected = [f for f, keep in zip(feature_names, selector.support_) if keep]
 
         if verbose:
-            print(f"   ✅ RFE selected {len(selected)} features")
+            logger.info(f"   ✅ RFE selected {len(selected)} features")
             if keep_penalty_features:
-                print(f"      (including {len(penalty_features)} penalty features)")
+                logger.info(
+                    f"      (including {len(penalty_features)} penalty features)"
+                )
 
     else:
         selected = feature_names
@@ -378,7 +381,7 @@ def select_features(
             if pf not in selected and pf in feature_names:
                 selected.append(pf)
                 if verbose:
-                    print(f"   ➕ Force-added penalty feature: {pf}")
+                    logger.info(f"   ➕ Force-added penalty feature: {pf}")
 
     return selected
 
@@ -636,8 +639,8 @@ def optimize_pipeline(
     Returns:
         Tuple of (best_pipeline, search_results)
     """
-    print(f"\n🤖 Building {config['regressor']} pipeline...")
-    print(f"   Preprocessing strategy: {config['preprocessing']}")
+    logger.info(f"\n🤖 Building {config['regressor']} pipeline...")
+    logger.info(f"   Preprocessing strategy: {config['preprocessing']}")
 
     # Get regressor and param grid
     regressor, param_dist = get_regressor_and_param_grid(
@@ -695,19 +698,19 @@ def optimize_pipeline(
 
     # If best_params provided, use them directly (skip search)
     if best_params is not None:
-        print("   Using provided best hyperparameters (skipping search)")
-        print(f"      Best params: {best_params}")
-        print(f"      Features: {len(feature_names)}")
+        logger.info("   Using provided best hyperparameters (skipping search)")
+        logger.info(f"      Best params: {best_params}")
+        logger.info(f"      Features: {len(feature_names)}")
 
         # Set hyperparameters directly on pipeline
         pipeline.set_params(**best_params)
 
         # Fit pipeline on all data
-        print("\n🔧 Training pipeline with best hyperparameters...")
+        logger.info("\n🔧 Training pipeline with best hyperparameters...")
         pipeline.fit(X, y)
 
         # Evaluate on CV for consistency (even though we're not searching)
-        print("\n📊 Evaluating on CV data...")
+        logger.info("\n📊 Evaluating on CV data...")
         from sklearn.model_selection import cross_val_score
 
         cv_scores = cross_val_score(
@@ -715,7 +718,7 @@ def optimize_pipeline(
         )
         cv_score = cv_scores.mean()
 
-        print(f"   CV score: {cv_score:.4f}")
+        logger.info(f"   CV score: {cv_score:.4f}")
 
         return pipeline, {
             "best_score": cv_score,
@@ -724,14 +727,14 @@ def optimize_pipeline(
         }
 
     # Otherwise, run hyperparameter search
-    print("   Hyperparameter search:")
-    print(f"      Trials: {config['n_trials']}")
-    print(f"      CV folds: {len(cv_splits)}")
-    print(f"      Scorer: {config['scorer']}")
-    print(f"      Features: {len(feature_names)}")
+    logger.info("   Hyperparameter search:")
+    logger.info(f"      Trials: {config['n_trials']}")
+    logger.info(f"      CV folds: {len(cv_splits)}")
+    logger.info(f"      Scorer: {config['scorer']}")
+    logger.info(f"      Features: {len(feature_names)}")
 
     # Run randomized search
-    print("\n🔍 Running hyperparameter optimization...")
+    logger.info("\n🔍 Running hyperparameter optimization...")
 
     search = RandomizedSearchCV(
         pipeline,
@@ -905,17 +908,19 @@ def run_evaluate_mode(
     )
 
     if holdout_gws == 1:
-        print(f"   Holdout GW: {holdout_start_gw} (single gameweek)")
+        logger.info(f"   Holdout GW: {holdout_start_gw} (single gameweek)")
     else:
-        print(
+        logger.info(
             f"   Holdout GWs: {holdout_start_gw}-{config['end_gw']} ({holdout_gws} weeks)"
         )
 
-    print(f"   Hyperparameter trials: {config['n_trials'] // 2} (reduced for speed)")
-    print(f"   Scorer: {config['scorer']}")
+    logger.info(
+        f"   Hyperparameter trials: {config['n_trials'] // 2} (reduced for speed)"
+    )
+    logger.info(f"   Scorer: {config['scorer']}")
 
     # 1. Load training data (excluding holdout)
-    print("\n📦 Loading training data...")
+    logger.info("\n📦 Loading training data...")
     train_data = load_training_data(config["start_gw"], train_end_gw, verbose=True)
     (
         train_historical_df,
@@ -929,7 +934,7 @@ def run_evaluate_mode(
     ) = train_data
 
     # 2. Engineer features for training data
-    print("\n🔧 Engineering features for training data...")
+    logger.info("\n🔧 Engineering features for training data...")
     train_features_df, train_target, all_feature_names = engineer_features(
         train_historical_df,
         train_fixtures_df,
@@ -951,7 +956,7 @@ def run_evaluate_mode(
     X_train = cv_data[all_feature_names].copy()
     y_train = train_target[cv_data["_original_index"].values]
 
-    print("\n🔧 Feature Selection...")
+    logger.info("\n🔧 Feature Selection...")
     selected_features = select_features(
         X_train,
         y_train,
@@ -972,7 +977,7 @@ def run_evaluate_mode(
     )
 
     # 6. Evaluate on CV data
-    print("\n📊 Evaluation on Training Data (CV)...")
+    logger.info("\n📊 Evaluation on Training Data (CV)...")
     y_train_pred = best_pipeline.predict(X_train)
 
     train_metrics = evaluate_fpl_comprehensive(
@@ -983,9 +988,9 @@ def run_evaluate_mode(
     )
 
     # 7. Load and evaluate on holdout set
-    print("\n" + "=" * 80)
-    print("📊 Evaluation on Holdout Set")
-    print("=" * 80)
+    logger.info("\n" + "=" * 80)
+    logger.info("📊 Evaluation on Holdout Set")
+    logger.info("=" * 80)
 
     # Load full data including holdout
     holdout_data = load_training_data(
@@ -1022,7 +1027,7 @@ def run_evaluate_mode(
     holdout_features_filtered = holdout_features_df[holdout_mask].copy()
 
     if len(holdout_features_filtered) == 0:
-        print("   ⚠️  No holdout data found")
+        logger.warning("   ⚠️  No holdout data found")
         holdout_metrics = None
     else:
         # Add metadata columns for evaluation
@@ -1088,13 +1093,13 @@ def run_evaluate_mode(
     with open(params_path, "w") as f:
         json.dump(best_params_data, f, indent=2)
 
-    print(
+    logger.info(
         "\n✅ Evaluation complete! If results look good, run 'train' command to deploy."
     )
-    print(f"   Command: train --end-gw {config['end_gw']} [same other args]")
-    print(f"\n💾 Best hyperparameters saved to: {params_path.name}")
-    print("   To reuse these params in train mode, use:")
-    print(f"   train --use-best-params-from {params_path.name} [other args]")
+    logger.info(f"   Command: train --end-gw {config['end_gw']} [same other args]")
+    logger.info(f"\n💾 Best hyperparameters saved to: {params_path.name}")
+    logger.info("   To reuse these params in train mode, use:")
+    logger.info(f"   train --use-best-params-from {params_path.name} [other args]")
 
     return best_pipeline, selected_features, train_metrics, holdout_metrics
 
@@ -1234,10 +1239,10 @@ def run_train_mode(
         verbose,
     )
 
-    print("=" * 80)
-    print("🎯 TRAIN MODE: Full Training for Deployment")
-    print("=" * 80)
-    print("\nConfiguration:")
+    logger.info("=" * 80)
+    logger.info("🎯 TRAIN MODE: Full Training for Deployment")
+    logger.info("=" * 80)
+    logger.info("\nConfiguration:")
 
     # Load best params if provided
     best_params = None
@@ -1248,29 +1253,29 @@ def run_train_mode(
         best_params = saved_config_data["best_params"]
         selected_features_from_json = saved_config_data.get("selected_features")
 
-        print(f"   📁 Loaded from: {Path(use_best_params_from).name}")
-        print(f"   Regressor: {config['regressor']} (from saved config)")
-        print(
+        logger.info(f"   📁 Loaded from: {Path(use_best_params_from).name}")
+        logger.info(f"   Regressor: {config['regressor']} (from saved config)")
+        logger.info(
             f"   Feature selection: {config['feature_selection']} (from saved config)"
         )
-        print(f"   Preprocessing: {config['preprocessing']} (from saved config)")
-        print(f"   Scorer: {config['scorer']} (from saved config)")
-        print(
+        logger.info(f"   Preprocessing: {config['preprocessing']} (from saved config)")
+        logger.info(f"   Scorer: {config['scorer']} (from saved config)")
+        logger.info(
             f"   Keep penalty features: {config['keep_penalty_features']} (from saved config)"
         )
-        print(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
-        print("   Using saved hyperparameters (skipping search)")
-        print(
+        logger.info(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
+        logger.info("   Using saved hyperparameters (skipping search)")
+        logger.info(
             f"   Best CV score from evaluation: {saved_config_data.get('best_score', 'N/A'):.4f}"
         )
     else:
-        print(f"   Regressor: {config['regressor']}")
-        print(f"   Feature selection: {config['feature_selection']}")
-        print(f"   Preprocessing: {config['preprocessing']}")
-        print(f"   Keep penalty features: {config['keep_penalty_features']}")
-        print(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
-        print(f"   Hyperparameter trials: {config['n_trials']}")
-        print(f"   Scorer: {config['scorer']}")
+        logger.info(f"   Regressor: {config['regressor']}")
+        logger.info(f"   Feature selection: {config['feature_selection']}")
+        logger.info(f"   Preprocessing: {config['preprocessing']}")
+        logger.info(f"   Keep penalty features: {config['keep_penalty_features']}")
+        logger.info(f"   Gameweeks: GW{config['start_gw']}-{config['end_gw']}")
+        logger.info(f"   Hyperparameter trials: {config['n_trials']}")
+        logger.info(f"   Scorer: {config['scorer']}")
 
     # 1. Load data (reusable utility)
     data = load_training_data(config["start_gw"], config["end_gw"], verbose=True)
@@ -1303,11 +1308,11 @@ def run_train_mode(
     y = target
 
     # 4. Feature selection
-    print("\n🔧 Feature Selection...")
+    logger.info("\n🔧 Feature Selection...")
 
     # Use saved selected_features from JSON if available (to ensure exact same features)
     if selected_features_from_json is not None:
-        print(
+        logger.info(
             f"   Using saved feature selection from JSON ({len(selected_features_from_json)} features)"
         )
         # Verify all saved features exist
@@ -1344,7 +1349,7 @@ def run_train_mode(
 
     if best_params is None:
         # Need to run hyperparameter search (uses CV internally)
-        print("\n🔍 Running hyperparameter optimization...")
+        logger.info("\n🔍 Running hyperparameter optimization...")
         cv_splits_for_search, cv_data_for_search = create_temporal_cv_splits(
             features_df, max_folds=config["cv_folds"], verbose=True
         )
@@ -1362,12 +1367,12 @@ def run_train_mode(
         )
 
         # Now train final pipeline on ALL data with best params
-        print("\n🎯 Training final pipeline on 100% of available data...")
+        logger.info("\n🎯 Training final pipeline on 100% of available data...")
         best_pipeline.set_params(**search_results["best_params"])
         best_pipeline.fit(X_final, y_final)
     else:
         # Use provided best params, skip search entirely
-        print(
+        logger.info(
             "\n🎯 Training pipeline on 100% of available data with provided hyperparameters..."
         )
         # Build pipeline directly
@@ -1514,15 +1519,15 @@ def run_train_mode(
         metadata_path,
     )
 
-    print("\n💾 Model saved:")
-    print(f"   Pipeline (for deployment): {pipeline_path.name}")
-    print(f"   Metadata (for analysis): {metadata_path.name}")
-    print(f"   Features: {len(selected_features)}/99")
-    print(f"   Training samples: {len(y_final):,}")
+    logger.info("\n💾 Model saved:")
+    logger.info(f"   Pipeline (for deployment): {pipeline_path.name}")
+    logger.info(f"   Metadata (for analysis): {metadata_path.name}")
+    logger.info(f"   Features: {len(selected_features)}/99")
+    logger.info(f"   Training samples: {len(y_final):,}")
 
-    print("\n" + "=" * 80)
-    print("✅ PIPELINE TRAINING COMPLETE!")
-    print("=" * 80)
+    logger.info("\n" + "=" * 80)
+    logger.info("✅ PIPELINE TRAINING COMPLETE!")
+    logger.info("=" * 80)
 
     return best_pipeline, selected_features, diagnostics
 

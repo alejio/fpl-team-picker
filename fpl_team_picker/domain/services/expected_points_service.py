@@ -3,12 +3,9 @@
 from typing import Dict, Any, Optional
 import pandas as pd
 import warnings
-import logging
+from loguru import logger
 
 warnings.filterwarnings("ignore")
-
-# Set up logging
-logger = logging.getLogger(__name__)
 
 
 class ExpectedPointsService:
@@ -48,7 +45,7 @@ class ExpectedPointsService:
         self._player_form_cache = {}
 
         if self.debug:
-            print(
+            logger.debug(
                 f"🧠 ExpectedPointsService initialized - (Rule-based Form weight: {self.form_weight}, Window: {self.form_window} GWs"
             )
 
@@ -210,7 +207,7 @@ class ExpectedPointsService:
     ) -> pd.DataFrame:
         """Calculate expected points using rule-based model (internal implementation)."""
         if self.debug:
-            print(
+            logger.debug(
                 f"🔮 Calculating XP for GW{target_gameweek} (+{gameweeks_ahead - 1} ahead)"
             )
 
@@ -250,8 +247,8 @@ class ExpectedPointsService:
         )
 
         if self.debug:
-            print(f"✅ XP calculated for {len(players_xp)} players")
-            print(
+            logger.debug(f"✅ XP calculated for {len(players_xp)} players")
+            logger.debug(
                 f"📊 Average XP: {players_xp['xP'].mean():.2f}, Top XP: {players_xp['xP'].max():.2f}"
             )
 
@@ -467,23 +464,27 @@ class ExpectedPointsService:
 
             if self.debug:
                 if target_gameweek >= 8:
-                    print(
+                    logger.debug(
                         f"🔥 Using current season team strength (GW{target_gameweek})"
                     )
                 else:
-                    print(f"📊 Using weighted team strength (GW{target_gameweek})")
+                    logger.debug(
+                        f"📊 Using weighted team strength (GW{target_gameweek})"
+                    )
 
                 strongest = max(strength_ratings.items(), key=lambda x: x[1])
                 weakest = min(strength_ratings.items(), key=lambda x: x[1])
-                print(f"   Strongest: {strongest[0]} ({strongest[1]})")
-                print(f"   Weakest: {weakest[0]} ({weakest[1]})")
+                logger.debug(f"   Strongest: {strongest[0]} ({strongest[1]})")
+                logger.debug(f"   Weakest: {weakest[0]} ({weakest[1]})")
 
             self._team_strength_cache = strength_ratings
             return strength_ratings
 
         except Exception as e:
             if self.debug:
-                print(f"⚠️ Dynamic team strength failed: {e}, using static fallback")
+                logger.warning(
+                    f"⚠️ Dynamic team strength failed: {e}, using static fallback"
+                )
 
             # Fallback to static ratings
             return self._get_static_team_strength_fallback()
@@ -559,7 +560,7 @@ class ExpectedPointsService:
         total_players = len(players_with_xg)
 
         if missing_xg > 0 and self.debug:
-            print(
+            logger.debug(
                 f"⚙️ Missing xG/xA for {missing_xg}/{total_players} players - estimating statistically"
             )
 
@@ -630,7 +631,7 @@ class ExpectedPointsService:
 
         if form_data.empty:
             if self.debug:
-                print(
+                logger.debug(
                     "⚠️ No form data available - skipping form weighting (early season)"
                 )
             return players_df
@@ -658,7 +659,7 @@ class ExpectedPointsService:
         if self.debug:
             improved = (players_with_form["form_multiplier"] > 1.05).sum()
             declined = (players_with_form["form_multiplier"] < 0.95).sum()
-            print(
+            logger.debug(
                 f"📈 Form adjustments: {improved} players boosted, {declined} players reduced"
             )
 
@@ -1002,14 +1003,14 @@ class ExpectedPointsService:
             enriched_result = player_repo.get_enriched_players_dataframe()
 
             if enriched_result.is_failure:
-                print(
+                logger.warning(
                     f"⚠️ Could not load enriched data: {enriched_result.error.message}"
                 )
-                print("⚠️ Falling back to basic player data")
+                logger.warning("⚠️ Falling back to basic player data")
                 return players_with_xp
 
             enriched_players = enriched_result.value
-            print(
+            logger.info(
                 f"✅ Loaded enriched data for {len(enriched_players)} players with {len(enriched_players.columns)} additional attributes"
             )
 
@@ -1038,12 +1039,12 @@ class ExpectedPointsService:
                     else:
                         enriched_xp[col] = enriched_xp[col].fillna(0)
 
-            print(
+            logger.info(
                 f"✅ Successfully enriched {len(enriched_xp)} players with additional season statistics"
             )
             return enriched_xp
 
         except Exception as e:
             # If enrichment fails, return original data with warning
-            print(f"⚠️ Warning: Could not enrich player data - {str(e)}")
+            logger.warning(f"⚠️ Warning: Could not enrich player data - {str(e)}")
             return players_with_xp

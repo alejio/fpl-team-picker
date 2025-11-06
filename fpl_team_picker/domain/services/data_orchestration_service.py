@@ -3,6 +3,7 @@
 from typing import Dict, List, Any, Tuple, Optional
 import pandas as pd
 from datetime import datetime
+from loguru import logger
 
 from fpl_team_picker.domain.repositories.player_repository import PlayerRepository
 from fpl_team_picker.domain.repositories.team_repository import TeamRepository
@@ -326,7 +327,7 @@ class DataOrchestrationService:
         if missing_prices:
             # Warn but don't fail - filter these players out instead
             missing_pct = (len(missing_prices) / len(players)) * 100
-            print(
+            logger.warning(
                 f"⚠️ Historical prices missing for {len(missing_prices)} players ({missing_pct:.1f}%) in GW{price_gw}. "
                 f"Filtering these players from analysis. Missing IDs: {list(missing_prices)[:10]}"
             )
@@ -410,7 +411,7 @@ class DataOrchestrationService:
             else:
                 raw_players_df = client.get_raw_players_bootstrap()
         except Exception as e:
-            print(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
+            logger.warning(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
 
         # ========== Standardize ALL DataFrames for guaranteed clean data contracts ==========
 
@@ -664,7 +665,9 @@ class DataOrchestrationService:
         # Initialize robust client
         client = FPLDataClient()
 
-        print(f"🔄 Loading FPL data from database for gameweek {target_gameweek}...")
+        logger.info(
+            f"🔄 Loading FPL data from database for gameweek {target_gameweek}..."
+        )
 
         # Get base data from database using enhanced client
         players_base = client.get_current_players()
@@ -693,7 +696,7 @@ class DataOrchestrationService:
                         gw_data["event"] = gw
 
                     historical_data.append(gw_data)
-                    print(
+                    logger.debug(
                         f"✅ Loaded detailed form data for GW{gw} ({len(gw_data)} players)"
                     )
                 else:
@@ -704,15 +707,15 @@ class DataOrchestrationService:
                         if "event" not in gw_data.columns:
                             gw_data["event"] = gw
                         historical_data.append(gw_data)
-                        print(f"✅ Loaded legacy form data for GW{gw}")
+                        logger.debug(f"✅ Loaded legacy form data for GW{gw}")
             except Exception as e:
-                print(f"⚠️  No form data for GW{gw}: {str(e)[:50]}")
+                logger.warning(f"⚠️  No form data for GW{gw}: {str(e)[:50]}")
                 continue
 
         # Combine historical data for form analysis
         if historical_data:
             live_data_historical = pd.concat(historical_data, ignore_index=True)
-            print(f"📊 Combined form data from {len(historical_data)} gameweeks")
+            logger.info(f"📊 Combined form data from {len(historical_data)} gameweeks")
 
             # Enrich with position data (required for ML feature engineering)
             # gameweek_performance doesn't include position, need to merge from current_players
@@ -728,21 +731,23 @@ class DataOrchestrationService:
                     )
                     missing_position = live_data_historical["position"].isna().sum()
                     if missing_position > 0:
-                        print(
+                        logger.warning(
                             f"⚠️  Warning: {missing_position} records missing position after merge"
                         )
                     else:
-                        print("✅ Enriched historical data with position information")
+                        logger.debug(
+                            "✅ Enriched historical data with position information"
+                        )
         else:
             live_data_historical = pd.DataFrame()
-            print("⚠️  No historical form data available")
+            logger.warning("⚠️  No historical form data available")
 
         # Try to get current gameweek live data with enhanced methods
         try:
             # Try detailed gameweek performance first
             current_live_data = client.get_gameweek_performance(target_gameweek)
             if not current_live_data.empty:
-                print(
+                logger.debug(
                     f"✅ Found detailed live data for GW{target_gameweek} ({len(current_live_data)} players)"
                 )
                 # Standardize column names for compatibility
@@ -757,12 +762,14 @@ class DataOrchestrationService:
                 # Fallback to legacy live data
                 current_live_data = client.get_gameweek_live_data(target_gameweek)
                 if not current_live_data.empty:
-                    print(f"✅ Found legacy live data for GW{target_gameweek}")
+                    logger.debug(f"✅ Found legacy live data for GW{target_gameweek}")
                     # Ensure event column exists
                     if "event" not in current_live_data.columns:
                         current_live_data["event"] = target_gameweek
         except Exception as e:
-            print(f"⚠️  No current live data for GW{target_gameweek}: {str(e)[:50]}")
+            logger.warning(
+                f"⚠️  No current live data for GW{target_gameweek}: {str(e)[:50]}"
+            )
             current_live_data = pd.DataFrame()
 
         # Combine historical and current live data
@@ -774,7 +781,7 @@ class DataOrchestrationService:
 
         if all_live_data:
             live_data_combined = pd.concat(all_live_data, ignore_index=True)
-            print(
+            logger.info(
                 f"📊 Combined live data: {len(live_data_combined)} records across {len(live_data_combined['event'].unique()) if 'event' in live_data_combined.columns else 0} gameweeks"
             )
 
@@ -798,7 +805,7 @@ class DataOrchestrationService:
                         invalid_values = live_data_combined.loc[
                             invalid_mask, col
                         ].unique()
-                        print(
+                        logger.warning(
                             f"⚠️  Warning: Invalid numeric values in {col}: {invalid_values}"
                         )
                         # Fill invalid values with 0.0 instead of NaN for better data quality
@@ -948,8 +955,10 @@ class DataOrchestrationService:
         ].fillna(target_gameweek).replace(0, 1)
         players["form"] = players["total_points"].fillna(0).astype(float)
 
-        print(f"✅ Loaded {len(players)} players, {len(teams)} teams from database")
-        print(f"📅 Target GW: {target_gameweek}")
+        logger.info(
+            f"✅ Loaded {len(players)} players, {len(teams)} teams from database"
+        )
+        logger.info(f"📅 Target GW: {target_gameweek}")
 
         # Enrich historical live data with position information (required for ML features)
         # Position is not in gameweek performance data, so merge from current players
@@ -985,21 +994,21 @@ class DataOrchestrationService:
                     f"Data contract violation - fix dataset-builder."
                 )
 
-            print("✅ Enriched live data with position information")
+            logger.debug("✅ Enriched live data with position information")
 
         # Load enhanced data sources for ML feature engineering (Issue #37)
-        print("📊 Loading enhanced data sources...")
+        logger.info("📊 Loading enhanced data sources...")
         ownership_trends = client.get_derived_ownership_trends()
         value_analysis = client.get_derived_value_analysis()
         fixture_difficulty = client.get_derived_fixture_difficulty()
-        print(
+        logger.info(
             f"   ✅ Ownership trends: {len(ownership_trends)} | "
             f"Value analysis: {len(value_analysis)} | "
             f"Fixture difficulty: {len(fixture_difficulty)}"
         )
 
         # Load betting odds features (Issue #38)
-        print("🎲 Loading betting odds features...")
+        logger.info("🎲 Loading betting odds features...")
         try:
             betting_features_df = client.get_derived_betting_features()
             if (
@@ -1011,7 +1020,7 @@ class DataOrchestrationService:
                     if betting_features_df["gameweek"].nunique() > 1
                     else f"GW{betting_features_df['gameweek'].iloc[0]}"
                 )
-                print(
+                logger.info(
                     f"   ✅ Betting features: {len(betting_features_df)} records ({gw_range})"
                 )
                 # Log next GW availability for inference pipeline verification
@@ -1021,17 +1030,19 @@ class DataOrchestrationService:
                             betting_features_df["gameweek"] == target_gameweek
                         ]
                     )
-                    print(
+                    logger.debug(
                         f"   ✅ GW{target_gameweek} betting data available: {next_gw_count} player records"
                     )
                 else:
-                    print(
+                    logger.warning(
                         f"   ⚠️  GW{target_gameweek} betting data not found - will use neutral defaults"
                     )
             else:
-                print(f"   ✅ Betting features: {len(betting_features_df)} records")
+                logger.info(
+                    f"   ✅ Betting features: {len(betting_features_df)} records"
+                )
         except (AttributeError, Exception) as e:
-            print(f"   ⚠️  Betting features unavailable: {e}")
+            logger.warning(f"   ⚠️  Betting features unavailable: {e}")
             raise ValueError(f"Betting features unavailable: {e}")
 
         # Load set-piece and penalty taker data (supports per-gameweek if available)
@@ -1044,7 +1055,7 @@ class DataOrchestrationService:
                 # Fallback to bootstrap snapshot (may not have gameweek column)
                 raw_players_df = client.get_raw_players_bootstrap()
         except Exception as e:
-            print(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
+            logger.warning(f"⚠️  Could not load set-piece/penalty data: {str(e)[:80]}")
 
         # Keep only relevant columns if present
         needed_cols = [
@@ -1084,7 +1095,7 @@ class DataOrchestrationService:
         Returns:
             Dictionary with team info including picks, bank balance, etc., or None if failed
         """
-        print(f"🔄 Fetching your team from GW{previous_gameweek}...")
+        logger.info(f"🔄 Fetching your team from GW{previous_gameweek}...")
 
         try:
             from client import FPLDataClient
@@ -1094,7 +1105,7 @@ class DataOrchestrationService:
             # Get manager data
             manager_data = client.get_my_manager_data()
             if manager_data.empty:
-                print("❌ No manager data found in database")
+                logger.error("❌ No manager data found in database")
                 return None
 
             # Get picks from previous gameweek with enhanced methods
@@ -1105,21 +1116,21 @@ class DataOrchestrationService:
                 )
                 if not historical_picks.empty:
                     current_picks = historical_picks
-                    print(f"✅ Found historical picks for GW{previous_gameweek}")
+                    logger.debug(f"✅ Found historical picks for GW{previous_gameweek}")
                 else:
                     # Fallback to current picks
                     current_picks = client.get_my_current_picks()
                     if not current_picks.empty:
-                        print("⚠️ Using current picks as fallback")
+                        logger.warning("⚠️ Using current picks as fallback")
                     else:
-                        print("❌ No picks found in database")
+                        logger.error("❌ No picks found in database")
                         return None
             except Exception as e:
-                print(f"⚠️ Error getting picks: {str(e)[:50]}")
+                logger.warning(f"⚠️ Error getting picks: {str(e)[:50]}")
                 # Last resort fallback to current picks
                 current_picks = client.get_my_current_picks()
                 if current_picks.empty:
-                    print("❌ No current picks found in database")
+                    logger.error("❌ No current picks found in database")
                     return None
 
             # Convert picks to the expected format
@@ -1156,14 +1167,14 @@ class DataOrchestrationService:
                 "chips_used": chips_used,
             }
 
-            print(
+            logger.info(
                 f"✅ Loaded team from GW{previous_gameweek}: {team_info['entry_name']}"
             )
             return team_info
 
         except Exception as e:
-            print(f"❌ Error fetching team from database: {e}")
-            print("💡 Make sure manager data is available in the database")
+            logger.error(f"❌ Error fetching team from database: {e}")
+            logger.info("💡 Make sure manager data is available in the database")
             return None
 
     def _get_chip_status_internal(
@@ -1244,7 +1255,9 @@ class DataOrchestrationService:
                         columns={alt_col: standard_col}
                     )
                     found_team_col = alt_col
-                    print(f"📋 Standardized team column: {alt_col} -> {standard_col}")
+                    logger.debug(
+                        f"📋 Standardized team column: {alt_col} -> {standard_col}"
+                    )
                     break
 
             if not found_team_col:

@@ -132,7 +132,6 @@ class TestHoldoutSplitLogic:
 
     def test_single_gameweek_holdout(self):
         """Single GW holdout should calculate correctly."""
-        start_gw = 1
         end_gw = 10
         holdout_gws = 1
 
@@ -144,7 +143,6 @@ class TestHoldoutSplitLogic:
 
     def test_two_gameweeks_holdout(self):
         """Two GWs holdout should calculate correctly."""
-        start_gw = 1
         end_gw = 10
         holdout_gws = 2
 
@@ -312,7 +310,6 @@ class TestEvaluateModeValidation:
 
     def test_holdout_gameweek_range_calculation(self):
         """Holdout range should be calculated correctly."""
-        start_gw = 1
         end_gw = 10
         holdout_gws = 1
 
@@ -325,7 +322,6 @@ class TestEvaluateModeValidation:
 
     def test_holdout_two_gameweeks_range(self):
         """Two holdout GWs should create correct range."""
-        start_gw = 1
         end_gw = 10
         holdout_gws = 2
 

@@ -15,6 +15,7 @@ import joblib
 import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from loguru import logger
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
@@ -164,9 +165,9 @@ def save_pipeline(
         with open(metadata_path, "w") as f:
             json.dump(metadata, f, indent=2, default=str)
 
-    print(f"✅ Pipeline saved to {path}")
+    logger.info(f"✅ Pipeline saved to {path}")
     if metadata:
-        print(f"✅ Metadata saved to {metadata_path}")
+        logger.info(f"✅ Metadata saved to {metadata_path}")
 
 
 def load_pipeline(path: Path) -> Tuple[Pipeline, Optional[Dict]]:
@@ -363,10 +364,12 @@ def train_and_save_model(
     # Save pipeline
     save_pipeline(pipeline, Path(save_path), metadata)
 
-    print("\n✅ Model training complete!")
-    print(f"   MAE: {metadata['cv_mae_mean']:.3f} ± {metadata['cv_mae_std']:.3f}")
-    print(f"   RMSE: {metadata['cv_rmse_mean']:.3f} ± {metadata['cv_rmse_std']:.3f}")
-    print(f"   R²: {metadata['cv_r2_mean']:.3f} ± {metadata['cv_r2_std']:.3f}")
+    logger.info("\n✅ Model training complete!")
+    logger.info(f"   MAE: {metadata['cv_mae_mean']:.3f} ± {metadata['cv_mae_std']:.3f}")
+    logger.info(
+        f"   RMSE: {metadata['cv_rmse_mean']:.3f} ± {metadata['cv_rmse_std']:.3f}"
+    )
+    logger.info(f"   R²: {metadata['cv_r2_mean']:.3f} ± {metadata['cv_r2_std']:.3f}")
 
     return pipeline, metadata
 
@@ -395,9 +398,9 @@ def predict_gameweek(
     pipeline, metadata = load_pipeline(Path(pipeline_path))
 
     if metadata:
-        print(f"📊 Using {metadata.get('model_type', 'Unknown')} model")
-        print(f"   Trained on {metadata.get('training_date', 'Unknown')}")
-        print(f"   CV MAE: {metadata.get('cv_mae_mean', 0):.3f}")
+        logger.info(f"📊 Using {metadata.get('model_type', 'Unknown')} model")
+        logger.info(f"   Trained on {metadata.get('training_date', 'Unknown')}")
+        logger.info(f"   CV MAE: {metadata.get('cv_mae_mean', 0):.3f}")
 
     # Make predictions
     predictions = pipeline.predict(current_players_df)

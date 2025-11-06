@@ -3,6 +3,7 @@
 from typing import Dict, Any, List, Optional
 import pandas as pd
 import numpy as np
+from loguru import logger
 from pydantic import BaseModel, Field
 
 
@@ -652,7 +653,9 @@ class PerformanceAnalyticsService:
                     all_results.append(gw_results)
                 except Exception as e:
                     # Log error but continue with other gameweeks/algorithms
-                    print(f"⚠️ Failed to recompute GW{gw} with {algo_version}: {e}")
+                    logger.warning(
+                        f"⚠️ Failed to recompute GW{gw} with {algo_version}: {e}"
+                    )
                     continue
 
         if not all_results:

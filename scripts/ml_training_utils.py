@@ -17,6 +17,7 @@ from typing import Tuple, List, Optional
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 from sklearn.model_selection import BaseCrossValidator
 from sklearn.metrics import make_scorer, mean_absolute_error, mean_squared_error
 from scipy.stats import spearmanr
@@ -82,7 +83,7 @@ def load_training_data(
     client = FPLDataClient()
 
     if verbose:
-        print(f"\n📥 Loading training data (GW{start_gw} to GW{end_gw})...")
+        logger.info(f"\n📥 Loading training data (GW{start_gw} to GW{end_gw})...")
 
     # Load historical gameweek performance
     historical_data = []
@@ -92,10 +93,10 @@ def load_training_data(
             gw_performance["gameweek"] = gw
             historical_data.append(gw_performance)
             if verbose:
-                print(f"   ✅ GW{gw}: {len(gw_performance)} players")
+                logger.debug(f"   ✅ GW{gw}: {len(gw_performance)} players")
         else:
             if verbose:
-                print(f"   ⚠️  GW{gw}: No data available")
+                logger.warning(f"   ⚠️  GW{gw}: No data available")
 
     if not historical_data:
         raise ValueError("No historical data loaded. Check gameweek range.")
@@ -104,7 +105,7 @@ def load_training_data(
 
     # Enrich with position data
     if verbose:
-        print("\n📊 Enriching with position data...")
+        logger.info("\n📊 Enriching with position data...")
 
     players_data = client.get_current_players()
     if (
@@ -122,45 +123,47 @@ def load_training_data(
 
     missing_count = historical_df["position"].isna().sum()
     if missing_count > 0 and verbose:
-        print(f"   ⚠️  Warning: {missing_count} records missing position data")
+        logger.warning(f"   ⚠️  Warning: {missing_count} records missing position data")
 
     # Load fixtures and teams
     if verbose:
-        print("\n🏟️  Loading fixtures and teams...")
+        logger.info("\n🏟️  Loading fixtures and teams...")
     fixtures_df = client.get_fixtures_normalized()
     teams_df = client.get_current_teams()
 
     if verbose:
-        print(f"   ✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}")
+        logger.info(f"   ✅ Fixtures: {len(fixtures_df)} | Teams: {len(teams_df)}")
 
     # Load enhanced data sources
     if verbose:
-        print("\n📊 Loading enhanced data sources...")
+        logger.info("\n📊 Loading enhanced data sources...")
     ownership_trends_df = client.get_derived_ownership_trends()
     value_analysis_df = client.get_derived_value_analysis()
     fixture_difficulty_df = client.get_derived_fixture_difficulty()
 
     if verbose:
-        print(f"   ✅ Ownership trends: {len(ownership_trends_df)} records")
-        print(f"   ✅ Value analysis: {len(value_analysis_df)} records")
-        print(f"   ✅ Fixture difficulty: {len(fixture_difficulty_df)} records")
+        logger.info(f"   ✅ Ownership trends: {len(ownership_trends_df)} records")
+        logger.info(f"   ✅ Value analysis: {len(value_analysis_df)} records")
+        logger.info(f"   ✅ Fixture difficulty: {len(fixture_difficulty_df)} records")
 
     # Load betting odds features
     if verbose:
-        print("\n🎲 Loading betting odds features...")
+        logger.info("\n🎲 Loading betting odds features...")
     try:
         betting_features_df = client.get_derived_betting_features()
         if verbose:
-            print(f"   ✅ Betting features: {len(betting_features_df)} records")
+            logger.info(f"   ✅ Betting features: {len(betting_features_df)} records")
     except (AttributeError, Exception) as e:
         if verbose:
-            print(f"   ⚠️  Betting features unavailable: {e}")
-            print("   ℹ️  Continuing with neutral defaults (features will be 0/neutral)")
+            logger.warning(f"   ⚠️  Betting features unavailable: {e}")
+            logger.info(
+                "   ℹ️  Continuing with neutral defaults (features will be 0/neutral)"
+            )
         betting_features_df = pd.DataFrame()
 
     # Load raw players data for penalty/set-piece features
     if verbose:
-        print("\n⚽ Loading penalty/set-piece taker data...")
+        logger.info("\n⚽ Loading penalty/set-piece taker data...")
     try:
         raw_players_df = client.get_raw_players_bootstrap()
         required_cols = [
@@ -174,20 +177,20 @@ def load_training_data(
 
         if missing_cols:
             if verbose:
-                print(f"   ⚠️  Missing penalty columns: {missing_cols}")
+                logger.warning(f"   ⚠️  Missing penalty columns: {missing_cols}")
             raw_players_df = pd.DataFrame()
         else:
             if verbose:
-                print(f"   ✅ Loaded penalty data: {len(raw_players_df)} players")
+                logger.info(f"   ✅ Loaded penalty data: {len(raw_players_df)} players")
     except Exception as e:
         if verbose:
-            print(f"   ❌ Error loading penalty data: {e}")
+            logger.error(f"   ❌ Error loading penalty data: {e}")
         raw_players_df = pd.DataFrame()
 
     if verbose:
-        print(f"\n✅ Total records: {len(historical_df):,}")
-        print(f"   Unique players: {historical_df['player_id'].nunique():,}")
-        print(f"   Gameweeks: {sorted(historical_df['gameweek'].unique())}")
+        logger.info(f"\n✅ Total records: {len(historical_df):,}")
+        logger.info(f"   Unique players: {historical_df['player_id'].nunique():,}")
+        logger.info(f"   Gameweeks: {sorted(historical_df['gameweek'].unique())}")
 
     return (
         historical_df,
@@ -230,11 +233,13 @@ def engineer_features(
         Tuple of (features_df, target_array, feature_column_names)
     """
     if verbose:
-        print("\n🔧 Engineering features (FPLFeatureEngineer with 99 features)...")
+        logger.info(
+            "\n🔧 Engineering features (FPLFeatureEngineer with 99 features)..."
+        )
 
     # Calculate per-gameweek team strength (no data leakage)
     if verbose:
-        print("   📊 Calculating per-gameweek team strength (leak-free)...")
+        logger.info("   📊 Calculating per-gameweek team strength (leak-free)...")
 
     start_gw = 6  # First trainable gameweek (needs GW1-5 for rolling features)
     end_gw = historical_df["gameweek"].max()
@@ -245,7 +250,7 @@ def engineer_features(
     )
 
     if verbose:
-        print(f"   ✅ Team strength calculated for GW{start_gw}-{end_gw}")
+        logger.info(f"   ✅ Team strength calculated for GW{start_gw}-{end_gw}")
 
     # Initialize feature engineer
     feature_engineer = FPLFeatureEngineer(
@@ -267,16 +272,16 @@ def engineer_features(
 
     # Transform
     if verbose:
-        print("   🔄 Transforming data...")
+        logger.info("   🔄 Transforming data...")
 
     features_df = feature_engineer.fit_transform(historical_df)
     target = historical_df["total_points"].values
     feature_names = feature_engineer.get_feature_names_out()
 
     if verbose:
-        print(f"   ✅ Features shape: {features_df.shape}")
-        print(f"   ✅ Target shape: {target.shape}")
-        print(f"   ✅ Feature count: {len(feature_names)}")
+        logger.info(f"   ✅ Features shape: {features_df.shape}")
+        logger.info(f"   ✅ Target shape: {target.shape}")
+        logger.info(f"   ✅ Feature count: {len(feature_names)}")
 
     # Add metadata columns back for CV splitting and evaluation
     # CRITICAL: Sort historical_df to match feature_df order (FPLFeatureEngineer sorts internally)
@@ -312,7 +317,7 @@ def create_temporal_cv_splits(
         - cv_data: Filtered DataFrame (GW6+)
     """
     if verbose:
-        print("\n📊 Creating temporal CV splits (walk-forward validation)...")
+        logger.info("\n📊 Creating temporal CV splits (walk-forward validation)...")
 
     # Filter to GW6+ (need 5 preceding GWs for features)
     cv_data = features_df[features_df["gameweek"] >= 6].copy()
@@ -347,13 +352,13 @@ def create_temporal_cv_splits(
         cv_splits.append((train_idx, test_idx))
 
         if verbose:
-            print(
+            logger.debug(
                 f"   Fold {i + 1}: Train on GW{min(train_gws)}-{max(train_gws)} "
                 f"({len(train_idx)} samples) → Test on GW{test_gw} ({len(test_idx)} samples)"
             )
 
     if verbose:
-        print(f"\n✅ Created {len(cv_splits)} temporal CV folds")
+        logger.info(f"\n✅ Created {len(cv_splits)} temporal CV folds")
 
     return cv_splits, cv_data
 
@@ -387,15 +392,15 @@ def evaluate_predictions(
     }
 
     if verbose:
-        print("\n📊 Evaluation Metrics:")
-        print(f"   MAE: {mae:.3f}")
-        print(f"   RMSE: {rmse:.3f}")
-        print(f"   Spearman Correlation: {correlation:.3f}")
+        logger.info("\n📊 Evaluation Metrics:")
+        logger.info(f"   MAE: {mae:.3f}")
+        logger.info(f"   RMSE: {rmse:.3f}")
+        logger.info(f"   Spearman Correlation: {correlation:.3f}")
 
     # Per-position metrics
     if position is not None:
         if verbose:
-            print("\n📊 Per-Position Metrics:")
+            logger.info("\n📊 Per-Position Metrics:")
 
         for pos in ["GKP", "DEF", "MID", "FWD"]:
             mask = position == pos
@@ -409,7 +414,7 @@ def evaluate_predictions(
                 metrics[f"{pos}_correlation"] = pos_corr
 
                 if verbose:
-                    print(
+                    logger.info(
                         f"   {pos}: MAE={pos_mae:.3f}, RMSE={pos_rmse:.3f}, Corr={pos_corr:.3f}"
                     )
 
@@ -712,25 +717,25 @@ def evaluate_fpl_comprehensive(
     metrics["r2"] = r2
 
     if verbose:
-        print("\n📈 Overall Metrics:")
-        print(f"   MAE:  {mae:.3f} points")
-        print(f"   RMSE: {rmse:.3f} points")
-        print(f"   R²:   {r2:.3f}")
+        logger.info("\n📈 Overall Metrics:")
+        logger.info(f"   MAE:  {mae:.3f} points")
+        logger.info(f"   RMSE: {rmse:.3f} points")
+        logger.info(f"   R²:   {r2:.3f}")
 
     # FPL-specific strategic metrics
     rank_corr, _ = spearmanr(eval_df["actual"], eval_df["predicted"])
     metrics["spearman_correlation"] = rank_corr
 
     if verbose:
-        print("\n🎯 FPL Strategic Metrics:")
-        print(f"   Spearman correlation (ranking): {rank_corr:.3f}")
+        logger.info("\n🎯 FPL Strategic Metrics:")
+        logger.info(f"   Spearman correlation (ranking): {rank_corr:.3f}")
 
     # Top-15 selection and captain accuracy per gameweek
     top15_overlaps = []
     captain_hits = []
 
     if verbose:
-        print("\n📅 Per-Gameweek Strategic Performance:")
+        logger.info("\n📅 Per-Gameweek Strategic Performance:")
 
     for gw in sorted(eval_df["gameweek"].unique()):
         gw_data = eval_df[eval_df["gameweek"] == gw]
@@ -748,7 +753,7 @@ def evaluate_fpl_comprehensive(
         captain_hits.append(captain_correct)
 
         if verbose:
-            print(
+            logger.info(
                 f"   GW{gw}: Top-15 overlap {overlap}/15 ({100 * overlap / 15:.0f}%), "
                 f"Captain {'✓' if captain_correct else '✗'}"
             )
@@ -759,7 +764,7 @@ def evaluate_fpl_comprehensive(
     # Position-specific metrics
     if "position" in eval_df.columns:
         if verbose:
-            print("\n📊 Position-Specific MAE:")
+            logger.info("\n📊 Position-Specific MAE:")
 
         for position in ["GKP", "DEF", "MID", "FWD"]:
             pos_mask = eval_df["position"] == position
@@ -770,11 +775,11 @@ def evaluate_fpl_comprehensive(
                 metrics[f"{position}_mae"] = pos_mae
 
                 if verbose:
-                    print(f"   {position}: {pos_mae:.3f} points")
+                    logger.info(f"   {position}: {pos_mae:.3f} points")
 
     # Gameweek-specific metrics with chaos detection
     if verbose:
-        print("\n📅 Gameweek Analysis (with chaos detection):")
+        logger.info("\n📅 Gameweek Analysis (with chaos detection):")
 
     gw_metrics = []
     for gw in sorted(eval_df["gameweek"].unique()):
@@ -812,7 +817,7 @@ def evaluate_fpl_comprehensive(
         chaos_str = f" ⚠️ [{', '.join(chaos_flags)}]" if chaos_flags else ""
 
         if verbose:
-            print(
+            logger.info(
                 f"   GW{gw}: MAE {gw_mae:.3f} | Std {actual_std:.2f} | "
                 f"Max {actual_max:.0f} | 10+ pts: {high_scorers} | "
                 f"0 pts: {zero_pct:.0f}%{chaos_str}"

@@ -22,7 +22,7 @@ import numpy as np
 import warnings
 from typing import Dict, Optional
 from pathlib import Path
-import logging
+from loguru import logger
 
 from sklearn.pipeline import Pipeline
 from .ml_pipeline_factory import (
@@ -34,8 +34,9 @@ from .ml_pipeline_factory import (
 
 warnings.filterwarnings("ignore")
 
-# Set up logging
-logger = logging.getLogger(__name__)
+# Module-specific logger to avoid global configuration pollution
+# This logger is bound to this module and doesn't affect other modules
+_service_logger = logger.bind(service="ml_expected_points")
 
 
 class MLExpectedPointsService:
@@ -90,11 +91,17 @@ class MLExpectedPointsService:
         if model_path and Path(model_path).exists():
             self._load_pretrained_model()
 
+        self._log_debug(
+            f"Initialized ML XP Service: model_type={model_type}, ensemble_weight={ensemble_rule_weight}"
+        )
+
+    def _log_debug(self, message: str):
+        """
+        Log debug message only if debug mode is enabled.
+        Uses module-specific logger to avoid global configuration pollution.
+        """
         if self.debug:
-            logger.setLevel(logging.DEBUG)
-            logger.debug(
-                f"Initialized ML XP Service: model_type={model_type}, ensemble_weight={ensemble_rule_weight}"
-            )
+            _service_logger.debug(message)
 
     def _load_pretrained_model(self):
         """
@@ -119,10 +126,9 @@ class MLExpectedPointsService:
 
             if not has_feature_engineer:
                 # TPOT model or bare sklearn pipeline - needs feature engineering wrapper
-                if self.debug:
-                    logger.debug(
-                        "⚙️  Bare sklearn pipeline detected (likely TPOT) - will wrap with FPLFeatureEngineer"
-                    )
+                self._log_debug(
+                    "⚙️  Bare sklearn pipeline detected (likely TPOT) - will wrap with FPLFeatureEngineer"
+                )
 
                 # Store the loaded model - we'll create the wrapper in calculate_expected_points
                 # after we have historical data to fit the feature_engineer
@@ -135,11 +141,10 @@ class MLExpectedPointsService:
                 self.pipeline = loaded_pipeline
                 self.needs_feature_wrapper = False
 
-            if self.debug:
-                logger.debug(f"✅ Loaded pre-trained model from {self.model_path}")
-                if self.pipeline_metadata:
-                    mae = self.pipeline_metadata.get("cv_mae_mean", "N/A")
-                    logger.debug(f"   Model CV MAE: {mae}")
+            self._log_debug(f"✅ Loaded pre-trained model from {self.model_path}")
+            if self.debug and self.pipeline_metadata:
+                mae = self.pipeline_metadata.get("cv_mae_mean", "N/A")
+                self._log_debug(f"   Model CV MAE: {mae}")
         except Exception as e:
             raise ValueError(
                 f"Failed to load pre-trained model from {self.model_path}: {e}\n"
@@ -166,8 +171,7 @@ class MLExpectedPointsService:
         Returns:
             Trained sklearn Pipeline
         """
-        if self.debug:
-            logger.debug(f"Training new {self.model_type} pipeline...")
+        self._log_debug(f"Training new {self.model_type} pipeline...")
 
         # Validate position column exists (should be enriched upstream by DataOrchestrationService)
         if "position" not in historical_df.columns:
@@ -231,14 +235,15 @@ class MLExpectedPointsService:
             all_features_with_meta["gameweek"] >= 6
         ].copy()
 
-        if self.debug:
-            print(
-                f"🔧 ML Training: {len(historical_df)} records → {len(train_features)} after GW6+ filter"
-            )
-            print(f"   Training GWs: {sorted(train_features['gameweek'].unique())}")
-            print(
-                f"   Target stats: mean={train_features['total_points'].mean():.2f}, max={train_features['total_points'].max()}"
-            )
+        self._log_debug(
+            f"🔧 ML Training: {len(historical_df)} records → {len(train_features)} after GW6+ filter"
+        )
+        self._log_debug(
+            f"   Training GWs: {sorted(train_features['gameweek'].unique())}"
+        )
+        self._log_debug(
+            f"   Target stats: mean={train_features['total_points'].mean():.2f}, max={train_features['total_points'].max()}"
+        )
 
         if len(train_features) < 100:
             raise ValueError(
@@ -253,8 +258,7 @@ class MLExpectedPointsService:
         model = pipeline.named_steps["model"]
         model.fit(X_train, y_train)
 
-        if self.debug:
-            logger.debug(f"✅ Model trained on {len(train_features)} GW6+ samples")
+        self._log_debug(f"✅ Model trained on {len(train_features)} GW6+ samples")
 
         return pipeline
 
@@ -339,10 +343,9 @@ class MLExpectedPointsService:
                 from .ml_feature_engineering import FPLFeatureEngineer
                 from .ml_pipeline_factory import get_team_strength_ratings
 
-                if self.debug:
-                    logger.debug(
-                        "🔧 Creating feature engineering wrapper for TPOT model..."
-                    )
+                self._log_debug(
+                    "🔧 Creating feature engineering wrapper for TPOT model..."
+                )
 
                 # Use target_gameweek for dynamic team strength (important for fixture difficulty)
                 team_strength = get_team_strength_ratings(
@@ -390,10 +393,9 @@ class MLExpectedPointsService:
 
                 # Fit ONLY the feature_engineer step (TPOT model is already fitted)
                 # We fit on historical data so rolling features are calculated correctly
-                if self.debug:
-                    logger.debug(
-                        f"   Fitting feature_engineer on {len(live_data)} historical samples..."
-                    )
+                self._log_debug(
+                    f"   Fitting feature_engineer on {len(live_data)} historical samples..."
+                )
 
                 # Fit only the feature engineer on historical data
                 feature_engineer.fit(live_data, live_data["total_points"])
@@ -402,8 +404,7 @@ class MLExpectedPointsService:
                 self.pipeline = wrapper_pipeline
                 self.needs_feature_wrapper = False  # Don't wrap again
 
-                if self.debug:
-                    logger.debug("   ✅ Feature engineering wrapper created and fitted")
+                self._log_debug("   ✅ Feature engineering wrapper created and fitted")
             else:
                 # Standard pipeline with feature_engineer already included
                 # Update context if needed
@@ -432,10 +433,9 @@ class MLExpectedPointsService:
                         team_strength if team_strength else None
                     )
 
-                    if self.debug:
-                        logger.debug(
-                            "✅ Updated FPLFeatureEngineer context (fixtures, teams, team_strength)"
-                        )
+                    self._log_debug(
+                        "✅ Updated FPLFeatureEngineer context (fixtures, teams, team_strength)"
+                    )
 
             # Prepare current gameweek data for prediction
             # Need to add gameweek column and ensure all required columns exist
@@ -525,11 +525,11 @@ class MLExpectedPointsService:
                 missing_players = result.loc[
                     missing_predictions, ["player_id", "web_name"]
                 ]
-                logger.error(
+                _service_logger.error(
                     f"ML prediction failed for {missing_predictions.sum()} players: "
                     f"{missing_players['web_name'].tolist()}"
                 )
-                logger.error(
+                _service_logger.error(
                     "This indicates upstream data quality issues (missing features, "
                     "insufficient historical data, or feature engineering failures)"
                 )
@@ -544,7 +544,7 @@ class MLExpectedPointsService:
                 missing_players = result.loc[
                     missing_uncertainty, ["player_id", "web_name"]
                 ]
-                logger.error(
+                _service_logger.error(
                     f"Uncertainty extraction failed for {missing_uncertainty.sum()} players: "
                     f"{missing_players['web_name'].tolist()}"
                 )
@@ -586,24 +586,24 @@ class MLExpectedPointsService:
                     # For now, keep ML uncertainty scaled by its weight
                     result["xP_uncertainty"] = ml_weight * result["xP_uncertainty"]
 
-                    if self.debug:
-                        logger.debug(
-                            f"Created ensemble: ML={ml_weight:.2f}, Rule={self.ensemble_rule_weight:.2f}"
-                        )
+                    self._log_debug(
+                        f"Created ensemble: ML={ml_weight:.2f}, Rule={self.ensemble_rule_weight:.2f}"
+                    )
 
                 except Exception as e:
-                    logger.warning(f"Rule-based ensemble failed, using pure ML: {e}")
+                    _service_logger.warning(
+                        f"Rule-based ensemble failed, using pure ML: {e}"
+                    )
 
-            if self.debug:
-                logger.debug(f"Generated ML predictions for {len(result)} players")
-                logger.debug(
-                    f"xP range: {result['xP'].min():.2f} - {result['xP'].max():.2f}"
-                )
+            self._log_debug(f"Generated ML predictions for {len(result)} players")
+            self._log_debug(
+                f"xP range: {result['xP'].min():.2f} - {result['xP'].max():.2f}"
+            )
 
             return result
 
         except Exception as e:
-            logger.error(f"ML XP calculation failed: {str(e)}")
+            _service_logger.error(f"ML XP calculation failed: {str(e)}")
             raise
 
     def save_models(self, filepath: str):
@@ -618,8 +618,7 @@ class MLExpectedPointsService:
 
         save_pipeline(self.pipeline, Path(filepath), self.pipeline_metadata)
 
-        if self.debug:
-            logger.debug(f"Saved pipeline to {filepath}")
+        self._log_debug(f"Saved pipeline to {filepath}")
 
     def load_models(self, filepath: str):
         """
@@ -631,8 +630,7 @@ class MLExpectedPointsService:
         self.model_path = filepath
         self._load_pretrained_model()
 
-        if self.debug:
-            logger.debug(f"Loaded pipeline from {filepath}")
+        self._log_debug(f"Loaded pipeline from {filepath}")
 
     def _extract_uncertainty(self, X: pd.DataFrame) -> np.ndarray:
         """
@@ -722,7 +720,7 @@ class MLExpectedPointsService:
                     else:
                         # Fallback: if no transform method, skip transformation
                         # This shouldn't happen for RFE, but handle it gracefully
-                        logger.warning(
+                        _service_logger.warning(
                             f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
                             "Skipping transformation step."
                         )
@@ -735,16 +733,15 @@ class MLExpectedPointsService:
                 # Calculate standard deviation across trees
                 uncertainty = np.std(tree_predictions, axis=0)
 
-                if self.debug:
-                    logger.debug(
-                        f"✅ Extracted uncertainty from {len(actual_model.estimators_)} RF trees. "
-                        f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
-                    )
+                self._log_debug(
+                    f"✅ Extracted uncertainty from {len(actual_model.estimators_)} RF trees. "
+                    f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+                )
 
                 return uncertainty
 
             except Exception as e:
-                logger.error(
+                _service_logger.error(
                     f"Failed to extract Random Forest uncertainty. "
                     f"Model type: {type(actual_model).__name__}, "
                     f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
@@ -757,10 +754,9 @@ class MLExpectedPointsService:
                 ) from e
 
         # No uncertainty available for non-ensemble models
-        if self.debug:
-            logger.debug(
-                f"Model type {type(actual_model).__name__} does not support uncertainty extraction"
-            )
+        self._log_debug(
+            f"Model type {type(actual_model).__name__} does not support uncertainty extraction"
+        )
         return np.zeros(len(X))
 
     def get_feature_importance(self) -> pd.DataFrame:
