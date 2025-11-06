@@ -60,24 +60,28 @@ class TestCaptainRecommendationStructure:
         assert "differential" in result
 
         # Check captain structure
+        # NOTE: With 2025/26 enhancements, Salah (Easy fixture) now beats Haaland (Average fixture)
+        # despite lower xP due to matchup quality bonus (20% vs 10%)
         captain = result["captain"]
         assert isinstance(captain, dict)
-        assert captain["web_name"] == "Haaland"  # Highest xP
-        assert captain["xP"] == 9.2
-        assert captain["captain_points"] == 18.4  # xP * 2
+        assert captain["web_name"] == "Salah"  # Best fixture-adjusted score
+        assert captain["xP"] == 8.5
+        assert captain["captain_points"] == 17.0  # xP * 2
 
         # Check vice captain
         vice = result["vice_captain"]
         assert isinstance(vice, dict)
-        assert vice["web_name"] == "Salah"  # Second highest xP
+        assert vice["web_name"] == "Haaland"  # Second best fixture-adjusted score
 
         # Check top candidates
         assert isinstance(result["top_candidates"], list)
         assert len(result["top_candidates"]) == 3
 
-        # Check metrics
-        assert result["captain_upside"] == 18.4
-        assert result["differential"] > 0
+        # Check metrics (updated for new captain)
+        assert result["captain_upside"] == 17.0
+        # Note: differential can be negative when fixture quality bonus overcomes higher base xP
+        # Salah (17.0 base + 20% bonus = 20.4) beats Haaland (18.4 base + 10% bonus = 20.24)
+        assert abs(result["differential"] - (-1.4)) < 0.01  # Approximate equality
 
     def test_captain_candidate_structure(self):
         """Test that each candidate has all required fields."""

@@ -323,20 +323,67 @@ class OptimizationService:
 
             risk_adjusted_score = base_score / (1 + uncertainty_penalty)
 
-            # Template protection: Boost high ownership players (>50%)
+            # Template protection + Matchup quality: Boost high ownership in good fixtures
+            # UPGRADED 2025/26: Increased from 5-10% to 20-40% + betting odds integration
+            # Rationale: Template captains (Haaland 60%) vs weak teams MUST be captained
             ownership_bonus = 0
-            if has_ownership and ownership_pct > 50:
-                # Template captain (>50% owned) gets 5-10% bonus
-                # This protects against big rank swings if they haul
-                ownership_bonus = min((ownership_pct - 50) / 100, 0.10)  # Max 10% bonus
+            matchup_bonus = 0
 
-            final_score = risk_adjusted_score * (1 + ownership_bonus)
+            # Check if betting odds available
+            has_betting_odds = (
+                "team_win_probability" in player and "team_expected_goals" in player
+            )
+
+            if has_ownership and ownership_pct > 50:
+                # TEMPLATE PROTECTION (20-40% boost)
+                # Ownership factor: 50% = 0.0, 70%+ = 1.0
+                ownership_factor = min((ownership_pct - 50) / 20, 1.0)
+
+                # Fixture quality from betting odds (preferred) or fixture outlook (fallback)
+                if has_betting_odds:
+                    # Use win probability (0.33 = neutral, 0.70+ = strong favorite)
+                    win_prob = player.get("team_win_probability", 0.33)
+                    fixture_quality = min(win_prob / 0.70, 1.0)  # Normalize [0, 1]
+                else:
+                    # Fallback to fixture outlook
+                    fixture_outlook_str = player.get("fixture_outlook", "")
+                    if "Easy" in fixture_outlook_str or "🟢" in fixture_outlook_str:
+                        fixture_quality = 1.0  # Easy fixture
+                    elif "Hard" in fixture_outlook_str or "🔴" in fixture_outlook_str:
+                        fixture_quality = 0.2  # Hard fixture
+                    else:
+                        fixture_quality = 0.5  # Average fixture
+
+                # Template protection: up to 40% boost
+                # Example: Haaland 60% owned, 75% win prob → 40% boost
+                ownership_bonus = ownership_factor * fixture_quality * 0.40
+
+            # MATCHUP QUALITY (0-25% boost for ALL players)
+            # Rewards attacking potential regardless of ownership
+            if has_betting_odds:
+                # Expected goals as proxy for attacking potential
+                team_xg = player.get("team_expected_goals", 1.25)
+                # Normalize: 1.25 = neutral (PL average), 2.0+ = elite matchup
+                xg_factor = min(max((team_xg - 1.0) / 1.0, 0.0), 1.0)  # [0, 1]
+                matchup_bonus = xg_factor * 0.25  # Up to 25% boost
+            else:
+                # Fallback: use fixture outlook for matchup quality
+                fixture_outlook_str = player.get("fixture_outlook", "")
+                if "Easy" in fixture_outlook_str or "🟢" in fixture_outlook_str:
+                    matchup_bonus = 0.20  # Good matchup
+                elif "Hard" in fixture_outlook_str or "🔴" in fixture_outlook_str:
+                    matchup_bonus = 0.0  # Poor matchup
+                else:
+                    matchup_bonus = 0.10  # Average matchup
+
+            final_score = risk_adjusted_score * (1 + ownership_bonus + matchup_bonus)
 
             # Store scoring components for analysis
             player["_captain_score"] = final_score
             player["_base_score"] = base_score
             player["_uncertainty_penalty"] = uncertainty_penalty
             player["_ownership_bonus"] = ownership_bonus
+            player["_matchup_bonus"] = matchup_bonus
 
         # Sort by enhanced captain score
         captain_candidates = sorted(
@@ -424,8 +471,13 @@ class OptimizationService:
                 # Add template flag
                 candidate["is_template"] = ownership_pct > 50
 
-            # Add risk-adjusted score
+            # Add risk-adjusted score and scoring components (always present)
             candidate["captain_score"] = player.get("_captain_score", captain_potential)
+            candidate["base_score"] = player.get("_base_score", captain_potential)
+            candidate["matchup_bonus"] = player.get("_matchup_bonus", 0)
+            # Add ownership_bonus even if 0 (for consistent API)
+            if not has_ownership:
+                candidate["ownership_bonus"] = 0
 
             top_candidates.append(candidate)
 
@@ -1141,6 +1193,63 @@ class OptimizationService:
 
             if candidates.empty:
                 return None
+
+            # FILTER: Uncertainty-based differential strategy (2025/26 upgrade)
+            # Allow differentials IF model is confident (low uncertainty)
+            # This preserves asymmetric information advantage
+            if "selected_by_percent" in candidates.columns:
+
+                def is_valid_differential_target(row):
+                    """
+                    Smart filter using prediction uncertainty.
+
+                    Logic:
+                    1. Template/quality players (>15% owned, >£5.5m) → Always valid
+                    2. Premiums (>£9m) → Always valid (proven players)
+                    3. Differentials (<15% owned) → Valid IF:
+                       - High xP/price (>1.0) AND
+                       - Low uncertainty (<30% of xP)
+
+                    Example:
+                    - Munetsi: 6.0 xP ± 0.8, £4.5m → 1.33 xP/£, 13% uncertainty → ALLOW
+                    - Cullen: 4.0 xP ± 2.0, £4.6m → 0.87 xP/£, 50% uncertainty → BLOCK
+                    """
+                    price = row["price"]
+                    ownership = row["selected_by_percent"]
+                    xp = row[xp_column]
+
+                    # Route 1: Template/quality players (safe bets)
+                    if ownership >= 15.0 and price >= 5.5:
+                        return True
+
+                    # Route 2: Premium exception (proven track record)
+                    if price >= 9.0:
+                        return True
+
+                    # Route 3: Differential - require confident prediction
+                    if ownership < 15.0:
+                        xp_per_price = xp / max(price, 0.1)
+
+                        # Need strong value signal (>1.0 xP per £m)
+                        if xp_per_price < 1.0:
+                            return False  # Insufficient value
+
+                        # Check prediction confidence via uncertainty
+                        uncertainty = row.get("xP_uncertainty", 0)
+                        uncertainty_ratio = uncertainty / max(xp, 0.1)
+
+                        # Allow if confident prediction (<30% uncertainty)
+                        # Reject if uncertain (>30% uncertainty)
+                        return uncertainty_ratio < 0.30
+
+                    return True  # Default allow
+
+                valid_mask = candidates.apply(is_valid_differential_target, axis=1)
+                valid_targets = candidates[valid_mask]
+
+                # Apply filter if it doesn't eliminate all options
+                if not valid_targets.empty:
+                    candidates = valid_targets
 
             # Prefer higher xP with randomness
             topk = min(10, len(candidates))
