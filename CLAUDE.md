@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Fantasy Premier League (FPL) analysis suite with season-start team building and weekly gameweek management. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
+Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-start team building and weekly gameweek management. 2025-2026 season is in progress. We are competing in the FPL league and are using this tool to help us win. The tool is underperforming and needs to be improved. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
 
 ## Architecture
 
@@ -42,8 +42,6 @@ Install: `uv sync`
 **Leak-free**: All features use shift(1) or historical lookback. Betting odds are forward-looking (available pre-match) - no shift needed.
 
 ## ML Pipeline Training
-
-**⚠️ CRITICAL**: TPOT's auto-ML RFE drops penalty features (ranks 4-8 by permutation importance) due to MDI bias. Use custom pipeline instead.
 
 **Reusable Training Infrastructure** (`scripts/ml_training_utils.py`):
 - `load_training_data()` - Load all 8 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players)
@@ -170,6 +168,6 @@ See `fpl_rules.md`. Key: 2 GKP, 5 DEF, 5 MID, 3 FWD; £100m budget; max 3 player
 
 ## Tech Stack
 
-Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
+uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
 
 **Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models, repository pattern, 29/29 tests passing
