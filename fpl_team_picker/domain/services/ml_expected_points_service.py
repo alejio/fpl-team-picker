@@ -606,6 +606,223 @@ class MLExpectedPointsService:
             _service_logger.error(f"ML XP calculation failed: {str(e)}")
             raise
 
+    def calculate_5gw_expected_points(
+        self,
+        players_data: pd.DataFrame,
+        teams_data: pd.DataFrame,
+        xg_rates_data: pd.DataFrame,
+        fixtures_data: pd.DataFrame,
+        target_gameweek: int,
+        live_data: pd.DataFrame,
+        rule_based_model=None,
+        ownership_trends_df: Optional[pd.DataFrame] = None,
+        value_analysis_df: Optional[pd.DataFrame] = None,
+        fixture_difficulty_df: Optional[pd.DataFrame] = None,
+        raw_players_df: Optional[pd.DataFrame] = None,
+        betting_features_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
+        """
+        Calculate 5-gameweek expected points using cascading predictions.
+
+        This method predicts each of the next 5 gameweeks sequentially, using
+        predictions from earlier gameweeks to inform rolling features for later ones.
+        This ensures rolling features (e.g., rolling_5gw_points) remain valid.
+
+        Strategy:
+        1. Predict GW+1 using actual historical data
+        2. Predict GW+2 using historical data + predicted GW+1 points
+        3. Predict GW+3 using historical data + predicted GW+1-2 points
+        4. Continue for GW+4 and GW+5
+        5. Sum all 5 predictions to get total 5gw xP
+
+        Args:
+            players_data: Current player data
+            teams_data: Team data
+            xg_rates_data: xG rates data
+            fixtures_data: Fixtures data
+            target_gameweek: Starting gameweek (will predict GW+1 through GW+5)
+            live_data: Historical live gameweek data (actual results up to target_gameweek)
+            rule_based_model: Optional rule-based model for ensemble
+            ownership_trends_df: Ownership trends data
+            value_analysis_df: Value analysis data
+            fixture_difficulty_df: Fixture difficulty data
+            raw_players_df: Raw players data
+            betting_features_df: Betting odds features data
+
+        Returns:
+            DataFrame with:
+            - ml_xP: 5-gameweek total expected points
+            - xP_uncertainty: Combined uncertainty (sqrt of sum of variances)
+            - xP: Same as ml_xP (for compatibility)
+            - xP_gw1, xP_gw2, ..., xP_gw5: Per-gameweek predictions (for analysis)
+        """
+        if self.pipeline is None:
+            raise ValueError("Pipeline not initialized. Train or load a model first.")
+
+        self._log_debug(
+            f"🔄 Calculating 5GW ML xP using cascading predictions starting from GW{target_gameweek}"
+        )
+
+        # Start with actual historical data
+        historical_data = live_data.copy()
+        if historical_data.empty:
+            raise ValueError(
+                "No historical live_data provided for cascading predictions"
+            )
+
+        # Store predictions for each gameweek
+        per_gw_predictions = []
+        per_gw_uncertainties = []
+        per_gw_results = []
+
+        # Predict each of the next 5 gameweeks sequentially
+        for gw_offset in range(1, 6):
+            current_gw = target_gameweek + gw_offset
+
+            self._log_debug(
+                f"  📊 Predicting GW{current_gw} (using data up to GW{current_gw - 1})"
+            )
+
+            # Predict this gameweek using current historical data
+            result = self.calculate_expected_points(
+                players_data=players_data,
+                teams_data=teams_data,
+                xg_rates_data=xg_rates_data,
+                fixtures_data=fixtures_data,
+                target_gameweek=current_gw,
+                live_data=historical_data,
+                gameweeks_ahead=1,
+                rule_based_model=rule_based_model,
+                ownership_trends_df=ownership_trends_df,
+                value_analysis_df=value_analysis_df,
+                fixture_difficulty_df=fixture_difficulty_df,
+                raw_players_df=raw_players_df,
+                betting_features_df=betting_features_df,
+            )
+
+            # Extract predictions and uncertainties
+            per_gw_predictions.append(result["ml_xP"].values)
+            per_gw_uncertainties.append(result["xP_uncertainty"].values)
+            per_gw_results.append(result)
+
+            # Create synthetic gameweek data from predictions for next iteration
+            # This allows rolling features to use predicted points for future gameweeks
+            synthetic_gw_data = self._create_synthetic_gameweek_data(
+                players_data=players_data,
+                predictions=result,
+                gameweek=current_gw,
+            )
+
+            # Add synthetic data to historical data for next iteration
+            historical_data = pd.concat(
+                [historical_data, synthetic_gw_data], ignore_index=True
+            )
+
+        # Combine results: sum predictions, combine uncertainties
+        result_5gw = players_data.copy()
+
+        # Sum all 5 gameweek predictions
+        xp_5gw = np.sum(per_gw_predictions, axis=0)
+
+        # Combine uncertainties: sqrt(sum of variances) for independent predictions
+        # This assumes predictions are independent (reasonable for different gameweeks)
+        uncertainty_5gw = np.sqrt(np.sum(np.square(per_gw_uncertainties), axis=0))
+
+        result_5gw["ml_xP"] = xp_5gw
+        result_5gw["xP"] = xp_5gw
+        result_5gw["xP_5gw"] = xp_5gw  # Alias for compatibility
+        result_5gw["xP_uncertainty"] = uncertainty_5gw
+
+        # Add per-gameweek predictions for analysis/debugging
+        for i, gw_result in enumerate(per_gw_results):
+            gw_num = target_gameweek + i + 1
+            result_5gw[f"xP_gw{gw_num}"] = gw_result["ml_xP"].values
+            result_5gw[f"uncertainty_gw{gw_num}"] = gw_result["xP_uncertainty"].values
+
+        self._log_debug(
+            f"✅ 5GW predictions complete: Total xP range {xp_5gw.min():.2f} - {xp_5gw.max():.2f}"
+        )
+
+        return result_5gw
+
+    def _create_synthetic_gameweek_data(
+        self,
+        players_data: pd.DataFrame,
+        predictions: pd.DataFrame,
+        gameweek: int,
+    ) -> pd.DataFrame:
+        """
+        Create synthetic gameweek data from ML predictions for cascading predictions.
+
+        This generates a DataFrame that mimics actual gameweek performance data,
+        using predicted points to populate performance columns. This allows
+        rolling features in subsequent predictions to use predicted values.
+
+        Args:
+            players_data: Base player data with player_id, position, team, etc.
+            predictions: DataFrame with ml_xP predictions
+            gameweek: Gameweek number for synthetic data
+
+        Returns:
+            DataFrame with synthetic gameweek performance data
+        """
+        # Start with base player data
+        synthetic = players_data.copy()
+
+        # Set gameweek
+        synthetic["gameweek"] = gameweek
+
+        # Map predictions to players
+        if "player_id" in predictions.columns and "ml_xP" in predictions.columns:
+            pred_map = dict(zip(predictions["player_id"], predictions["ml_xP"]))
+            synthetic["total_points"] = synthetic["player_id"].map(pred_map).fillna(0)
+        else:
+            synthetic["total_points"] = 0
+
+        # Estimate other performance metrics from predicted points
+        # These are rough heuristics - the exact values don't matter much
+        # since we're mainly using total_points for rolling features
+        synthetic["minutes"] = np.where(
+            synthetic["total_points"] > 0, 90, 0
+        )  # Assume 90 mins if points > 0
+
+        # Estimate goals/assists from points (rough heuristic)
+        # Points = 2 (appearance) + goals*points_per_goal + assists*3 + ...
+        # For simplicity, assume points come from goals/assists
+        points_from_goals_assists = synthetic["total_points"] - 2  # Subtract appearance
+        points_from_goals_assists = np.maximum(0, points_from_goals_assists)
+
+        # Rough estimate: assume goals worth 4-6 points on average
+        synthetic["goals_scored"] = (points_from_goals_assists / 5).clip(0, 5)
+        synthetic["assists"] = (points_from_goals_assists / 3).clip(0, 5)
+
+        # Set other required columns to reasonable defaults
+        synthetic["clean_sheets"] = 0
+        synthetic["goals_conceded"] = 0
+        synthetic["yellow_cards"] = 0
+        synthetic["red_cards"] = 0
+        synthetic["saves"] = 0
+        synthetic["bonus"] = 0
+        synthetic["bps"] = synthetic["total_points"] * 10  # Rough estimate
+        synthetic["influence"] = synthetic["total_points"] * 10
+        synthetic["creativity"] = synthetic["total_points"] * 5
+        synthetic["threat"] = synthetic["total_points"] * 5
+        synthetic["ict_index"] = (
+            synthetic["influence"] + synthetic["creativity"] + synthetic["threat"]
+        ) / 3
+        synthetic["expected_goals"] = synthetic["goals_scored"] * 0.8  # Rough estimate
+        synthetic["expected_assists"] = synthetic["assists"] * 0.8
+        synthetic["expected_goal_involvements"] = (
+            synthetic["expected_goals"] + synthetic["expected_assists"]
+        )
+        synthetic["expected_goals_conceded"] = 0
+
+        # Ensure value column exists
+        if "value" not in synthetic.columns and "price" in synthetic.columns:
+            synthetic["value"] = synthetic["price"] * 10
+
+        return synthetic
+
     def save_models(self, filepath: str):
         """
         Save trained pipeline to file (maintains old interface)
