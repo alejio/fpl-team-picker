@@ -515,6 +515,24 @@ def _(gameweek_data, mo):
                 betting_features_df=gameweek_data.get("betting_features"),
             )
 
+            # Calculate 3GW predictions using cascading predictions
+            # This properly accounts for fixture difficulty changes across gameweeks
+            if config.xp_model.debug:
+                print("🔄 Calculating 3GW ML xP using cascading predictions...")
+            players_3gw = ml_xp_service.calculate_3gw_expected_points(
+                players_data=gameweek_data.get("players", _pd.DataFrame()),
+                teams_data=gameweek_data.get("teams", _pd.DataFrame()),
+                xg_rates_data=gameweek_data.get("xg_rates", _pd.DataFrame()),
+                fixtures_data=gameweek_data.get("fixtures", _pd.DataFrame()),
+                target_gameweek=gameweek_data["target_gameweek"],
+                live_data=gameweek_data.get("live_data_historical", _pd.DataFrame()),
+                ownership_trends_df=gameweek_data.get("ownership_trends"),
+                value_analysis_df=gameweek_data.get("value_analysis"),
+                fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
+                raw_players_df=gameweek_data.get("raw_players"),
+                betting_features_df=gameweek_data.get("betting_features"),
+            )
+
             # Calculate 5GW predictions using cascading predictions
             # This properly accounts for fixture difficulty changes across gameweeks
             if config.xp_model.debug:
@@ -532,6 +550,32 @@ def _(gameweek_data, mo):
                 raw_players_df=gameweek_data.get("raw_players"),
                 betting_features_df=gameweek_data.get("betting_features"),
             )
+
+            # Merge 3GW predictions into main dataframe
+            if "player_id" in players_3gw.columns:
+                merge_cols = ["player_id", "ml_xP", "xP_uncertainty"]
+                # Also include per-gameweek predictions if available
+                for col in players_3gw.columns:
+                    if col.startswith("xP_gw") or col.startswith("uncertainty_gw"):
+                        merge_cols.append(col)
+
+                players_3gw_subset = players_3gw[merge_cols].copy()
+                players_3gw_subset = players_3gw_subset.rename(
+                    columns={"ml_xP": "xP_3gw", "xP_uncertainty": "xP_uncertainty_3gw"}
+                )
+                players_with_xp = players_with_xp.merge(
+                    players_3gw_subset,
+                    on="player_id",
+                    how="left",
+                    suffixes=("", "_3gw"),
+                )
+                # Fill any missing 3gw values with 1gw * 3 as fallback
+                players_with_xp["xP_3gw"] = players_with_xp["xP_3gw"].fillna(
+                    players_with_xp["xP"] * 3
+                )
+            else:
+                # Fallback if merge fails
+                players_with_xp["xP_3gw"] = players_with_xp["xP"] * 3
 
             # Merge 5GW predictions into main dataframe
             if "player_id" in players_5gw.columns:
@@ -566,6 +610,9 @@ def _(gameweek_data, mo):
             )
             players_with_xp["xP_per_price"] = (
                 players_with_xp["xP"] / players_with_xp["price"]
+            )
+            players_with_xp["xP_per_price_3gw"] = (
+                players_with_xp["xP_3gw"] / players_with_xp["price"]
             )
             players_with_xp["xP_per_price_5gw"] = (
                 players_with_xp["xP_5gw"] / players_with_xp["price"]
@@ -879,7 +926,15 @@ def _(gameweek_data, mo, players_with_xp):
                 mo.md("**🎯 Top Performers (by Expected Points):**"),
                 mo.ui.table(
                     players_with_xp.nlargest(15, "xP")[
-                        ["web_name", "position", "xP", "xP_uncertainty", "price"]
+                        [
+                            "web_name",
+                            "position",
+                            "xP",
+                            "xP_3gw",
+                            "xP_5gw",
+                            "xP_uncertainty",
+                            "price",
+                        ]
                     ].round(2),
                     page_size=10,
                 ),
@@ -954,7 +1009,7 @@ def _(mo):
     )
 
     optimization_horizon_toggle = mo.ui.radio(
-        options=["5gw", "1gw"], value="5gw", label="Optimization Horizon:"
+        options=["5gw", "3gw", "1gw"], value="5gw", label="Optimization Horizon:"
     )
 
     mo.vstack(
@@ -970,6 +1025,9 @@ def _(mo):
             optimization_horizon_toggle,
             mo.md(
                 "**5GW (Strategic)**: Optimizes for 5-gameweek fixture outlook and form trends"
+            ),
+            mo.md(
+                "**3GW (Medium-term)**: Optimizes for 3-gameweek fixture outlook and form trends"
             ),
             mo.md("**1GW (Immediate)**: Focuses only on current gameweek performance"),
             mo.md("---"),
@@ -1013,14 +1071,20 @@ def _(
                 if optimization_horizon_toggle.value
                 else "5gw"
             )
-            horizon_label = "5GW-xP" if horizon == "5gw" else "1GW-xP"
+            if horizon == "5gw":
+                horizon_label = "5GW-xP"
+            elif horizon == "3gw":
+                horizon_label = "3GW-xP"
+            else:
+                horizon_label = "1GW-xP"
 
             # Get xP values from DataFrame for sorting (temporary bridge)
-            xp_lookup = (
-                players_with_xp.set_index("player_id")["xP_5gw"]
-                if horizon == "5gw" and "xP_5gw" in players_with_xp.columns
-                else players_with_xp.set_index("player_id")["xP"]
-            )
+            if horizon == "5gw" and "xP_5gw" in players_with_xp.columns:
+                xp_lookup = players_with_xp.set_index("player_id")["xP_5gw"]
+            elif horizon == "3gw" and "xP_3gw" in players_with_xp.columns:
+                xp_lookup = players_with_xp.set_index("player_id")["xP_3gw"]
+            else:
+                xp_lookup = players_with_xp.set_index("player_id")["xP"]
 
             # Generate UI options from domain models with type safety
             player_options = []
@@ -1330,6 +1394,7 @@ def _(
                                     "price",
                                     "xP",
                                     "xP_uncertainty",
+                                    "xP_3gw",
                                     "xP_5gw",
                                     "fixture_outlook",
                                 ]
@@ -1370,6 +1435,7 @@ def _(
                                         "price",
                                         "xP",
                                         "xP_uncertainty",
+                                        "xP_3gw",
                                         "xP_5gw",
                                         "fixture_outlook",
                                     ]
@@ -1380,9 +1446,12 @@ def _(
                                 bench_horizon = optimization_metadata.get(
                                     "xp_column", "xP"
                                 )
-                                bench_xp_label = (
-                                    "1-GW" if bench_horizon == "xP" else "5-GW"
-                                )
+                                if bench_horizon == "xP":
+                                    bench_xp_label = "1-GW"
+                                elif bench_horizon == "xP_3gw":
+                                    bench_xp_label = "3-GW"
+                                else:
+                                    bench_xp_label = "5-GW"
 
                                 bench_components.extend(
                                     [
@@ -1569,8 +1638,13 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
                 chip_service = ChipAssessmentService()
 
                 # Merge current squad with xP data for chip assessment
+                merge_xp_cols = ["player_id", "xP"]
+                if "xP_3gw" in players_with_xp.columns:
+                    merge_xp_cols.append("xP_3gw")
+                if "xP_5gw" in players_with_xp.columns:
+                    merge_xp_cols.append("xP_5gw")
                 current_squad_with_xp = _current_squad.merge(
-                    players_with_xp[["player_id", "xP", "xP_5gw"]],
+                    players_with_xp[merge_xp_cols],
                     on="player_id",
                     how="left",
                 )

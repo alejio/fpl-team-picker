@@ -148,7 +148,6 @@ class TestGetAdjustedXP:
 
     def test_handles_nan_values(self, service):
         """Test that NaN values in availability fields are handled correctly."""
-        import numpy as np
 
         # NaN in chance_of_playing_this_round should fall back to next_round
         player = {

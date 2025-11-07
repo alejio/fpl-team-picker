@@ -340,14 +340,16 @@ class OptimizationConfig(BaseModel):
     # Optimization horizon
     optimization_horizon: str = Field(
         default="5gw",
-        description="Optimization horizon: '1gw' for current gameweek only, '5gw' for 5-gameweek strategic planning",
+        description="Optimization horizon: '1gw' for current gameweek only, '3gw' for 3-gameweek planning, '5gw' for 5-gameweek strategic planning",
     )
 
     @field_validator("optimization_horizon")
     @classmethod
     def validate_optimization_horizon(cls, v):
-        if v not in ["1gw", "5gw"]:
-            raise ValueError("optimization_horizon must be either '1gw' or '5gw'")
+        if v not in ["1gw", "3gw", "5gw"]:
+            raise ValueError(
+                "optimization_horizon must be either '1gw', '3gw', or '5gw'"
+            )
         return v
 
     # Transfer optimization method (only simulated annealing is supported)

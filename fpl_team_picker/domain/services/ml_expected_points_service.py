@@ -901,6 +901,144 @@ class MLExpectedPointsService:
 
         return result_5gw
 
+    def calculate_3gw_expected_points(
+        self,
+        players_data: pd.DataFrame,
+        teams_data: pd.DataFrame,
+        xg_rates_data: pd.DataFrame,
+        fixtures_data: pd.DataFrame,
+        target_gameweek: int,
+        live_data: pd.DataFrame,
+        rule_based_model=None,
+        ownership_trends_df: Optional[pd.DataFrame] = None,
+        value_analysis_df: Optional[pd.DataFrame] = None,
+        fixture_difficulty_df: Optional[pd.DataFrame] = None,
+        raw_players_df: Optional[pd.DataFrame] = None,
+        betting_features_df: Optional[pd.DataFrame] = None,
+    ) -> pd.DataFrame:
+        """
+        Calculate 3-gameweek expected points using cascading predictions.
+
+        This method predicts each of the next 3 gameweeks sequentially, using
+        predictions from earlier gameweeks to inform rolling features for later ones.
+        This ensures rolling features (e.g., rolling_5gw_points) remain valid.
+
+        Strategy:
+        1. Predict GW+1 using actual historical data
+        2. Predict GW+2 using historical data + predicted GW+1 points
+        3. Predict GW+3 using historical data + predicted GW+1-2 points
+        4. Sum all 3 predictions to get total 3gw xP
+
+        Args:
+            players_data: Current player data
+            teams_data: Team data
+            xg_rates_data: xG rates data
+            fixtures_data: Fixtures data
+            target_gameweek: Starting gameweek (will predict GW+1 through GW+3)
+            live_data: Historical live gameweek data (actual results up to target_gameweek)
+            rule_based_model: Optional rule-based model for ensemble
+            ownership_trends_df: Ownership trends data
+            value_analysis_df: Value analysis data
+            fixture_difficulty_df: Fixture difficulty data
+            raw_players_df: Raw players data
+            betting_features_df: Betting odds features data
+
+        Returns:
+            DataFrame with:
+            - ml_xP: 3-gameweek total expected points
+            - xP_uncertainty: Combined uncertainty (sqrt of sum of variances)
+            - xP: Same as ml_xP (for compatibility)
+            - xP_gw1, xP_gw2, xP_gw3: Per-gameweek predictions (for analysis)
+        """
+        if self.pipeline is None:
+            raise ValueError("Pipeline not initialized. Train or load a model first.")
+
+        self._log_debug(
+            f"🔄 Calculating 3GW ML xP using cascading predictions starting from GW{target_gameweek}"
+        )
+
+        # Start with actual historical data
+        historical_data = live_data.copy()
+        if historical_data.empty:
+            raise ValueError(
+                "No historical live_data provided for cascading predictions"
+            )
+
+        # Store predictions for each gameweek
+        per_gw_predictions = []
+        per_gw_uncertainties = []
+        per_gw_results = []
+
+        # Predict each of the next 3 gameweeks sequentially
+        for gw_offset in range(1, 4):
+            current_gw = target_gameweek + gw_offset
+
+            self._log_debug(
+                f"  📊 Predicting GW{current_gw} (using data up to GW{current_gw - 1})"
+            )
+
+            # Predict this gameweek using current historical data
+            result = self.calculate_expected_points(
+                players_data=players_data,
+                teams_data=teams_data,
+                xg_rates_data=xg_rates_data,
+                fixtures_data=fixtures_data,
+                target_gameweek=current_gw,
+                live_data=historical_data,
+                gameweeks_ahead=1,
+                rule_based_model=rule_based_model,
+                ownership_trends_df=ownership_trends_df,
+                value_analysis_df=value_analysis_df,
+                fixture_difficulty_df=fixture_difficulty_df,
+                raw_players_df=raw_players_df,
+                betting_features_df=betting_features_df,
+            )
+
+            # Extract predictions and uncertainties
+            per_gw_predictions.append(result["ml_xP"].values)
+            per_gw_uncertainties.append(result["xP_uncertainty"].values)
+            per_gw_results.append(result)
+
+            # Create synthetic gameweek data from predictions for next iteration
+            # This allows rolling features to use predicted points for future gameweeks
+            synthetic_gw_data = self._create_synthetic_gameweek_data(
+                players_data=players_data,
+                predictions=result,
+                gameweek=current_gw,
+            )
+
+            # Add synthetic data to historical data for next iteration
+            historical_data = pd.concat(
+                [historical_data, synthetic_gw_data], ignore_index=True
+            )
+
+        # Combine results: sum predictions, combine uncertainties
+        result_3gw = players_data.copy()
+
+        # Sum all 3 gameweek predictions
+        xp_3gw = np.sum(per_gw_predictions, axis=0)
+
+        # Combine uncertainties: sqrt(sum of variances) for independent predictions
+        # This assumes predictions are independent (reasonable for different gameweeks)
+        uncertainty_3gw = np.sqrt(np.sum(np.square(per_gw_uncertainties), axis=0))
+
+        result_3gw["ml_xP"] = xp_3gw
+        result_3gw["xP"] = xp_3gw
+        result_3gw["xP_3gw"] = xp_3gw  # Alias for compatibility
+        result_3gw["xP_uncertainty"] = uncertainty_3gw
+
+        # Add per-gameweek predictions for analysis/debugging
+        for i, gw_result in enumerate(per_gw_results):
+            gw_num = target_gameweek + i + 1
+            result_3gw[f"xP_gw{gw_num}"] = gw_result["ml_xP"].values
+            result_3gw[f"uncertainty_gw{gw_num}"] = gw_result["xP_uncertainty"].values
+
+        self._log_debug(
+            f"✅ 3GW predictions complete: Total xP range {xp_3gw.min():.2f} - {xp_3gw.max():.2f}"
+        )
+
+        return result_3gw
+
     def _create_synthetic_gameweek_data(
         self,
         players_data: pd.DataFrame,

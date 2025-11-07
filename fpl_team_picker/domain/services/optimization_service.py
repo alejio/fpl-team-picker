@@ -34,10 +34,12 @@ class OptimizationService:
         """Get the XP column to use for optimization based on configuration.
 
         Returns:
-            'xP' for 1-gameweek optimization, 'xP_5gw' for 5-gameweek optimization
+            'xP' for 1-gameweek optimization, 'xP_3gw' for 3-gameweek optimization, 'xP_5gw' for 5-gameweek optimization
         """
         if config.optimization.optimization_horizon == "1gw":
             return "xP"
+        elif config.optimization.optimization_horizon == "3gw":
+            return "xP_3gw"
         else:  # "5gw"
             return "xP_5gw"
 
@@ -228,7 +230,7 @@ class OptimizationService:
 
         Args:
             squad_df: Squad DataFrame
-            xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_5gw' for strategic)
+            xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_3gw' for 3-GW, 'xP_5gw' for strategic)
 
         Returns:
             Tuple of (best_11_list, formation_name, total_xp)
@@ -263,11 +265,15 @@ class OptimizationService:
             )
             return [], "", 0
 
-        # Default to current gameweek XP, fallback to 5GW if current not available
+        # Default to current gameweek XP, fallback to 3GW or 5GW if current not available
         sort_col = (
             xp_column
             if xp_column in available_squad.columns
-            else ("xP_5gw" if "xP_5gw" in available_squad.columns else "xP")
+            else (
+                "xP_3gw"
+                if "xP_3gw" in available_squad.columns
+                else ("xP_5gw" if "xP_5gw" in available_squad.columns else "xP")
+            )
         )
 
         # Group by position and sort by XP
@@ -292,7 +298,7 @@ class OptimizationService:
         Args:
             squad_df: Squad DataFrame
             starting_11: List of starting 11 player dictionaries
-            xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_5gw' for strategic)
+            xp_column: Column to use for XP sorting ('xP' for current GW, 'xP_3gw' for 3-GW, 'xP_5gw' for strategic)
 
         Returns:
             List of bench player dictionaries ordered by XP (highest first)
@@ -308,7 +314,11 @@ class OptimizationService:
         sort_col = (
             xp_column
             if xp_column in squad_df.columns
-            else ("xP_5gw" if "xP_5gw" in squad_df.columns else "xP")
+            else (
+                "xP_3gw"
+                if "xP_3gw" in squad_df.columns
+                else ("xP_5gw" if "xP_5gw" in squad_df.columns else "xP")
+            )
         )
 
         for _, player in squad_df.iterrows():
@@ -801,10 +811,19 @@ class OptimizationService:
 
         # Get optimization column based on configuration
         xp_column = self.get_optimization_xp_column()
-        horizon_label = "1-GW" if xp_column == "xP" else "5-GW"
+        if xp_column == "xP":
+            horizon_label = "1-GW"
+        elif xp_column == "xP_3gw":
+            horizon_label = "3-GW"
+        else:
+            horizon_label = "5-GW"
 
-        # Update current squad with both 1-GW and 5-GW XP data
-        merge_columns = ["player_id", "xP", "xP_5gw"]
+        # Update current squad with 1-GW, 3-GW, and 5-GW XP data
+        merge_columns = ["player_id", "xP"]
+        if "xP_3gw" in players_with_xp.columns:
+            merge_columns.append("xP_3gw")
+        if "xP_5gw" in players_with_xp.columns:
+            merge_columns.append("xP_5gw")
         if "xP_uncertainty" in players_with_xp.columns:
             merge_columns.append("xP_uncertainty")
         if "fixture_outlook" in players_with_xp.columns:
@@ -826,7 +845,10 @@ class OptimizationService:
         )
         # Fill any missing XP with 0
         current_squad_with_xp["xP"] = current_squad_with_xp["xP"].fillna(0)
-        current_squad_with_xp["xP_5gw"] = current_squad_with_xp["xP_5gw"].fillna(0)
+        if "xP_3gw" in current_squad_with_xp.columns:
+            current_squad_with_xp["xP_3gw"] = current_squad_with_xp["xP_3gw"].fillna(0)
+        if "xP_5gw" in current_squad_with_xp.columns:
+            current_squad_with_xp["xP_5gw"] = current_squad_with_xp["xP_5gw"].fillna(0)
         if "fixture_outlook" in current_squad_with_xp.columns:
             current_squad_with_xp["fixture_outlook"] = current_squad_with_xp[
                 "fixture_outlook"

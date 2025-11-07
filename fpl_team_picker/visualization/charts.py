@@ -1053,12 +1053,14 @@ def create_xp_results_display(
             "selected_by_percent",
         ]
 
-        # Add XP model outputs (both 1-GW and 5-GW)
+        # Add XP model outputs (1-GW, 3-GW, and 5-GW)
         xp_columns = [
             "xP",
             "xP_uncertainty",
+            "xP_3gw",
             "xP_5gw",
             "xP_per_price",
+            "xP_per_price_3gw",
             "xP_per_price_5gw",
             "expected_minutes",
             "fixture_difficulty",
@@ -1152,10 +1154,10 @@ def create_xp_results_display(
                 ),
                 mo_ref.md(f"**Players analyzed:** {len(players_xp)}"),
                 mo_ref.md(
-                    f"**Average 1-GW XP:** {players_xp['xP'].mean():.2f} | **Average 5-GW XP:** {players_xp['xP_5gw'].mean():.2f}"
+                    f"**Average 1-GW XP:** {players_xp['xP'].mean():.2f} | **Average 3-GW XP:** {(players_xp['xP_3gw'].mean() if 'xP_3gw' in players_xp.columns else players_xp['xP'].mean() * 3):.2f} | **Average 5-GW XP:** {players_xp['xP_5gw'].mean():.2f}"
                 ),
                 mo_ref.md(
-                    f"**Top 1-GW:** {players_xp['xP'].max():.2f} | **Top 5-GW:** {players_xp['xP_5gw'].max():.2f}"
+                    f"**Top 1-GW:** {players_xp['xP'].max():.2f} | **Top 3-GW:** {(players_xp['xP_3gw'].max() if 'xP_3gw' in players_xp.columns else players_xp['xP'].max() * 3):.2f} | **Top 5-GW:** {players_xp['xP_5gw'].max():.2f}"
                 ),
                 mo_ref.md(strategic_info),
                 mo_ref.md(form_info) if form_info else mo_ref.md(""),
@@ -1163,7 +1165,7 @@ def create_xp_results_display(
                     "**All Players - Strategic Comparison (Sorted by 5-GW XP):**"
                 ),
                 mo_ref.md(
-                    "*Showing: Season stats (total points, form, minutes, goals, assists, etc.), 1-GW vs 5-GW XP with uncertainty, fixture outlook, ICT components, expected stats, and more*"
+                    "*Showing: Season stats (total points, form, minutes, goals, assists, etc.), 1-GW vs 3-GW vs 5-GW XP with uncertainty, fixture outlook, ICT components, expected stats, and more*"
                 ),
                 mo_ref.ui.table(display_df, page_size=25),
             ]
