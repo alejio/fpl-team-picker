@@ -772,11 +772,39 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 all_team_fixtures["opponent_name"].map(self.team_strength).fillna(1.0)
             )
 
-        # Calculate fixture difficulty
+        # Calculate fixture difficulty using relative scaling
+        # This ensures full 0-2 range utilization and better differentiation
+        # Formula: Normalize opponent strength to 0-1, then map to 0-2 range (inverted)
+        # Get min/max from the actual opponent_strength values (handles both formats)
+        if all_team_fixtures["opponent_strength"].notna().any():
+            min_strength = all_team_fixtures["opponent_strength"].min()
+            max_strength = all_team_fixtures["opponent_strength"].max()
+        else:
+            # Fallback if no opponent_strength values (shouldn't happen)
+            min_strength = 0.9
+            max_strength = 1.1
+
+        # Avoid division by zero (all teams same strength)
+        strength_range = max_strength - min_strength
+        if strength_range < 0.01:
+            strength_range = 0.22  # Fallback to typical range
+
+        # Normalize opponent strength to 0-1, then map to 0-2 range (inverted)
+        # Weak opponent (low strength) → high normalized → low fixture_difficulty (wrong!)
+        # Need to invert: weak opponent → low normalized → high fixture_difficulty
+        normalized = (
+            all_team_fixtures["opponent_strength"] - min_strength
+        ) / strength_range
+        base_difficulty = 2.0 * (
+            1.0 - normalized
+        )  # Inverted: weak opponent = high value
+
+        # Apply home advantage
+        home_advantage = 1.1
         all_team_fixtures["fixture_difficulty"] = np.where(
             all_team_fixtures["is_home"] == 1,
-            (2.0 - all_team_fixtures["opponent_strength"]) * 1.1,
-            2.0 - all_team_fixtures["opponent_strength"],
+            base_difficulty * home_advantage,
+            base_difficulty,
         )
 
         # Merge fixture features to player data

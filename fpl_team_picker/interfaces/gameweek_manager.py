@@ -575,9 +575,6 @@ def _(gameweek_data, mo):
             players_with_xp["xP_horizon_advantage"] = players_with_xp["xP_5gw"] - (
                 players_with_xp["xP"] * 5
             )
-            players_with_xp["fixture_difficulty"] = 1.0  # Neutral
-            players_with_xp["fixture_difficulty_5gw"] = 1.0  # Neutral
-            players_with_xp["fixture_outlook"] = "Average"  # Placeholder
 
             # Add form analytics columns
             # Calculate form multiplier from recent performance (use form_season if available)
@@ -642,6 +639,147 @@ def _(gameweek_data, mo):
                 players_with_xp
             )
             model_info = xp_service.get_model_info(False)
+
+        # Extract fixture difficulty from ML service output or gameweek_data
+        # ML service should have already added fixture_difficulty and fixture_outlook
+        if "fixture_difficulty" not in players_with_xp.columns:
+            # Extract from gameweek_data if ML service didn't provide it
+            fixture_difficulty_df = gameweek_data.get("fixture_difficulty")
+            if fixture_difficulty_df is None or fixture_difficulty_df.empty:
+                raise ValueError(
+                    "fixture_difficulty not found in ML service output and gameweek_data['fixture_difficulty'] "
+                    "is missing or empty. DataOrchestrationService should provide fixture_difficulty_df."
+                )
+
+            target_gw = gameweek_data["target_gameweek"]
+            target_fixture_difficulty = fixture_difficulty_df[
+                fixture_difficulty_df["gameweek"] == target_gw
+            ].copy()
+
+            if target_fixture_difficulty.empty:
+                raise ValueError(
+                    f"No fixture difficulty data found for gameweek {target_gw}. "
+                    f"fixture_difficulty_df must contain data for the target gameweek."
+                )
+
+            if "overall_difficulty" not in target_fixture_difficulty.columns:
+                raise ValueError(
+                    f"fixture_difficulty_df missing required 'overall_difficulty' column. "
+                    f"Available columns: {list(target_fixture_difficulty.columns)}"
+                )
+
+            # Rename to fixture_difficulty for consistency in output
+            players_with_xp = players_with_xp.merge(
+                target_fixture_difficulty[["team_id", "overall_difficulty"]].rename(
+                    columns={"overall_difficulty": "fixture_difficulty"}
+                ),
+                left_on="team",
+                right_on="team_id",
+                how="left",
+                suffixes=("", "_from_fixture"),
+            )
+
+            # Validate that all players have fixture difficulty data
+            missing_difficulty = players_with_xp["fixture_difficulty"].isna()
+            if missing_difficulty.any():
+                missing_players = players_with_xp.loc[
+                    missing_difficulty, ["player_id", "web_name", "team"]
+                ]
+                raise ValueError(
+                    f"Missing fixture difficulty data for {missing_difficulty.sum()} players. "
+                    f"Missing players: {missing_players['web_name'].tolist()}. "
+                    f"This indicates a data quality issue - fixture_difficulty_df should contain "
+                    f"data for all teams in the target gameweek."
+                )
+
+            # Drop the team_id column from merge if it was added
+            if "team_id_from_fixture" in players_with_xp.columns:
+                players_with_xp = players_with_xp.drop(columns=["team_id_from_fixture"])
+
+        # Calculate fixture_difficulty_5gw as average of next 5 gameweeks
+        fixture_difficulty_df = gameweek_data.get("fixture_difficulty")
+        if fixture_difficulty_df is None or fixture_difficulty_df.empty:
+            raise ValueError(
+                "gameweek_data['fixture_difficulty'] is required for calculating fixture_difficulty_5gw. "
+                "DataOrchestrationService should provide fixture_difficulty_df."
+            )
+
+        target_gw = gameweek_data["target_gameweek"]
+        # Get fixture difficulties for next 5 gameweeks
+        future_gws = list(range(target_gw, target_gw + 5))
+        future_fixture_difficulty = fixture_difficulty_df[
+            fixture_difficulty_df["gameweek"].isin(future_gws)
+        ].copy()
+
+        if future_fixture_difficulty.empty:
+            raise ValueError(
+                f"No fixture difficulty data found for gameweeks {future_gws}. "
+                f"fixture_difficulty_df must contain data for the next 5 gameweeks."
+            )
+
+        if "overall_difficulty" not in future_fixture_difficulty.columns:
+            raise ValueError(
+                f"fixture_difficulty_df missing required 'overall_difficulty' column. "
+                f"Available columns: {list(future_fixture_difficulty.columns)}"
+            )
+
+        # Calculate average difficulty per team across the 5 gameweeks
+        avg_difficulty = (
+            future_fixture_difficulty.groupby("team_id")["overall_difficulty"]
+            .mean()
+            .reset_index()
+        )
+        avg_difficulty.columns = ["team_id", "fixture_difficulty_5gw"]
+
+        players_with_xp = players_with_xp.merge(
+            avg_difficulty,
+            left_on="team",
+            right_on="team_id",
+            how="left",
+            suffixes=("", "_5gw"),
+        )
+
+        # Validate that all players have 5GW fixture difficulty data
+        missing_difficulty_5gw = players_with_xp["fixture_difficulty_5gw"].isna()
+        if missing_difficulty_5gw.any():
+            missing_players = players_with_xp.loc[
+                missing_difficulty_5gw, ["player_id", "web_name", "team"]
+            ]
+            raise ValueError(
+                f"Missing fixture_difficulty_5gw data for {missing_difficulty_5gw.sum()} players. "
+                f"Missing players: {missing_players['web_name'].tolist()}. "
+                f"This indicates a data quality issue - fixture_difficulty_df should contain "
+                f"data for all teams across the next 5 gameweeks."
+            )
+
+        # Drop the team_id column from merge if it was added
+        if "team_id_5gw" in players_with_xp.columns:
+            players_with_xp = players_with_xp.drop(columns=["team_id_5gw"])
+
+        # Calculate fixture_outlook if not already set by ML service
+        # NOTE: Higher fixture_difficulty = easier fixture (inverse of opponent strength)
+        # Use configurable thresholds that match the actual distribution
+        if "fixture_outlook" not in players_with_xp.columns:
+            from fpl_team_picker.config import config
+
+            easy_threshold = config.fixture_difficulty.easy_fixture_threshold
+            average_min = config.fixture_difficulty.average_fixture_min
+
+            def get_fixture_outlook(diff):
+                if _pd.isna(diff):
+                    raise ValueError(
+                        "fixture_difficulty is NaN - this should not happen after validation"
+                    )
+                elif diff >= easy_threshold:
+                    return "🟢 Easy"  # High value = easy fixture
+                elif diff <= average_min:
+                    return "🔴 Hard"  # Low value = hard fixture
+                else:
+                    return "🟡 Average"
+
+            players_with_xp["fixture_outlook"] = players_with_xp[
+                "fixture_difficulty"
+            ].apply(get_fixture_outlook)
 
         xp_results_display = create_xp_results_display(
             players_with_xp, gameweek_data["target_gameweek"], mo

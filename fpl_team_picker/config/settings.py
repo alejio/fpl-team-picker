@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-10_20251105_230609_pipeline.joblib",
+        default="models/custom/random-forest_gw1-10_20251107_143207_pipeline.joblib",
         description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
@@ -294,14 +294,21 @@ class FixtureDifficultyConfig(BaseModel):
         le=5.0,
     )
 
-    # Difficulty classification thresholds (adjusted for better elite team recognition)
+    # Difficulty classification thresholds (calibrated for relative scaling: 0.0-2.2 range)
+    # Based on 25th/75th percentiles of GW11 distribution with relative scaling
     easy_fixture_threshold: float = Field(
-        default=1.20, description="> 1.20 = Easy (🟢)", ge=1.0, le=2.0
+        default=1.538,
+        description=">= 1.538 = Easy (🟢) - top 25% of fixtures",
+        ge=1.0,
+        le=2.2,
     )
     average_fixture_min: float = Field(
-        default=0.90, description="0.90-1.20 = Average (🟡)", ge=0.5, le=1.0
+        default=0.791,
+        description="0.791-1.538 = Average (🟡), <= 0.791 = Hard (🔴)",
+        ge=0.0,
+        le=1.5,
     )
-    # < 0.90 = Hard (🔴) - now properly captures elite teams like Liverpool
+    # Relative scaling produces 0.0-2.2 range, so thresholds adjusted accordingly
 
     # Temporal weighting for multi-gameweek
     temporal_weights: List[float] = Field(
