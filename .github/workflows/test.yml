@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout fpl-dataset-builder
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/fpl-dataset-builder
+          path: fpl-dataset-builder
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create symlink for fpl-dataset-builder
+        working-directory: ${{ github.workspace }}
+        run: |
+          cd ..
+          ln -s fpl-team-picker/fpl-dataset-builder fpl-dataset-builder
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run tests
+        run: uv run pytest
