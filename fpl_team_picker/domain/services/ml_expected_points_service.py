@@ -555,6 +555,162 @@ class MLExpectedPointsService:
 
             result["xP"] = result["ml_xP"]
 
+            # Extract fixture difficulty from fixture_difficulty_df and merge into result
+            if fixture_difficulty_df is None or fixture_difficulty_df.empty:
+                raise ValueError(
+                    "fixture_difficulty_df is required but was not provided or is empty. "
+                    "DataOrchestrationService should provide this in gameweek_data."
+                )
+
+            # Filter fixture_difficulty_df for target gameweek
+            target_fixture_difficulty = fixture_difficulty_df[
+                fixture_difficulty_df["gameweek"] == target_gameweek
+            ].copy()
+
+            if target_fixture_difficulty.empty:
+                raise ValueError(
+                    f"No fixture difficulty data found for gameweek {target_gameweek}. "
+                    f"fixture_difficulty_df must contain data for the target gameweek."
+                )
+
+            if "overall_difficulty" not in target_fixture_difficulty.columns:
+                raise ValueError(
+                    f"fixture_difficulty_df missing required 'overall_difficulty' column. "
+                    f"Available columns: {list(target_fixture_difficulty.columns)}"
+                )
+
+            # Recalculate fixture_difficulty using the same formula as training
+            # This ensures consistency with the 0-2 scale used in feature engineering
+            # (overall_difficulty from get_derived_fixture_difficulty uses a different 3-5 scale)
+            from fpl_team_picker.domain.services.team_analytics_service import (
+                TeamAnalyticsService,
+            )
+            from .ml_pipeline_factory import get_team_strength_ratings
+
+            # Get team strength (same as used in feature engineering)
+            analytics_service = TeamAnalyticsService(debug=False)
+            historical_gws = sorted(
+                live_data["event"].unique()
+                if "event" in live_data.columns
+                else live_data["gameweek"].unique()
+            )
+            if historical_gws:
+                current_season_data = analytics_service.load_historical_gameweek_data(
+                    start_gw=min(historical_gws), end_gw=max(historical_gws)
+                )
+                team_strength = analytics_service.get_team_strength(
+                    target_gameweek=target_gameweek,
+                    teams_data=teams_data,
+                    current_season_data=current_season_data,
+                )
+            else:
+                # Fallback: use static team strength
+                team_strength = get_team_strength_ratings(
+                    target_gameweek=target_gameweek,
+                    teams_df=teams_data,
+                )
+
+            # Get fixtures for target gameweek
+            # Handle both "gameweek" and "event" column names
+            gw_col = "gameweek" if "gameweek" in fixtures_data.columns else "event"
+            target_fixtures = (
+                fixtures_data[fixtures_data[gw_col] == target_gameweek].copy()
+                if gw_col in fixtures_data.columns
+                else pd.DataFrame()
+            )
+
+            # Create team name mapping
+            team_name_map = dict(zip(teams_data["team_id"], teams_data["name"]))
+
+            # Calculate fixture_difficulty using same formula as training
+            # (2.0 - opponent_strength) * 1.1 for home, 2.0 - opponent_strength for away
+            fixture_difficulty_map = {}
+            for _, fix in target_fixtures.iterrows():
+                # Handle different column name variations
+                home_id = fix.get("team_h") or fix.get("home_team_id")
+                away_id = fix.get("team_a") or fix.get("away_team_id")
+
+                if pd.isna(home_id) or pd.isna(away_id):
+                    continue
+
+                home_name = team_name_map.get(int(home_id))
+                away_name = team_name_map.get(int(away_id))
+
+                if home_name and away_name:
+                    home_opponent_strength = team_strength.get(away_name, 1.0)
+                    away_opponent_strength = team_strength.get(home_name, 1.0)
+
+                    # Use relative scaling for fixture difficulty (same as ml_feature_engineering)
+                    # This ensures full 0-2 range utilization and better differentiation
+                    min_strength = min(team_strength.values())
+                    max_strength = max(team_strength.values())
+                    strength_range = max_strength - min_strength
+                    if strength_range < 0.01:
+                        strength_range = 0.22  # Fallback to typical range
+
+                    # Normalize opponent strength to 0-1, then map to 0-2 range (inverted)
+                    home_normalized = (
+                        home_opponent_strength - min_strength
+                    ) / strength_range
+                    away_normalized = (
+                        away_opponent_strength - min_strength
+                    ) / strength_range
+
+                    home_base = 2.0 * (
+                        1.0 - home_normalized
+                    )  # Weak opponent = high value
+                    away_base = 2.0 * (1.0 - away_normalized)
+
+                    # Apply home advantage
+                    home_advantage = 1.1
+                    home_difficulty = home_base * home_advantage
+                    away_difficulty = away_base
+
+                    fixture_difficulty_map[int(home_id)] = home_difficulty
+                    fixture_difficulty_map[int(away_id)] = away_difficulty
+
+            # Map fixture_difficulty to result using team column
+            result["fixture_difficulty"] = result["team"].map(fixture_difficulty_map)
+
+            # Fill missing values with neutral 1.0 (shouldn't happen, but safety)
+            result["fixture_difficulty"] = result["fixture_difficulty"].fillna(1.0)
+
+            # Validate that all players have fixture difficulty data
+            missing_difficulty = result["fixture_difficulty"].isna()
+            if missing_difficulty.any():
+                missing_players = result.loc[
+                    missing_difficulty, ["player_id", "web_name", "team"]
+                ]
+                raise ValueError(
+                    f"Missing fixture difficulty data for {missing_difficulty.sum()} players. "
+                    f"Missing players: {missing_players['web_name'].tolist()}. "
+                    f"This indicates a data quality issue - could not calculate fixture_difficulty."
+                )
+
+            # Calculate fixture_outlook from fixture_difficulty
+            # NOTE: Higher fixture_difficulty = easier fixture (inverse of opponent strength)
+            # Use configurable thresholds that match the actual distribution with base_multiplier
+            from fpl_team_picker.config import config
+
+            easy_threshold = config.fixture_difficulty.easy_fixture_threshold
+            average_min = config.fixture_difficulty.average_fixture_min
+
+            def get_fixture_outlook(diff):
+                if pd.isna(diff):
+                    raise ValueError(
+                        "fixture_difficulty is NaN - this should not happen after validation"
+                    )
+                elif diff >= easy_threshold:
+                    return "🟢 Easy"  # High value = easy fixture
+                elif diff <= average_min:
+                    return "🔴 Hard"  # Low value = hard fixture
+                else:
+                    return "🟡 Average"
+
+            result["fixture_outlook"] = result["fixture_difficulty"].apply(
+                get_fixture_outlook
+            )
+
             # Calculate expected_minutes using rule-based logic
             from .expected_points_service import ExpectedPointsService
 

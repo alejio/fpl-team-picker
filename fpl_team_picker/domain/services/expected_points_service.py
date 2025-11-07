@@ -816,10 +816,24 @@ class ExpectedPointsService:
             away_opponent_strength = team_strength.get(home_team_name, 1.0)
 
             # Fixture difficulty: higher value = easier fixture (inverse of opponent strength)
-            # Home teams get slight advantage boost (10%)
+            # Use relative scaling for full 0-2 range utilization
+            min_strength = min(team_strength.values())
+            max_strength = max(team_strength.values())
+            strength_range = max_strength - min_strength
+            if strength_range < 0.01:
+                strength_range = 0.22  # Fallback to typical range
+
+            # Normalize opponent strength to 0-1, then map to 0-2 range (inverted)
+            home_normalized = (home_opponent_strength - min_strength) / strength_range
+            away_normalized = (away_opponent_strength - min_strength) / strength_range
+
+            home_base = 2.0 * (1.0 - home_normalized)  # Weak opponent = high value
+            away_base = 2.0 * (1.0 - away_normalized)
+
+            # Apply home advantage
             home_advantage_multiplier = 1.1
-            home_difficulty = (2.0 - home_opponent_strength) * home_advantage_multiplier
-            away_difficulty = 2.0 - away_opponent_strength
+            home_difficulty = home_base * home_advantage_multiplier
+            away_difficulty = away_base
 
             fixture_difficulties.append(
                 {
