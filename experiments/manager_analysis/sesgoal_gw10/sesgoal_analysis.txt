@@ -1,0 +1,552 @@
+
+================================================================================
+FPL MANAGER STRATEGY ANALYSIS
+================================================================================
+
+Manager: Sesgoal (ID: 4233026)
+Team: Alex Spanos
+Overall Points: 545
+Overall Rank: 4,275,179
+
+================================================================================
+
+OVERALL SEASON STATISTICS
+--------------------------------------------------------------------------------
+Total Points: 549
+Average Points per GW: 54.90
+Total Transfers: 9
+Total Transfer Cost: 4 points
+Net Points (after transfers): 549
+
+================================================================================
+
+PERFORMANCE TREND ANALYSIS
+--------------------------------------------------------------------------------
+First Half Average (GW1-5): 55.20
+Second Half Average (GW6+): 54.60
+Improvement: -0.60 points/GW
+⚠️ Manager did not improve in the second half
+
+================================================================================
+
+GAMEWEEK-BY-GAMEWEEK DETAILED ANALYSIS
+================================================================================
+
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 1
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 47
+   Rank: 6,639,003
+   Overall Rank: 6,638,992
+   Bank: £0.0m
+   Team Value: £100.0m
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Sels (Nott'm Forest) 🟡
+      DEF: Frimpong (Liverpool) 🟡
+      DEF: Aït-Nouri (Man City) 🟢
+      DEF: Wan-Bissaka (West Ham) 🟡
+      MID: Palmer (Chelsea) (VC) 🟡
+      MID: Wirtz (Liverpool) 🟡
+      MID: B.Fernandes (Man Utd) 🔴
+      MID: Mbeumo (Man Utd) 🔴
+      FWD: Gyökeres (Arsenal) 🟡
+      FWD: Ekitiké (Liverpool) (C) 🟡
+      FWD: João Pedro (Chelsea) 🟡
+
+   Bench:
+      GKP: Dúbravka (Burnley)
+      DEF: Konsa (Aston Villa)
+      MID: Sangaré (Nott'm Forest)
+      DEF: Alex Moreno (Aston Villa)
+
+🏟️  Fixtures:
+      Liverpool vs Bournemouth
+      Aston Villa vs Newcastle
+      Brighton vs Fulham
+      Spurs vs Burnley
+      Sunderland vs West Ham
+      Wolves vs Man City
+      Chelsea vs Crystal Palace
+      Nott'm Forest vs Brentford
+      Man Utd vs Arsenal
+      Leeds vs Everton
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 2
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 65
+   Rank: 1,601,384
+   Overall Rank: 3,126,374
+   Bank: £0.0m
+   Team Value: £100.1m
+
+🔄 Transfers:
+   Number of Transfers: 1
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Frimpong (Liverpool) - DEF - £5.8m
+
+   Transferred IN:
+      ✅ Cucurella (Chelsea) - DEF - £6.1m 🟢
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🟢
+      DEF: Cucurella (Chelsea) 🟢
+      DEF: Aït-Nouri (Man City) 🟡
+      DEF: Wan-Bissaka (West Ham) 🟡
+      MID: Sangaré (Nott'm Forest) 🟡
+      MID: Wirtz (Liverpool) 🔴
+      MID: Mbeumo (Man Utd) 🟡
+      MID: B.Fernandes (Man Utd) 🟡
+      FWD: Ekitiké (Liverpool) (C) 🔴
+      FWD: João Pedro (Chelsea) 🟢
+      FWD: Gyökeres (Arsenal) 🟢
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: Konsa (Aston Villa)
+      MID: Palmer (Chelsea)
+      DEF: Alex Moreno (Aston Villa)
+
+🏟️  Fixtures:
+      West Ham vs Chelsea
+      Man City vs Spurs
+      Bournemouth vs Wolves
+      Brentford vs Aston Villa
+      Burnley vs Sunderland
+      Arsenal vs Leeds
+      Crystal Palace vs Nott'm Forest
+      Everton vs Brighton
+      Fulham vs Man Utd
+      Newcastle vs Liverpool
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 3
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 55
+   Rank: 3,020,609
+   Overall Rank: 2,168,756
+   Bank: £3.3m
+   Team Value: £100.3m
+
+🔄 Transfers:
+   Number of Transfers: 1
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Palmer (Chelsea) - MID - £10.3m
+
+   Transferred IN:
+      ✅ Semenyo (Bournemouth) - MID - £8.1m 🟡
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🟡
+      DEF: Cucurella (Chelsea) 🟢
+      DEF: Aït-Nouri (Man City) 🟡
+      DEF: Konsa (Aston Villa) 🟡
+      MID: Semenyo (Bournemouth) 🟡
+      MID: Wirtz (Liverpool) 🔴
+      MID: B.Fernandes (Man Utd) 🟢
+      MID: Mbeumo (Man Utd) 🟢
+      FWD: Gyökeres (Arsenal) (VC) 🔴
+      FWD: Ekitiké (Liverpool) 🔴
+      FWD: João Pedro (Chelsea) (C) 🟢
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      MID: Sangaré (Nott'm Forest)
+      DEF: Wan-Bissaka (West Ham)
+      DEF: Alex Moreno (Aston Villa)
+
+🏟️  Fixtures:
+      Chelsea vs Fulham
+      Man Utd vs Burnley
+      Spurs vs Bournemouth
+      Sunderland vs Brentford
+      Wolves vs Everton
+      Leeds vs Newcastle
+      Brighton vs Man City
+      Nott'm Forest vs West Ham
+      Liverpool vs Arsenal
+      Aston Villa vs Crystal Palace
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 4
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 60
+   Rank: 7,128,392
+   Overall Rank: 3,001,965
+   Bank: £1.3m
+   Team Value: £100.7m
+
+🔄 Transfers:
+   Number of Transfers: 1
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Alex Moreno (Aston Villa) - DEF - £4.0m
+
+   Transferred IN:
+      ✅ Virgil (Liverpool) - DEF - £6.0m 🟢
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🔴
+      DEF: Cucurella (Chelsea) 🟡
+      DEF: Virgil (Liverpool) 🟢
+      DEF: Konsa (Aston Villa) 🟡
+      MID: Semenyo (Bournemouth) 🟡
+      MID: Wirtz (Liverpool) 🟢
+      MID: Mbeumo (Man Utd) 🔴
+      MID: B.Fernandes (Man Utd) 🔴
+      FWD: Ekitiké (Liverpool) (VC) 🟢
+      FWD: João Pedro (Chelsea) (C) 🟡
+      FWD: Gyökeres (Arsenal) 🟢
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: Aït-Nouri (Man City)
+      DEF: Wan-Bissaka (West Ham)
+      MID: Sangaré (Nott'm Forest)
+
+🏟️  Fixtures:
+      Arsenal vs Nott'm Forest
+      Bournemouth vs Brighton
+      Crystal Palace vs Sunderland
+      Everton vs Aston Villa
+      Fulham vs Leeds
+      Newcastle vs Wolves
+      West Ham vs Spurs
+      Brentford vs Chelsea
+      Burnley vs Liverpool
+      Man City vs Man Utd
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 5
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 49
+   Rank: 3,363,593
+   Overall Rank: 2,926,558
+   Bank: £1.2m
+   Team Value: £101.0m
+
+🔄 Transfers:
+   Number of Transfers: 2
+   Transfer Cost: 4 points
+
+   Transferred OUT:
+      ❌ Wan-Bissaka (West Ham) - DEF - £4.3m
+      ❌ Aït-Nouri (Man City) - DEF - £5.8m
+
+   Transferred IN:
+      ✅ J.Timber (Arsenal) - DEF - £6.1m 🔴
+      ✅ Senesi (Bournemouth) - DEF - £5.0m 🟡
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🟢
+      DEF: Cucurella (Chelsea) 🟡
+      DEF: Senesi (Bournemouth) (VC) 🟡
+      DEF: Virgil (Liverpool) 🟢
+      DEF: J.Timber (Arsenal) (C) 🔴
+      MID: Semenyo (Bournemouth) 🟡
+      MID: B.Fernandes (Man Utd) 🟡
+      MID: Mbeumo (Man Utd) 🟡
+      FWD: Gyökeres (Arsenal) 🔴
+      FWD: Ekitiké (Liverpool) 🟢
+      FWD: João Pedro (Chelsea) 🟡
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: Konsa (Aston Villa)
+      MID: Wirtz (Liverpool)
+      MID: Sangaré (Nott'm Forest)
+
+🏟️  Fixtures:
+      Liverpool vs Everton
+      Brighton vs Spurs
+      Burnley vs Nott'm Forest
+      West Ham vs Crystal Palace
+      Wolves vs Leeds
+      Man Utd vs Chelsea
+      Fulham vs Brentford
+      Bournemouth vs Newcastle
+      Sunderland vs Aston Villa
+      Arsenal vs Man City
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 6
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 40
+   Rank: 6,896,573
+   Overall Rank: 3,856,951
+   Bank: £1.0m
+   Team Value: £101.1m
+
+🔄 Transfers:
+   Number of Transfers: 1
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Konsa (Aston Villa) - DEF - £4.4m
+
+   Transferred IN:
+      ✅ Guéhi (Crystal Palace) - DEF - £5.0m 🔴
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🔴
+      DEF: Guéhi (Crystal Palace) (VC) 🔴
+      DEF: Senesi (Bournemouth) 🟡
+      DEF: Virgil (Liverpool) 🟡
+      DEF: J.Timber (Arsenal) 🔴
+      MID: Semenyo (Bournemouth) (C) 🟡
+      MID: B.Fernandes (Man Utd) 🟡
+      MID: Mbeumo (Man Utd) 🟡
+      MID: Wirtz (Liverpool) 🟡
+      FWD: Gyökeres (Arsenal) 🔴
+      FWD: João Pedro (Chelsea) 🟡
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: Cucurella (Chelsea)
+      MID: Sangaré (Nott'm Forest)
+      FWD: Ekitiké (Liverpool)
+
+🏟️  Fixtures:
+      Brentford vs Man Utd
+      Chelsea vs Brighton
+      Crystal Palace vs Liverpool
+      Leeds vs Bournemouth
+      Man City vs Burnley
+      Nott'm Forest vs Sunderland
+      Spurs vs Wolves
+      Aston Villa vs Fulham
+      Newcastle vs Arsenal
+      Everton vs West Ham
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 7
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 69
+   Rank: 3,680,658
+   Overall Rank: 3,497,968
+   Bank: £1.0m
+   Team Value: £101.1m
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🟡
+      DEF: Guéhi (Crystal Palace) (VC) 🟡
+      DEF: Senesi (Bournemouth) 🟢
+      DEF: Virgil (Liverpool) 🟡
+      DEF: J.Timber (Arsenal) 🟢
+      MID: Semenyo (Bournemouth) (C) 🟢
+      MID: B.Fernandes (Man Utd) 🟢
+      MID: Mbeumo (Man Utd) 🟢
+      MID: Wirtz (Liverpool) 🟡
+      FWD: Gyökeres (Arsenal) 🟢
+      FWD: João Pedro (Chelsea) 🔴
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: Cucurella (Chelsea)
+      MID: Sangaré (Nott'm Forest)
+      FWD: Ekitiké (Liverpool)
+
+🏟️  Fixtures:
+      Bournemouth vs Fulham
+      Leeds vs Spurs
+      Arsenal vs West Ham
+      Man Utd vs Sunderland
+      Chelsea vs Liverpool
+      Aston Villa vs Burnley
+      Everton vs Crystal Palace
+      Newcastle vs Nott'm Forest
+      Wolves vs Brighton
+      Brentford vs Man City
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 8
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 56
+   Rank: 6,393,978
+   Overall Rank: 3,790,091
+   Bank: £4.2m
+   Team Value: £101.3m
+
+🔄 Transfers:
+   Number of Transfers: 1
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Wirtz (Liverpool) - MID - £8.0m
+
+   Transferred IN:
+      ✅ Longstaff (Leeds) - MID - £4.9m 🟢
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Dúbravka (Burnley) 🟢
+      DEF: Guéhi (Crystal Palace) 🟡
+      DEF: Senesi (Bournemouth) 🟡
+      DEF: Virgil (Liverpool) 🟡
+      DEF: Cucurella (Chelsea) 🟡
+      MID: Semenyo (Bournemouth) (C) 🟡
+      MID: B.Fernandes (Man Utd) 🔴
+      MID: Mbeumo (Man Utd) 🔴
+      MID: Longstaff (Leeds) (VC) 🟢
+      FWD: Ekitiké (Liverpool) 🟡
+      FWD: João Pedro (Chelsea) 🟡
+
+   Bench:
+      GKP: Sels (Nott'm Forest)
+      DEF: J.Timber (Arsenal)
+      MID: Sangaré (Nott'm Forest)
+      FWD: Gyökeres (Arsenal)
+
+🏟️  Fixtures:
+      Nott'm Forest vs Chelsea
+      Brighton vs Newcastle
+      Burnley vs Leeds
+      Crystal Palace vs Bournemouth
+      Man City vs Everton
+      Sunderland vs Wolves
+      Fulham vs Arsenal
+      Spurs vs Aston Villa
+      Liverpool vs Man Utd
+      West Ham vs Brentford
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 9
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 48
+   Rank: 5,084,106
+   Overall Rank: 3,740,301
+   Bank: £1.2m
+   Team Value: £100.4m
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Roefs (Sunderland) 🟡
+      DEF: Calafiori (Arsenal) 🟡
+      DEF: Gabriel (Arsenal) 🟡
+      DEF: J.Timber (Arsenal) 🟡
+      DEF: Tarkowski (Everton) 🟡
+      MID: Semenyo (Bournemouth) 🟢
+      MID: Kudus (Spurs) 🟡
+      MID: Bentancur (Spurs) 🟡
+      FWD: Woltemade (Newcastle) 🟢
+      FWD: Haaland (Man City) (C) 🟡
+      FWD: Mateta (Crystal Palace) (VC) 🔴
+
+   Bench:
+      GKP: Lammens (Man Utd)
+      DEF: Diakité (Bournemouth)
+      MID: Cullen (Burnley)
+      MID: Estêvão (Chelsea)
+
+🏟️  Fixtures:
+      Leeds vs West Ham
+      Chelsea vs Sunderland
+      Newcastle vs Fulham
+      Man Utd vs Brighton
+      Brentford vs Liverpool
+      Arsenal vs Crystal Palace
+      Aston Villa vs Man City
+      Bournemouth vs Nott'm Forest
+      Wolves vs Burnley
+      Everton vs Spurs
+
+────────────────────────────────────────────────────────────────────────────────
+GAMEWEEK 10
+────────────────────────────────────────────────────────────────────────────────
+
+📊 Performance:
+   Points: 60
+   Rank: 8,320,040
+   Overall Rank: 4,275,179
+   Bank: £1.0m
+   Team Value: £101.0m
+
+🔄 Transfers:
+   Number of Transfers: 2
+   Transfer Cost: 0 points
+
+   Transferred OUT:
+      ❌ Bentancur (Spurs) - MID - £5.3m
+      ❌ Estêvão (Chelsea) - MID - £6.5m
+
+   Transferred IN:
+      ✅ Munetsi (Wolves) - MID - £5.4m 🟡
+      ✅ Sarr (Crystal Palace) - MID - £6.6m 🟡
+
+⚽ Team Selection:
+
+   Starting XI:
+      GKP: Roefs (Sunderland) 🟢
+      DEF: Tarkowski (Everton) 🟡
+      DEF: Gabriel (Arsenal) 🟢
+      DEF: J.Timber (Arsenal) 🟢
+      DEF: Calafiori (Arsenal) 🟢
+      MID: Munetsi (Wolves) 🟡
+      MID: Sarr (Crystal Palace) 🟡
+      MID: Kudus (Spurs) (C) 🟡
+      MID: Cullen (Burnley) 🔴
+      FWD: Mateta (Crystal Palace) 🟡
+      FWD: Haaland (Man City) (VC) 🟡
+
+   Bench:
+      GKP: Lammens (Man Utd)
+      MID: Semenyo (Bournemouth)
+      DEF: Diakité (Bournemouth)
+      FWD: Woltemade (Newcastle)
+
+🏟️  Fixtures:
+      Brighton vs Leeds
+      Burnley vs Arsenal
+      Crystal Palace vs Brentford
+      Fulham vs Wolves
+      Nott'm Forest vs Man Utd
+      Spurs vs Chelsea
+      Liverpool vs Aston Villa
+      West Ham vs Newcastle
+      Man City vs Bournemouth
+      Sunderland vs Everton
+
+================================================================================
+ANALYSIS COMPLETE
+================================================================================
