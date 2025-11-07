@@ -262,7 +262,9 @@ class TestOptimizerUsesAdjustedXP:
             ]
         )
 
-    def test_optimizer_prefers_fit_players_over_injured(self, service, players_with_injuries):
+    def test_optimizer_prefers_fit_players_over_injured(
+        self, service, players_with_injuries
+    ):
         """Test that optimizer prefers fully fit players when base xP is similar."""
         # Add enough players to make a valid squad (need 15 total, with proper position distribution)
         all_players = []

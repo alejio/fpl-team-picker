@@ -103,7 +103,9 @@ class TestExhaustiveSearch:
         original_max = config.optimization.sa_exhaustive_search_max_transfers
         try:
             config.optimization.sa_exhaustive_search_max_transfers = 2
-            config.optimization.sa_use_consensus_mode = False  # Disable consensus to test exhaustive
+            config.optimization.sa_use_consensus_mode = (
+                False  # Disable consensus to test exhaustive
+            )
 
             squad_df, result_summary, metadata = (
                 optimization_service.optimize_transfers(
@@ -139,12 +141,10 @@ class TestExhaustiveSearch:
             # Run multiple times - should get same result (exhaustive is deterministic)
             results = []
             for _ in range(3):
-                squad_df, result_summary, _ = (
-                    optimization_service.optimize_transfers(
-                        current_squad=current_squad,
-                        team_data=team_data,
-                        players_with_xp=sample_players,
-                    )
+                squad_df, result_summary, _ = optimization_service.optimize_transfers(
+                    current_squad=current_squad,
+                    team_data=team_data,
+                    players_with_xp=sample_players,
                 )
                 results.append(result_summary["net_xp"])
 
@@ -167,7 +167,9 @@ class TestConsensusMode:
         original_exhaustive = config.optimization.sa_exhaustive_search_max_transfers
         try:
             config.optimization.sa_consensus_runs = 3
-            config.optimization.sa_exhaustive_search_max_transfers = 0  # Disable exhaustive
+            config.optimization.sa_exhaustive_search_max_transfers = (
+                0  # Disable exhaustive
+            )
             config.optimization.sa_use_consensus_mode = True
 
             squad_df, result_summary, metadata = (
@@ -203,12 +205,10 @@ class TestConsensusMode:
             config.optimization.sa_random_seed = None  # Allow variation
 
             # Run consensus mode
-            squad_df, result_summary, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df, result_summary, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Should find valid solution
@@ -237,12 +237,10 @@ class TestRandomSeedReproducibility:
             config.optimization.sa_use_consensus_mode = False  # Single run
 
             # Run with seed set
-            squad_df1, result_summary1, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df1, result_summary1, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Should produce valid results
@@ -268,22 +266,18 @@ class TestRandomSeedReproducibility:
 
             # Run with seed 1
             config.optimization.sa_random_seed = 1
-            squad_df1, result_summary1, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df1, result_summary1, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Run with seed 2
             config.optimization.sa_random_seed = 2
-            squad_df2, result_summary2, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df2, result_summary2, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Different seeds should potentially produce different results
@@ -315,12 +309,10 @@ class TestDeterministicMode:
             config.optimization.sa_exhaustive_search_max_transfers = 0
             config.optimization.sa_use_consensus_mode = False
 
-            squad_df, result_summary, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df, result_summary, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Should complete successfully
@@ -344,14 +336,14 @@ class TestIntegrationStability:
         original_consensus = config.optimization.sa_use_consensus_mode
         try:
             config.optimization.sa_exhaustive_search_max_transfers = 1
-            config.optimization.sa_use_consensus_mode = True  # Enabled but should be bypassed
+            config.optimization.sa_use_consensus_mode = (
+                True  # Enabled but should be bypassed
+            )
 
-            squad_df, result_summary, _ = (
-                optimization_service.optimize_transfers(
-                    current_squad=current_squad,
-                    team_data=team_data,
-                    players_with_xp=sample_players,
-                )
+            squad_df, result_summary, _ = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
             )
 
             # Should use exhaustive search (guaranteed optimal)
