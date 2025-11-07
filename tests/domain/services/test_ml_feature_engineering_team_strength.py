@@ -90,35 +90,41 @@ def mock_player_data():
 def minimal_enhanced_data():
     """Minimal ownership, value, and fixture difficulty data for testing."""
     # Need GW5 data for shift(1) to work with GW6-7 predictions
-    ownership = pd.DataFrame({
-        "player_id": [1, 1, 1, 2, 2, 2],
-        "gameweek": [5, 6, 7, 5, 6, 7],
-        "selected_by_percent": [5.0, 5.0, 5.0, 10.0, 10.0, 10.0],
-        "net_transfers_gw": [0, 0, 0, 100, 100, 100],
-        "avg_net_transfers_5gw": [0, 0, 0, 50, 50, 50],
-        "transfer_momentum": ["neutral"] * 6,
-        "ownership_velocity": [0] * 6,
-        "ownership_tier": ["budget"] * 3 + ["popular"] * 3,
-        "bandwagon_score": [0] * 6,
-    })
+    ownership = pd.DataFrame(
+        {
+            "player_id": [1, 1, 1, 2, 2, 2],
+            "gameweek": [5, 6, 7, 5, 6, 7],
+            "selected_by_percent": [5.0, 5.0, 5.0, 10.0, 10.0, 10.0],
+            "net_transfers_gw": [0, 0, 0, 100, 100, 100],
+            "avg_net_transfers_5gw": [0, 0, 0, 50, 50, 50],
+            "transfer_momentum": ["neutral"] * 6,
+            "ownership_velocity": [0] * 6,
+            "ownership_tier": ["budget"] * 3 + ["popular"] * 3,
+            "bandwagon_score": [0] * 6,
+        }
+    )
 
-    value = pd.DataFrame({
-        "player_id": [1, 1, 1, 2, 2, 2],
-        "gameweek": [5, 6, 7, 5, 6, 7],
-        "points_per_pound": [0.8] * 3 + [1.0] * 3,
-        "value_vs_position": [1.0] * 6,
-        "predicted_price_change_1gw": [0] * 6,
-        "price_volatility": [0] * 6,
-        "price_risk": [0] * 6,
-    })
+    value = pd.DataFrame(
+        {
+            "player_id": [1, 1, 1, 2, 2, 2],
+            "gameweek": [5, 6, 7, 5, 6, 7],
+            "points_per_pound": [0.8] * 3 + [1.0] * 3,
+            "value_vs_position": [1.0] * 6,
+            "predicted_price_change_1gw": [0] * 6,
+            "price_volatility": [0] * 6,
+            "price_risk": [0] * 6,
+        }
+    )
 
-    fixture_diff = pd.DataFrame({
-        "team_id": [1, 1, 1, 2, 2, 2, 3, 3, 4, 4],
-        "gameweek": [5, 6, 7, 5, 6, 7, 6, 7, 6, 7],
-        "congestion_difficulty": [1.0] * 10,
-        "form_difficulty": [1.0] * 10,
-        "clean_sheet_probability": [0.3] * 10,
-    })
+    fixture_diff = pd.DataFrame(
+        {
+            "team_id": [1, 1, 1, 2, 2, 2, 3, 3, 4, 4],
+            "gameweek": [5, 6, 7, 5, 6, 7, 6, 7, 6, 7],
+            "congestion_difficulty": [1.0] * 10,
+            "form_difficulty": [1.0] * 10,
+            "clean_sheet_probability": [0.3] * 10,
+        }
+    )
 
     return {
         "ownership": ownership,
@@ -133,27 +139,28 @@ def mock_betting_features():
     data = []
     for gw in range(5, 10):
         for player_id in range(1, 10):
-            data.append({
-                "player_id": player_id,
-                "gameweek": gw,
-                "team_win_probability": 0.40,
-                "opponent_win_probability": 0.30,
-                "draw_probability": 0.30,
-                "implied_clean_sheet_probability": 0.35,
-                "implied_total_goals": 2.5,
-                "team_expected_goals": 1.3,
-                "market_consensus_strength": 0.6,
-                "odds_movement_team": 0.0,
-                "odds_movement_magnitude": 0.1,
-                "favorite_status": 0.5,
-                "asian_handicap_line": 0.0,
-                "handicap_team_odds": 1.9,
-                "expected_goal_difference": 0.0,
-                "over_under_signal": 0.1,
-                "referee_encoded": 5,
-            })
+            data.append(
+                {
+                    "player_id": player_id,
+                    "gameweek": gw,
+                    "team_win_probability": 0.40,
+                    "opponent_win_probability": 0.30,
+                    "draw_probability": 0.30,
+                    "implied_clean_sheet_probability": 0.35,
+                    "implied_total_goals": 2.5,
+                    "team_expected_goals": 1.3,
+                    "market_consensus_strength": 0.6,
+                    "odds_movement_team": 0.0,
+                    "odds_movement_magnitude": 0.1,
+                    "favorite_status": 0.5,
+                    "asian_handicap_line": 0.0,
+                    "handicap_team_odds": 1.9,
+                    "expected_goal_difference": 0.0,
+                    "over_under_signal": 0.1,
+                    "referee_encoded": 5,
+                }
+            )
     return pd.DataFrame(data)
-
 
 
 class TestCalculatePerGameweekTeamStrength:
@@ -206,7 +213,12 @@ class TestCalculatePerGameweekTeamStrength:
 
         def mock_get_strength(target_gameweek, teams_data, current_season_data=None):
             called_gameweeks.append(target_gameweek)
-            return {"Arsenal": 1.2, "Liverpool": 1.25, "Man City": 1.23, "Leicester": 1.1}
+            return {
+                "Arsenal": 1.2,
+                "Liverpool": 1.25,
+                "Man City": 1.23,
+                "Leicester": 1.1,
+            }
 
         mock_service.get_team_strength = mock_get_strength
 
@@ -260,7 +272,6 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
             team_strength=per_gw_strength,
-
             betting_features_df=mock_betting_features,
         )
 
@@ -274,14 +285,18 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
             team_strength=static_strength,
-
             betting_features_df=mock_betting_features,
         )
 
         assert engineer._is_per_gameweek_strength is False
 
     def test_applies_per_gameweek_strength_correctly(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
+        self,
+        mock_teams_data,
+        mock_fixtures_data,
+        mock_player_data,
+        minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that per-gameweek strength is applied correctly to features."""
         # Different strength for GW6 vs GW7
@@ -297,7 +312,6 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
-
             betting_features_df=mock_betting_features,
         )
 
@@ -316,10 +330,20 @@ class TestFPLFeatureEngineerPerGameweekStrength:
         assert not np.array_equal(gw6_strengths, gw7_strengths)
 
     def test_backward_compatible_with_static_strength(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
+        self,
+        mock_teams_data,
+        mock_fixtures_data,
+        mock_player_data,
+        minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that static format still works (backward compatibility)."""
-        static_strength = {"Arsenal": 1.2, "Liverpool": 1.25, "Man City": 1.23, "Leicester": 1.1}
+        static_strength = {
+            "Arsenal": 1.2,
+            "Liverpool": 1.25,
+            "Man City": 1.23,
+            "Leicester": 1.1,
+        }
 
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
@@ -328,7 +352,6 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
-
             betting_features_df=mock_betting_features,
         )
 
@@ -350,12 +373,16 @@ class TestFPLFeatureEngineerPerGameweekStrength:
                 fixtures_df=mock_fixtures_data,
                 teams_df=mock_teams_data,
                 team_strength=invalid_strength,
-
-            betting_features_df=mock_betting_features,
-        )
+                betting_features_df=mock_betting_features,
+            )
 
     def test_empty_strength_dict_handled(
-        self, mock_teams_data, mock_fixtures_data, mock_player_data, minimal_enhanced_data, mock_betting_features
+        self,
+        mock_teams_data,
+        mock_fixtures_data,
+        mock_player_data,
+        minimal_enhanced_data,
+        mock_betting_features,
     ):
         """Test that empty team_strength dict is handled gracefully."""
         engineer = FPLFeatureEngineer(
@@ -365,7 +392,6 @@ class TestFPLFeatureEngineerPerGameweekStrength:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
-
             betting_features_df=mock_betting_features,
         )
 
@@ -396,7 +422,12 @@ class TestIntegration:
 
         def mock_get_strength(target_gameweek, teams_data, current_season_data=None):
             # Return different values per gameweek to simulate evolution
-            base = {"Arsenal": 1.2, "Liverpool": 1.25, "Man City": 1.23, "Leicester": 1.1}
+            base = {
+                "Arsenal": 1.2,
+                "Liverpool": 1.25,
+                "Man City": 1.23,
+                "Leicester": 1.1,
+            }
             return {team: val + (target_gameweek * 0.01) for team, val in base.items()}
 
         mock_service.get_team_strength = mock_get_strength
@@ -414,7 +445,6 @@ class TestIntegration:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
-
             betting_features_df=mock_betting_features,
         )
 

@@ -156,9 +156,9 @@ class TestTeamAnalyticsServiceBasics:
             )
 
             for team, rating in strength.items():
-                assert (
-                    0.7 <= rating <= 1.3
-                ), f"{team} strength {rating} outside [0.7, 1.3] range"
+                assert 0.7 <= rating <= 1.3, (
+                    f"{team} strength {rating} outside [0.7, 1.3] range"
+                )
 
 
 class TestDynamicTeamStrength:
@@ -345,9 +345,12 @@ class TestWrapperFunctionCompatibility:
         mock_teams = pd.DataFrame({"name": ["Liverpool", "Arsenal"]})
 
         # Patch FPLDataClient where it's imported (in client module)
-        with patch("client.FPLDataClient") as mock_client, patch(
-            "fpl_team_picker.domain.services.team_analytics_service.TeamAnalyticsService"
-        ) as mock_service:
+        with (
+            patch("client.FPLDataClient") as mock_client,
+            patch(
+                "fpl_team_picker.domain.services.team_analytics_service.TeamAnalyticsService"
+            ) as mock_service,
+        ):
             mock_client_instance = Mock()
             mock_client_instance.get_current_teams.return_value = mock_teams
             mock_client.return_value = mock_client_instance
@@ -512,7 +515,9 @@ class TestEdgeCasesAndErrorHandling:
 
         # Force an error by providing invalid teams data
         with patch.object(
-            service, "_calculate_multi_factor_strength", side_effect=Exception("Test error")
+            service,
+            "_calculate_multi_factor_strength",
+            side_effect=Exception("Test error"),
         ):
             strength = service._get_historical_baseline(mock_teams_data)
 
@@ -550,9 +555,9 @@ class TestEdgeCasesAndErrorHandling:
             for team, rating in strength.items():
                 assert not np.isnan(rating), f"{team} has NaN rating"
                 assert not np.isinf(rating), f"{team} has inf rating"
-                assert isinstance(
-                    rating, (float, np.floating)
-                ), f"{team} rating is not numeric"
+                assert isinstance(rating, (float, np.floating)), (
+                    f"{team} rating is not numeric"
+                )
 
 
 class TestConsistencyAcrossInvocations:

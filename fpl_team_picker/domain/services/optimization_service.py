@@ -721,6 +721,13 @@ class OptimizationService:
         if len(current_squad) == 0 or players_with_xp.empty or not team_data:
             return pd.DataFrame(), {}, {"error": "Load team and calculate XP first"}
 
+        # Set random seed for reproducibility if configured
+        if config.optimization.sa_random_seed is not None:
+            random.seed(config.optimization.sa_random_seed)
+            logger.debug(
+                f"🎲 Random seed set to {config.optimization.sa_random_seed} for reproducibility"
+            )
+
         logger.info(
             f"🧠 Strategic Optimization: Simulated Annealing ({config.optimization.sa_iterations} iterations)..."
         )
@@ -832,15 +839,32 @@ class OptimizationService:
             logger.info(
                 "🃏 Wildcard mode: Building optimal squad from scratch (ignoring current squad)"
             )
-            wildcard_result = self.optimize_initial_squad(
-                players_with_xp=all_players,
-                budget=100.0,  # Wildcard always £100m
-                formation=(2, 5, 5, 3),
-                iterations=config.optimization.sa_iterations,
-                must_include_ids=must_include_ids,
-                must_exclude_ids=must_exclude_ids,
-                xp_column=xp_column,
-            )
+
+            # Check if consensus mode is enabled for wildcard
+            if config.optimization.sa_wildcard_use_consensus:
+                logger.info(
+                    f"🎯 Wildcard Consensus: Running {config.optimization.sa_wildcard_restarts} restarts "
+                    f"× {config.optimization.sa_wildcard_iterations} iterations each to find truly optimal squad..."
+                )
+                wildcard_result = self._consensus_wildcard_optimization(
+                    players_with_xp=all_players,
+                    budget=100.0,
+                    formation=(2, 5, 5, 3),
+                    must_include_ids=must_include_ids,
+                    must_exclude_ids=must_exclude_ids,
+                    xp_column=xp_column,
+                )
+            else:
+                # Single run mode (faster but less reliable)
+                wildcard_result = self.optimize_initial_squad(
+                    players_with_xp=all_players,
+                    budget=100.0,  # Wildcard always £100m
+                    formation=(2, 5, 5, 3),
+                    iterations=config.optimization.sa_wildcard_iterations,
+                    must_include_ids=must_include_ids,
+                    must_exclude_ids=must_exclude_ids,
+                    xp_column=xp_column,
+                )
 
             # Convert initial squad result to transfer optimization format
             optimal_squad = wildcard_result["optimal_squad"]
@@ -854,26 +878,27 @@ class OptimizationService:
             sa_result = {
                 "optimal_squad": optimal_squad,
                 "best_xp": wildcard_result["total_xp"],
-                "iterations_improved": wildcard_result["iterations_improved"],
+                "iterations_improved": wildcard_result.get(
+                    "iterations_improved", wildcard_result.get("total_improvements", 0)
+                ),
                 "total_iterations": wildcard_result["total_iterations"],
+                "formation": wildcard_result.get("formation", "2-5-5-3"),
             }
+            if "consensus_confidence" in wildcard_result:
+                sa_result["consensus_confidence"] = wildcard_result[
+                    "consensus_confidence"
+                ]
+                sa_result["consensus_runs"] = wildcard_result["consensus_runs"]
             best_sa_result = sa_result
 
         else:
-            # Normal transfers: Run multiple SA restarts to find global optimum
-            num_restarts = config.optimization.sa_restarts
-            logger.info(
-                f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
-            )
-
-            best_sa_result = None
-            best_net_xp = float("-inf")
-
-            for restart in range(num_restarts):
-                if num_restarts > 1:
-                    logger.debug(f"  Restart {restart + 1}/{num_restarts}...")
-
-                sa_result = self._run_transfer_sa(
+            # Check if we should use exhaustive search for small transfer counts
+            max_exhaustive = config.optimization.sa_exhaustive_search_max_transfers
+            if max_exhaustive > 0 and free_transfers <= max_exhaustive:
+                logger.info(
+                    f"🔍 Using exhaustive search for {free_transfers} free transfer(s) (guaranteed optimal)..."
+                )
+                exhaustive_result = self._exhaustive_transfer_search(
                     current_squad=current_squad_with_xp,
                     all_players=all_players,
                     available_budget=available_budget,
@@ -882,30 +907,91 @@ class OptimizationService:
                     must_exclude_ids=must_exclude_ids,
                     xp_column=xp_column,
                     current_xp=current_xp,
-                    iterations=config.optimization.sa_iterations,
+                    max_transfers=max_exhaustive,
                 )
+                if exhaustive_result:
+                    sa_result = exhaustive_result
+                    best_net_xp = exhaustive_result["best_xp"]
+                    logger.info(
+                        f"✅ Exhaustive search complete: {best_net_xp:.2f} net xP"
+                    )
+                else:
+                    # Fallback to SA if exhaustive fails
+                    logger.warning("⚠️ Exhaustive search failed, falling back to SA")
+                    sa_result = None
+            else:
+                sa_result = None
 
-                # Calculate net XP for this restart (including penalty)
-                best_squad_df = pd.DataFrame(sa_result["optimal_squad"])
-                original_ids = set(current_squad_with_xp["player_id"].tolist())
-                new_ids = set(best_squad_df["player_id"].tolist())
-                num_transfers = len(original_ids - new_ids)
-                transfer_penalty = (
-                    max(0, num_transfers - free_transfers)
-                    * config.optimization.transfer_cost
-                )
-                net_xp = sa_result["best_xp"] - transfer_penalty
+            # Use SA if exhaustive wasn't used or failed
+            if sa_result is None:
+                # Check if consensus mode is enabled
+                if config.optimization.sa_use_consensus_mode:
+                    logger.info(
+                        f"🎯 Consensus mode: Running {config.optimization.sa_consensus_runs} full optimizations to find truly optimal solution..."
+                    )
+                    sa_result = self._consensus_optimization(
+                        current_squad=current_squad_with_xp,
+                        all_players=all_players,
+                        available_budget=available_budget,
+                        free_transfers=free_transfers,
+                        must_include_ids=must_include_ids,
+                        must_exclude_ids=must_exclude_ids,
+                        xp_column=xp_column,
+                        current_xp=current_xp,
+                    )
+                    best_net_xp = sa_result["best_xp"]
+                else:
+                    # Normal mode: Run multiple SA restarts to find global optimum
+                    num_restarts = config.optimization.sa_restarts
+                    logger.info(
+                        f"🔄 Running {num_restarts} SA restart(s) with {config.optimization.sa_iterations} iterations each..."
+                    )
 
-                if net_xp > best_net_xp:
-                    best_net_xp = net_xp
-                    best_sa_result = sa_result
-                    if num_restarts > 1:
-                        logger.debug(
-                            f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
+                    best_sa_result = None
+                    best_net_xp = float("-inf")
+
+                    for restart in range(num_restarts):
+                        if num_restarts > 1:
+                            logger.debug(f"  Restart {restart + 1}/{num_restarts}...")
+                            # Use different seed for each restart if seed is set (for diversity)
+                            if config.optimization.sa_random_seed is not None:
+                                random.seed(
+                                    config.optimization.sa_random_seed + restart
+                                )
+
+                        sa_result_restart = self._run_transfer_sa(
+                            current_squad=current_squad_with_xp,
+                            all_players=all_players,
+                            available_budget=available_budget,
+                            free_transfers=free_transfers,
+                            must_include_ids=must_include_ids,
+                            must_exclude_ids=must_exclude_ids,
+                            xp_column=xp_column,
+                            current_xp=current_xp,
+                            iterations=config.optimization.sa_iterations,
                         )
 
-            sa_result = best_sa_result
-            logger.info(f"✅ Best result: {best_net_xp:.2f} net xP")
+                        # Calculate net XP for this restart (including penalty)
+                        best_squad_df = pd.DataFrame(sa_result_restart["optimal_squad"])
+                        original_ids = set(current_squad_with_xp["player_id"].tolist())
+                        new_ids = set(best_squad_df["player_id"].tolist())
+                        num_transfers = len(original_ids - new_ids)
+                        transfer_penalty = (
+                            max(0, num_transfers - free_transfers)
+                            * config.optimization.transfer_cost
+                        )
+                        net_xp = sa_result_restart["best_xp"] - transfer_penalty
+
+                        if net_xp > best_net_xp:
+                            best_net_xp = net_xp
+                            best_sa_result = sa_result_restart
+                            if num_restarts > 1:
+                                logger.debug(
+                                    f"    → New best: {net_xp:.2f} net xP ({num_transfers} transfers)"
+                                )
+
+                    sa_result = best_sa_result
+                    logger.info(f"✅ Best result: {best_net_xp:.2f} net xP")
 
         # Create best scenario from SA result
         best_squad = sa_result["optimal_squad"]
@@ -1253,10 +1339,27 @@ class OptimizationService:
                 if not valid_targets.empty:
                     candidates = valid_targets
 
-            # Prefer higher xP with randomness
+            # Prefer higher xP with randomness (or deterministic if enabled)
             topk = min(10, len(candidates))
             candidates = candidates.nlargest(topk, xp_column)
-            replacement = candidates.sample(n=1).iloc[0].to_dict()
+
+            if config.optimization.sa_deterministic_mode and len(candidates) > 1:
+                # In deterministic mode, check if top candidate is significantly better
+                top_xp = candidates.iloc[0][xp_column]
+                second_xp = (
+                    candidates.iloc[1][xp_column] if len(candidates) > 1 else top_xp
+                )
+                xp_gap = top_xp - second_xp
+
+                # If top candidate is clearly better (>0.5 xP), always pick it
+                if xp_gap > 0.5:
+                    replacement = candidates.iloc[0].to_dict()
+                else:
+                    # Small gap: use weighted sampling (still some randomness for exploration)
+                    replacement = candidates.sample(n=1).iloc[0].to_dict()
+            else:
+                # Normal mode: always use weighted sampling for exploration
+                replacement = candidates.sample(n=1).iloc[0].to_dict()
 
             replacements.append(replacement)
             team_player_ids.add(replacement["player_id"])
@@ -1490,6 +1593,9 @@ class OptimizationService:
         This implements the proven algorithm from season_planner.py with
         improvements: removed debug code, proper error handling, clean structure.
         """
+        # Set random seed for reproducibility if configured
+        if config.optimization.sa_random_seed is not None:
+            random.seed(config.optimization.sa_random_seed)
         gkp_count, def_count, mid_count, fwd_count = formation
         position_requirements = {
             "GKP": gkp_count,
@@ -1661,21 +1767,57 @@ class OptimizationService:
                 if len(affordable) == 0:
                     return None
 
-            # Prefer higher xP with weighting
+            # Prefer higher xP with weighting (or deterministic if enabled)
             if remaining_budget > 1.0 and len(affordable) > 1:
-                weights = affordable[xp_column] * (1 + affordable["price"] / 20)
-                min_weight = weights.min()
-                if min_weight < 0:
-                    weights = weights - min_weight + 0.1
-
-                weights_array = weights.values
-                if weights_array.sum() > 0:
-                    weights_array = weights_array / weights_array.sum()
-                    new_player = (
-                        affordable.sample(n=1, weights=weights_array).iloc[0].to_dict()
+                if config.optimization.sa_deterministic_mode:
+                    # In deterministic mode, check if top candidate is significantly better
+                    affordable_sorted = affordable.sort_values(
+                        xp_column, ascending=False
                     )
+                    top_xp = affordable_sorted.iloc[0][xp_column]
+                    second_xp = (
+                        affordable_sorted.iloc[1][xp_column]
+                        if len(affordable_sorted) > 1
+                        else top_xp
+                    )
+                    xp_gap = top_xp - second_xp
+
+                    # If top candidate is clearly better (>0.5 xP), always pick it
+                    if xp_gap > 0.5:
+                        new_player = affordable_sorted.iloc[0].to_dict()
+                    else:
+                        # Small gap: use weighted sampling
+                        weights = affordable[xp_column] * (1 + affordable["price"] / 20)
+                        min_weight = weights.min()
+                        if min_weight < 0:
+                            weights = weights - min_weight + 0.1
+                        weights_array = weights.values
+                        if weights_array.sum() > 0:
+                            weights_array = weights_array / weights_array.sum()
+                            new_player = (
+                                affordable.sample(n=1, weights=weights_array)
+                                .iloc[0]
+                                .to_dict()
+                            )
+                        else:
+                            new_player = affordable.sample(n=1).iloc[0].to_dict()
                 else:
-                    new_player = affordable.sample(n=1).iloc[0].to_dict()
+                    # Normal mode: use weighted sampling
+                    weights = affordable[xp_column] * (1 + affordable["price"] / 20)
+                    min_weight = weights.min()
+                    if min_weight < 0:
+                        weights = weights - min_weight + 0.1
+
+                    weights_array = weights.values
+                    if weights_array.sum() > 0:
+                        weights_array = weights_array / weights_array.sum()
+                        new_player = (
+                            affordable.sample(n=1, weights=weights_array)
+                            .iloc[0]
+                            .to_dict()
+                        )
+                    else:
+                        new_player = affordable.sample(n=1).iloc[0].to_dict()
             else:
                 new_player = affordable.sample(n=1).iloc[0].to_dict()
 
@@ -1862,6 +2004,475 @@ class OptimizationService:
             starting_11.extend(available)
 
         return starting_11
+
+    def _consensus_wildcard_optimization(
+        self,
+        players_with_xp: pd.DataFrame,
+        budget: float,
+        formation: Tuple[int, int, int, int],
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+    ) -> Dict[str, Any]:
+        """Run wildcard optimization multiple times and find consensus optimal squad.
+
+        This addresses the problem where SA finds different "optimal" squads each run.
+        By running multiple times and aggregating results, we find the truly best squad.
+
+        Args:
+            players_with_xp: All available players with XP
+            budget: Budget (always £100m for wildcard)
+            formation: Formation tuple (GKP, DEF, MID, FWD)
+            must_include_ids: Players that must be included
+            must_exclude_ids: Players to exclude
+            xp_column: Column name for XP values
+
+        Returns:
+            Best consensus result with confidence metrics
+        """
+        num_restarts = config.optimization.sa_wildcard_restarts
+        iterations = config.optimization.sa_wildcard_iterations
+
+        logger.info(
+            f"   Running {num_restarts} wildcard optimizations ({iterations} iterations each)..."
+        )
+
+        all_results = []
+        squad_signatures = {}  # Track how often each squad appears
+
+        for restart in range(num_restarts):
+            if num_restarts > 1:
+                logger.debug(f"   Wildcard restart {restart + 1}/{num_restarts}...")
+
+            # Use different seed for each restart for diversity
+            if config.optimization.sa_random_seed is not None:
+                random.seed(config.optimization.sa_random_seed + restart * 1000)
+            else:
+                # Still use some seed for this restart to get different exploration
+                random.seed(restart * 1000)
+
+            result = self.optimize_initial_squad(
+                players_with_xp=players_with_xp,
+                budget=budget,
+                formation=formation,
+                iterations=iterations,
+                must_include_ids=must_include_ids,
+                must_exclude_ids=must_exclude_ids,
+                xp_column=xp_column,
+            )
+
+            # Create squad signature (sorted player IDs) for tracking
+            squad_ids = tuple(sorted([p["player_id"] for p in result["optimal_squad"]]))
+            squad_signatures[squad_ids] = squad_signatures.get(squad_ids, 0) + 1
+
+            all_results.append(result)
+
+        if not all_results:
+            raise ValueError(
+                "Wildcard consensus optimization failed - no valid results"
+            )
+
+        # Find the best result overall (highest xP)
+        best_overall = max(all_results, key=lambda r: r["total_xp"])
+
+        # Calculate confidence: how often did this exact squad appear?
+        best_squad_sig = tuple(
+            sorted([p["player_id"] for p in best_overall["optimal_squad"]])
+        )
+        confidence = squad_signatures.get(best_squad_sig, 0) / num_restarts
+
+        logger.info(
+            f"✅ Wildcard Consensus: Best squad found {squad_signatures.get(best_squad_sig, 0)}/{num_restarts} times "
+            f"({confidence * 100:.1f}% confidence), {best_overall['total_xp']:.2f} xP"
+        )
+
+        # Add consensus metrics to result
+        best_overall["consensus_confidence"] = confidence
+        best_overall["consensus_runs"] = num_restarts
+        best_overall["consensus_squad_frequency"] = squad_signatures
+        best_overall["total_improvements"] = best_overall.get("iterations_improved", 0)
+
+        return best_overall
+
+    def _consensus_optimization(
+        self,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        available_budget: float,
+        free_transfers: int,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+        current_xp: float,
+    ) -> Dict[str, Any]:
+        """Run optimization multiple times and find consensus optimal solution.
+
+        This addresses the problem where SA finds different "optimal" solutions each run.
+        By running multiple times and aggregating results, we find the truly best solution.
+
+        Args:
+            Same as _run_transfer_sa
+
+        Returns:
+            Best consensus result with confidence metrics
+        """
+        num_runs = config.optimization.sa_consensus_runs
+        num_restarts = config.optimization.sa_restarts
+        iterations = config.optimization.sa_iterations
+
+        logger.info(
+            f"   Running {num_runs} full optimizations ({num_restarts} restarts × {iterations} iterations each)..."
+        )
+
+        all_results = []
+        transfer_counts = {}  # Track how often each transfer combination appears
+
+        for run in range(num_runs):
+            if num_runs > 1:
+                logger.debug(f"   Consensus run {run + 1}/{num_runs}...")
+
+            # Run full SA with multiple restarts
+            best_result = None
+            best_net_xp = float("-inf")
+
+            for restart in range(num_restarts):
+                # Use different seed for each run+restart for diversity
+                if config.optimization.sa_random_seed is not None:
+                    random.seed(
+                        config.optimization.sa_random_seed + run * 1000 + restart
+                    )
+                else:
+                    # Still use some seed for this run to get different exploration
+                    random.seed(run * 1000 + restart)
+
+                sa_result = self._run_transfer_sa(
+                    current_squad=current_squad,
+                    all_players=all_players,
+                    available_budget=available_budget,
+                    free_transfers=free_transfers,
+                    must_include_ids=must_include_ids,
+                    must_exclude_ids=must_exclude_ids,
+                    xp_column=xp_column,
+                    current_xp=current_xp,
+                    iterations=iterations,
+                )
+
+                # Calculate net XP
+                best_squad_df = pd.DataFrame(sa_result["optimal_squad"])
+                original_ids = set(current_squad["player_id"].tolist())
+                new_ids = set(best_squad_df["player_id"].tolist())
+                transfers_out = original_ids - new_ids
+                transfers_in = new_ids - original_ids
+                num_transfers = len(transfers_out)
+
+                transfer_penalty = (
+                    max(0, num_transfers - free_transfers)
+                    * config.optimization.transfer_cost
+                )
+                net_xp = sa_result["best_xp"] - transfer_penalty
+
+                # Create transfer signature for tracking
+                transfer_sig = (
+                    tuple(sorted(transfers_out)),
+                    tuple(sorted(transfers_in)),
+                )
+                transfer_counts[transfer_sig] = transfer_counts.get(transfer_sig, 0) + 1
+
+                if net_xp > best_net_xp:
+                    best_net_xp = net_xp
+                    best_result = sa_result.copy()
+                    best_result["net_xp"] = net_xp
+                    best_result["transfers_out"] = transfers_out
+                    best_result["transfers_in"] = transfers_in
+
+            if best_result:
+                all_results.append(best_result)
+
+        if not all_results:
+            raise ValueError("Consensus optimization failed - no valid results")
+
+        # Find the best result overall
+        best_overall = max(all_results, key=lambda r: r["net_xp"])
+
+        # Calculate confidence: how often did this transfer appear?
+        best_transfer_sig = (
+            tuple(sorted(best_overall["transfers_out"])),
+            tuple(sorted(best_overall["transfers_in"])),
+        )
+        confidence = transfer_counts.get(best_transfer_sig, 0) / num_runs
+
+        logger.info(
+            f"✅ Consensus: Best solution found {transfer_counts.get(best_transfer_sig, 0)}/{num_runs} times "
+            f"({confidence * 100:.1f}% confidence), {best_overall['net_xp']:.2f} net xP"
+        )
+
+        # Add confidence to result
+        best_overall["consensus_confidence"] = confidence
+        best_overall["consensus_runs"] = num_runs
+        best_overall["consensus_transfer_frequency"] = transfer_counts
+
+        return best_overall
+
+    def _exhaustive_transfer_search(
+        self,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        available_budget: float,
+        free_transfers: int,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+        current_xp: float,
+        max_transfers: int,
+    ) -> Optional[Dict[str, Any]]:
+        """Exhaustive search for guaranteed optimal solution (0-N transfers).
+
+        Only feasible for small transfer counts (0-2 transfers). Guarantees finding
+        the truly optimal solution by evaluating all possible transfer combinations.
+
+        Args:
+            Same as _run_transfer_sa, plus max_transfers limit
+
+        Returns:
+            Optimal result or None if search is infeasible
+        """
+        from itertools import combinations
+
+        original_squad = current_squad.to_dict("records")
+        original_ids = {p["player_id"] for p in original_squad}
+        swappable_players = [
+            p for p in original_squad if p["player_id"] not in must_include_ids
+        ]
+
+        if len(swappable_players) == 0:
+            return None
+
+        best_result = None
+        best_net_xp = float("-inf")
+        total_combinations = 0
+
+        # Try 0 transfers first
+        starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
+        zero_transfer_xp = sum(p[xp_column] for p in starting_11)
+        if zero_transfer_xp > best_net_xp:
+            best_net_xp = zero_transfer_xp
+            best_result = {
+                "optimal_squad": original_squad,
+                "best_xp": zero_transfer_xp,
+                "net_xp": zero_transfer_xp,
+                "transfers_out": set(),
+                "transfers_in": set(),
+                "iterations_improved": 0,
+                "total_iterations": 1,
+                "formation": self._enumerate_formations_for_players(
+                    self._group_by_position(starting_11), xp_column
+                )[1],
+            }
+
+        # Try 1 to max_transfers transfers
+        for num_transfers in range(
+            1, min(max_transfers + 1, len(swappable_players) + 1)
+        ):
+            # Generate all combinations of players to transfer out
+            for out_players in combinations(swappable_players, num_transfers):
+                out_ids = {p["player_id"] for p in out_players}
+                out_value = sum(p["price"] for p in out_players)
+                out_positions = [p["position"] for p in out_players]
+
+                # Calculate available budget
+                swap_budget = available_budget + out_value
+
+                # Try to find replacements for each position
+                team_player_ids = original_ids - out_ids
+
+                # For exhaustive search, get top candidates per position
+                # For 1 transfer: try top 100 candidates (truly exhaustive)
+                # For 2 transfers: try top 50 candidates per position
+                max_candidates_per_pos = 100 if num_transfers == 1 else 50
+
+                # Get candidates for each unique position
+                pos_candidates = {}
+                for pos in set(out_positions):
+                    candidates = all_players[
+                        (all_players["position"] == pos)
+                        & (~all_players["player_id"].isin(team_player_ids))
+                        & (~all_players["player_id"].isin(must_exclude_ids))
+                        & (all_players["price"] <= swap_budget)  # Can use full budget
+                    ].nlargest(max_candidates_per_pos, xp_column)
+                    pos_candidates[pos] = (
+                        candidates.to_dict("records") if not candidates.empty else []
+                    )
+
+                # For single transfer, try ALL candidates (truly exhaustive)
+                if num_transfers == 1:
+                    pos = out_positions[0]
+                    if pos not in pos_candidates or not pos_candidates[pos]:
+                        continue
+
+                    # Try EVERY candidate for this position
+                    for candidate in pos_candidates[pos]:
+                        if candidate["price"] > swap_budget:
+                            continue
+
+                        # Check 3-per-team constraint
+                        candidate_team = candidate.get("team", candidate.get("team_id"))
+                        existing_count = sum(
+                            1
+                            for p in original_squad
+                            if p["player_id"] not in out_ids
+                            and p.get("team", p.get("team_id")) == candidate_team
+                        )
+                        if existing_count >= 3:
+                            continue  # Would violate 3-per-team
+
+                        # Valid candidate - evaluate this transfer
+                        replacements = [candidate]
+                        total_combinations += 1
+                        if total_combinations % 1000 == 0:
+                            logger.debug(
+                                f"   Evaluated {total_combinations} combinations..."
+                            )
+
+                        # Build new squad
+                        new_squad = []
+                        out_ids_set = out_ids
+
+                        for player in original_squad:
+                            if player["player_id"] in out_ids_set:
+                                new_squad.append(candidate)
+                            else:
+                                new_squad.append(player)
+
+                        # Validate constraints (should already be valid, but double-check)
+                        team_counts = self._count_players_per_team(new_squad)
+                        if any(count > 3 for count in team_counts.values()):
+                            continue
+
+                        # Calculate XP
+                        starting_11 = self._get_best_starting_11_from_squad(
+                            new_squad, xp_column
+                        )
+                        squad_xp = sum(p[xp_column] for p in starting_11)
+                        transfer_penalty = (
+                            max(0, num_transfers - free_transfers)
+                            * config.optimization.transfer_cost
+                        )
+                        net_xp = squad_xp - transfer_penalty
+
+                        if net_xp > best_net_xp:
+                            best_net_xp = net_xp
+                            in_ids = {candidate["player_id"]}
+                            best_result = {
+                                "optimal_squad": new_squad,
+                                "best_xp": squad_xp,
+                                "net_xp": net_xp,
+                                "transfers_out": out_ids,
+                                "transfers_in": in_ids,
+                                "iterations_improved": 1,
+                                "total_iterations": total_combinations,
+                                "formation": self._enumerate_formations_for_players(
+                                    self._group_by_position(starting_11), xp_column
+                                )[1],
+                            }
+                else:
+                    # For 2+ transfers, try all combinations of top candidates
+                    from itertools import product
+
+                    # Build list of candidate lists for each position
+                    replacement_combos = []
+                    for pos in out_positions:
+                        if pos not in pos_candidates or not pos_candidates[pos]:
+                            break
+                        replacement_combos.append(pos_candidates[pos])
+                    else:
+                        # All positions have candidates - try all combinations
+                        for replacement_combo in product(*replacement_combos):
+                            # Check budget
+                            combo_cost = sum(p["price"] for p in replacement_combo)
+                            if combo_cost > swap_budget:
+                                continue
+
+                            # Check for duplicates
+                            combo_ids = {p["player_id"] for p in replacement_combo}
+                            if len(combo_ids) != len(replacement_combo):
+                                continue
+
+                            # Check 3-per-team constraint
+                            combo_teams = {}
+                            for p in replacement_combo:
+                                team = p.get("team", p.get("team_id"))
+                                combo_teams[team] = combo_teams.get(team, 0) + 1
+
+                            existing_teams = {}
+                            for p in original_squad:
+                                if p["player_id"] not in out_ids:
+                                    team = p.get("team", p.get("team_id"))
+                                    existing_teams[team] = (
+                                        existing_teams.get(team, 0) + 1
+                                    )
+
+                            violates_constraint = False
+                            for team, count in combo_teams.items():
+                                existing = existing_teams.get(team, 0)
+                                if existing + count > 3:
+                                    violates_constraint = True
+                                    break
+
+                            if violates_constraint:
+                                continue
+
+                            # Valid combination - evaluate
+                            replacements = list(replacement_combo)
+                            total_combinations += 1
+                            if total_combinations % 1000 == 0:
+                                logger.debug(
+                                    f"   Evaluated {total_combinations} combinations..."
+                                )
+
+                            # Build new squad
+                            new_squad = []
+                            out_ids_set = out_ids
+                            replacement_iter = iter(replacements)
+
+                            for player in original_squad:
+                                if player["player_id"] in out_ids_set:
+                                    new_squad.append(next(replacement_iter))
+                                else:
+                                    new_squad.append(player)
+
+                            # Calculate XP
+                            starting_11 = self._get_best_starting_11_from_squad(
+                                new_squad, xp_column
+                            )
+                            squad_xp = sum(p[xp_column] for p in starting_11)
+                            transfer_penalty = (
+                                max(0, num_transfers - free_transfers)
+                                * config.optimization.transfer_cost
+                            )
+                            net_xp = squad_xp - transfer_penalty
+
+                            if net_xp > best_net_xp:
+                                best_net_xp = net_xp
+                                in_ids = {p["player_id"] for p in replacements}
+                                best_result = {
+                                    "optimal_squad": new_squad,
+                                    "best_xp": squad_xp,
+                                    "net_xp": net_xp,
+                                    "transfers_out": out_ids,
+                                    "transfers_in": in_ids,
+                                    "iterations_improved": 1,
+                                    "total_iterations": total_combinations,
+                                    "formation": self._enumerate_formations_for_players(
+                                        self._group_by_position(starting_11), xp_column
+                                    )[1],
+                                }
+
+        if best_result:
+            logger.info(
+                f"   Exhaustive search: Evaluated {total_combinations} combinations, "
+                f"best: {best_net_xp:.2f} net xP"
+            )
+        return best_result
 
 
 class InitialSquadOptimizationInput(BaseModel):

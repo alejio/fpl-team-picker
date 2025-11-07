@@ -11,7 +11,7 @@ Tests the cascading prediction approach where:
 import pytest
 import pandas as pd
 import numpy as np
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock
 
 from fpl_team_picker.domain.services.ml_expected_points_service import (
     MLExpectedPointsService,
@@ -109,10 +109,15 @@ class TestCascading5GWPredictions:
         return service
 
     def test_calculate_5gw_expected_points_basic(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test basic 5gw cascading prediction functionality."""
+
         # Mock calculate_expected_points to return predictable results
         def mock_calculate_expected_points(*args, **kwargs):
             target_gw = kwargs.get("target_gameweek", args[4] if len(args) > 4 else 11)
@@ -167,10 +172,15 @@ class TestCascading5GWPredictions:
         assert "uncertainty_gw15" in result.columns
 
     def test_uncertainty_combination(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test that uncertainties are properly combined using sqrt(sum of variances)."""
+
         # Mock calculate_expected_points to return fixed uncertainties
         def mock_calculate_expected_points(*args, **kwargs):
             result = sample_players_data.copy()
@@ -205,9 +215,7 @@ class TestCascading5GWPredictions:
             result["xP_uncertainty"].values, expected_uncertainties, decimal=2
         )
 
-    def test_synthetic_data_creation(
-        self, mock_ml_service, sample_players_data
-    ):
+    def test_synthetic_data_creation(self, mock_ml_service, sample_players_data):
         """Test that synthetic gameweek data is created correctly from predictions."""
         # Create a mock prediction result
         predictions = pd.DataFrame(
@@ -260,17 +268,23 @@ class TestCascading5GWPredictions:
         assert (synthetic[synthetic["total_points"] > 0]["minutes"] == 90).all()
 
     def test_cascading_uses_previous_predictions(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test that later predictions use synthetic data from earlier predictions."""
         call_historical_data = []
 
         def mock_calculate_expected_points(*args, **kwargs):
             # Capture the historical data passed to each call
-            live_data = kwargs.get("live_data", args[5] if len(args) > 5 else pd.DataFrame())
+            live_data = kwargs.get(
+                "live_data", args[5] if len(args) > 5 else pd.DataFrame()
+            )
             call_historical_data.append(len(live_data))
-            target_gw = kwargs.get("target_gameweek", args[4] if len(args) > 4 else 11)
+            kwargs.get("target_gameweek", args[4] if len(args) > 4 else 11)
 
             result = sample_players_data.copy()
             result["ml_xP"] = [5.0, 6.0, 7.0]
@@ -302,8 +316,11 @@ class TestCascading5GWPredictions:
         assert call_historical_data[4] > call_historical_data[0]  # Should keep growing
 
     def test_empty_historical_data_raises_error(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
     ):
         """Test that empty historical data raises appropriate error."""
         with pytest.raises(ValueError, match="No historical live_data"):
@@ -317,8 +334,11 @@ class TestCascading5GWPredictions:
             )
 
     def test_no_pipeline_raises_error(
-        self, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test that missing pipeline raises appropriate error."""
         service = MLExpectedPointsService(debug=False)
@@ -335,14 +355,23 @@ class TestCascading5GWPredictions:
             )
 
     def test_per_gameweek_predictions_included(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test that per-gameweek predictions are included in result."""
+
         def mock_calculate_expected_points(*args, **kwargs):
             target_gw = kwargs.get("target_gameweek", args[4] if len(args) > 4 else 11)
             result = sample_players_data.copy()
-            result["ml_xP"] = [float(target_gw), float(target_gw + 1), float(target_gw + 2)]
+            result["ml_xP"] = [
+                float(target_gw),
+                float(target_gw + 1),
+                float(target_gw + 2),
+            ]
             result["xP"] = result["ml_xP"]
             result["xP_uncertainty"] = [1.0, 1.5, 2.0]
             return result
@@ -396,10 +425,15 @@ class TestCascading5GWPredictions:
         assert synthetic[synthetic["player_id"] == 3]["total_points"].iloc[0] == 7.0
 
     def test_5gw_vs_1gw_multiplication_difference(
-        self, mock_ml_service, sample_players_data, sample_teams_data,
-        sample_fixtures_data, sample_historical_data
+        self,
+        mock_ml_service,
+        sample_players_data,
+        sample_teams_data,
+        sample_fixtures_data,
+        sample_historical_data,
     ):
         """Test that 5gw predictions differ from simple 1gw * 5 multiplication."""
+
         # Mock to return different xP for each gameweek
         def mock_calculate_expected_points(*args, **kwargs):
             target_gw = kwargs.get("target_gameweek", args[4] if len(args) > 4 else 11)

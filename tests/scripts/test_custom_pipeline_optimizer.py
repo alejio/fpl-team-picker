@@ -72,6 +72,7 @@ class TestParameterConfiguration:
         # With Typer, defaults are stored in OptionInfo objects, so we verify
         # the function accepts the expected parameters by checking they exist
         import inspect
+
         sig = inspect.signature(run_evaluate_mode)
 
         # Verify all expected parameters exist
@@ -89,6 +90,7 @@ class TestParameterConfiguration:
     def test_train_mode_defaults(self):
         """Test train mode function accepts default parameters."""
         import inspect
+
         sig = inspect.signature(run_train_mode)
 
         # Verify all expected parameters exist
@@ -106,6 +108,7 @@ class TestParameterConfiguration:
         """Test that feature selection parameter exists and accepts valid choices."""
         # Test that the function accepts valid feature selection strategies
         import inspect
+
         sig = inspect.signature(run_evaluate_mode)
         param = sig.parameters["feature_selection"]
 
@@ -120,6 +123,7 @@ class TestParameterConfiguration:
     def test_keep_penalty_features_flag(self):
         """Test keep_penalty_features parameter exists."""
         import inspect
+
         sig = inspect.signature(run_evaluate_mode)
         assert "keep_penalty_features" in sig.parameters
 
@@ -200,7 +204,12 @@ class TestFeatureSelection:
         X, y, feature_names = sample_data
 
         selected = select_features(
-            X, y, feature_names, strategy="none", keep_penalty_features=False, verbose=False
+            X,
+            y,
+            feature_names,
+            strategy="none",
+            keep_penalty_features=False,
+            verbose=False,
         )
 
         assert len(selected) == len(feature_names)
@@ -347,9 +356,7 @@ class TestIntegration:
                 {
                     "player_id": list(range(100)) * (end_gw - start_gw + 1),
                     "gameweek": [
-                        gw
-                        for gw in range(start_gw, end_gw + 1)
-                        for _ in range(100)
+                        gw for gw in range(start_gw, end_gw + 1) for _ in range(100)
                     ],
                     "total_points": np.random.randint(0, 15, n_samples),
                 }
@@ -419,7 +426,9 @@ class TestIntegration:
 
         # Verify reasonable metric values
         assert 0 < train_metrics["mae"] < 5  # MAE should be reasonable
-        assert train_metrics["spearman_correlation"] > 0  # Should have positive correlation
+        assert (
+            train_metrics["spearman_correlation"] > 0
+        )  # Should have positive correlation
 
 
 if __name__ == "__main__":

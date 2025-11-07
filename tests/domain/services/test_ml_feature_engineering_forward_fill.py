@@ -14,7 +14,6 @@ Test coverage:
 
 import pytest
 import pandas as pd
-import numpy as np
 
 from fpl_team_picker.domain.services.ml_feature_engineering import (
     FPLFeatureEngineer,
@@ -38,7 +37,9 @@ class TestOwnershipFeaturesForwardFill:
                         "minutes": 90,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                     }
                 )
@@ -54,7 +55,9 @@ class TestOwnershipFeaturesForwardFill:
                     {
                         "player_id": player_id,
                         "gameweek": gw,
-                        "selected_by_percent": 10.0 + player_id * 5 + gw * 0.1,  # Varies by player and GW
+                        "selected_by_percent": 10.0
+                        + player_id * 5
+                        + gw * 0.1,  # Varies by player and GW
                         "net_transfers_gw": 100 * player_id,
                         "avg_net_transfers_5gw": 80 * player_id,
                         "transfer_momentum": "rising" if player_id == 1 else "neutral",
@@ -131,11 +134,19 @@ class TestOwnershipFeaturesForwardFill:
         return pd.DataFrame(data)
 
     @pytest.fixture
-    def feature_engineer(self, ownership_data_through_gw10, value_data_through_gw10, fixture_difficulty_data, betting_features_data):
+    def feature_engineer(
+        self,
+        ownership_data_through_gw10,
+        value_data_through_gw10,
+        fixture_difficulty_data,
+        betting_features_data,
+    ):
         """Create feature engineer with ownership and value data."""
         engineer = FPLFeatureEngineer(
             fixtures_df=pd.DataFrame(),
-            teams_df=pd.DataFrame({"team_id": [1, 2, 3], "name": ["Team1", "Team2", "Team3"]}),
+            teams_df=pd.DataFrame(
+                {"team_id": [1, 2, 3], "name": ["Team1", "Team2", "Team3"]}
+            ),
             team_strength={},
             ownership_trends_df=ownership_data_through_gw10,
             value_analysis_df=value_data_through_gw10,
@@ -161,7 +172,9 @@ class TestOwnershipFeaturesForwardFill:
                         "minutes": 0,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                         "bonus": 0,
                         "bps": 0,
@@ -182,7 +195,9 @@ class TestOwnershipFeaturesForwardFill:
                     }
                 )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(future_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(future_data)], ignore_index=True
+        )
 
         # Preserve gameweek and player_id for verification
         metadata = all_data[["player_id", "gameweek"]].copy()
@@ -198,21 +213,31 @@ class TestOwnershipFeaturesForwardFill:
 
         # Check GW11 (should use GW10 ownership due to shift(1), or forward-filled if merge fails)
         gw11_data = result[result["gameweek"] == 11]
-        assert not gw11_data["selected_by_percent"].isna().any(), "GW11 should have ownership data"
+        assert not gw11_data["selected_by_percent"].isna().any(), (
+            "GW11 should have ownership data"
+        )
 
         # Check GW12-15 (should be forward-filled from GW11)
         # The key test is that they have non-null values, not exact matching
         # (forward-fill may use different values depending on implementation)
         for gw in [12, 13, 14, 15]:
             gw_data = result[result["gameweek"] == gw]
-            assert not gw_data["selected_by_percent"].isna().any(), f"GW{gw} should have forward-filled ownership"
+            assert not gw_data["selected_by_percent"].isna().any(), (
+                f"GW{gw} should have forward-filled ownership"
+            )
 
             # Verify forward-fill: each player's GW12+ ownership should be consistent (not NaN)
             # We don't check exact matching because forward-fill may use different strategies
             for player_id in [1, 2, 3]:
-                player_gw = gw_data[gw_data["player_id"] == player_id]["selected_by_percent"].iloc[0]
-                assert not pd.isna(player_gw), f"Player {player_id} GW{gw} should have ownership value"
-                assert player_gw > 0, f"Player {player_id} GW{gw} ownership should be positive"
+                player_gw = gw_data[gw_data["player_id"] == player_id][
+                    "selected_by_percent"
+                ].iloc[0]
+                assert not pd.isna(player_gw), (
+                    f"Player {player_id} GW{gw} should have ownership value"
+                )
+                assert player_gw > 0, (
+                    f"Player {player_id} GW{gw} ownership should be positive"
+                )
 
     def test_forward_fills_all_ownership_columns(
         self, feature_engineer, sample_historical_data
@@ -230,7 +255,9 @@ class TestOwnershipFeaturesForwardFill:
                         "minutes": 0,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                         "bonus": 0,
                         "bps": 0,
@@ -251,7 +278,9 @@ class TestOwnershipFeaturesForwardFill:
                     }
                 )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(future_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(future_data)], ignore_index=True
+        )
         metadata = all_data[["player_id", "gameweek"]].copy()
         result = feature_engineer.transform(all_data)
         result = result.merge(metadata, left_index=True, right_index=True, how="left")
@@ -270,7 +299,9 @@ class TestOwnershipFeaturesForwardFill:
 
         for col in ownership_cols:
             if col in gw12_data.columns:
-                assert not gw12_data[col].isna().any(), f"{col} should be forward-filled for GW12"
+                assert not gw12_data[col].isna().any(), (
+                    f"{col} should be forward-filled for GW12"
+                )
 
     def test_handles_new_players_with_no_history(
         self, feature_engineer, sample_historical_data
@@ -308,20 +339,26 @@ class TestOwnershipFeaturesForwardFill:
                 }
             )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(new_player_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(new_player_data)], ignore_index=True
+        )
         metadata = all_data[["player_id", "gameweek"]].copy()
         result = feature_engineer.transform(all_data)
         result = result.merge(metadata, left_index=True, right_index=True, how="left")
 
         # New player should get default ownership values
-        new_player_gw12 = result[(result["player_id"] == 4) & (result["gameweek"] == 12)]
+        new_player_gw12 = result[
+            (result["player_id"] == 4) & (result["gameweek"] == 12)
+        ]
         assert not new_player_gw12["selected_by_percent"].isna().any()
         # Should default to median ownership (5.0)
         assert new_player_gw12["selected_by_percent"].iloc[0] == 5.0
         assert new_player_gw12["net_transfers_gw"].iloc[0] == 0
         # transfer_momentum is encoded, so check the encoded version
         assert "transfer_momentum_encoded" in result.columns
-        assert new_player_gw12["transfer_momentum_encoded"].iloc[0] == 0  # "neutral" maps to 0
+        assert (
+            new_player_gw12["transfer_momentum_encoded"].iloc[0] == 0
+        )  # "neutral" maps to 0
 
     def test_still_raises_error_for_historical_gaps(
         self, feature_engineer, sample_historical_data
@@ -339,7 +376,10 @@ class TestOwnershipFeaturesForwardFill:
         with pytest.raises(ValueError) as exc_info:
             feature_engineer.transform(gap_data)
         # Check that the error mentions ownership or missing data
-        assert "ownership" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower()
+        assert (
+            "ownership" in str(exc_info.value).lower()
+            or "missing" in str(exc_info.value).lower()
+        )
 
 
 class TestValueAnalysisFeaturesForwardFill:
@@ -359,7 +399,9 @@ class TestValueAnalysisFeaturesForwardFill:
                         "minutes": 90,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                     }
                 )
@@ -375,7 +417,9 @@ class TestValueAnalysisFeaturesForwardFill:
                     {
                         "player_id": player_id,
                         "gameweek": gw,
-                        "points_per_pound": 0.5 + player_id * 0.1 + gw * 0.01,  # Varies by player and GW
+                        "points_per_pound": 0.5
+                        + player_id * 0.1
+                        + gw * 0.01,  # Varies by player and GW
                         "value_vs_position": 1.0 + player_id * 0.1,
                         "predicted_price_change_1gw": 0.1 * player_id,
                         "price_volatility": 0.05 * player_id,
@@ -452,11 +496,19 @@ class TestValueAnalysisFeaturesForwardFill:
         return pd.DataFrame(data)
 
     @pytest.fixture
-    def feature_engineer(self, ownership_data_through_gw10, value_data_through_gw10, fixture_difficulty_data, betting_features_data):
+    def feature_engineer(
+        self,
+        ownership_data_through_gw10,
+        value_data_through_gw10,
+        fixture_difficulty_data,
+        betting_features_data,
+    ):
         """Create feature engineer with ownership and value data."""
         engineer = FPLFeatureEngineer(
             fixtures_df=pd.DataFrame(),
-            teams_df=pd.DataFrame({"team_id": [1, 2, 3], "name": ["Team1", "Team2", "Team3"]}),
+            teams_df=pd.DataFrame(
+                {"team_id": [1, 2, 3], "name": ["Team1", "Team2", "Team3"]}
+            ),
             team_strength={},
             ownership_trends_df=ownership_data_through_gw10,
             value_analysis_df=value_data_through_gw10,
@@ -482,7 +534,9 @@ class TestValueAnalysisFeaturesForwardFill:
                         "minutes": 0,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                         "bonus": 0,
                         "bps": 0,
@@ -503,7 +557,9 @@ class TestValueAnalysisFeaturesForwardFill:
                     }
                 )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(future_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(future_data)], ignore_index=True
+        )
         metadata = all_data[["player_id", "gameweek"]].copy()
         result = feature_engineer.transform(all_data)
         result = result.merge(metadata, left_index=True, right_index=True, how="left")
@@ -513,19 +569,29 @@ class TestValueAnalysisFeaturesForwardFill:
 
         # Check GW11 (should use GW10 value due to shift(1))
         gw11_data = result[result["gameweek"] == 11]
-        assert not gw11_data["points_per_pound"].isna().any(), "GW11 should have value data"
+        assert not gw11_data["points_per_pound"].isna().any(), (
+            "GW11 should have value data"
+        )
 
         # Check GW12-15 (should be forward-filled from GW11)
         for gw in [12, 13, 14, 15]:
             gw_data = result[result["gameweek"] == gw]
-            assert not gw_data["points_per_pound"].isna().any(), f"GW{gw} should have forward-filled value"
+            assert not gw_data["points_per_pound"].isna().any(), (
+                f"GW{gw} should have forward-filled value"
+            )
 
             # Verify forward-fill: each player's GW12+ value should be consistent (not NaN)
             # We don't check exact matching because forward-fill may use different strategies
             for player_id in [1, 2, 3]:
-                player_gw = gw_data[gw_data["player_id"] == player_id]["points_per_pound"].iloc[0]
-                assert not pd.isna(player_gw), f"Player {player_id} GW{gw} should have value"
-                assert player_gw > 0, f"Player {player_id} GW{gw} value should be positive"
+                player_gw = gw_data[gw_data["player_id"] == player_id][
+                    "points_per_pound"
+                ].iloc[0]
+                assert not pd.isna(player_gw), (
+                    f"Player {player_id} GW{gw} should have value"
+                )
+                assert player_gw > 0, (
+                    f"Player {player_id} GW{gw} value should be positive"
+                )
 
     def test_forward_fills_all_value_columns(
         self, feature_engineer, sample_historical_data
@@ -543,7 +609,9 @@ class TestValueAnalysisFeaturesForwardFill:
                         "minutes": 0,
                         "goals_scored": 0,
                         "assists": 0,
-                        "position": "DEF" if player_id == 1 else ("MID" if player_id == 2 else "FWD"),
+                        "position": "DEF"
+                        if player_id == 1
+                        else ("MID" if player_id == 2 else "FWD"),
                         "team_id": player_id,
                         "bonus": 0,
                         "bps": 0,
@@ -564,7 +632,9 @@ class TestValueAnalysisFeaturesForwardFill:
                     }
                 )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(future_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(future_data)], ignore_index=True
+        )
         metadata = all_data[["player_id", "gameweek"]].copy()
         result = feature_engineer.transform(all_data)
         result = result.merge(metadata, left_index=True, right_index=True, how="left")
@@ -581,7 +651,9 @@ class TestValueAnalysisFeaturesForwardFill:
 
         for col in value_cols:
             if col in gw12_data.columns:
-                assert not gw12_data[col].isna().any(), f"{col} should be forward-filled for GW12"
+                assert not gw12_data[col].isna().any(), (
+                    f"{col} should be forward-filled for GW12"
+                )
 
     def test_handles_new_players_with_no_value_history(
         self, feature_engineer, sample_historical_data
@@ -619,13 +691,17 @@ class TestValueAnalysisFeaturesForwardFill:
                 }
             )
 
-        all_data = pd.concat([sample_historical_data, pd.DataFrame(new_player_data)], ignore_index=True)
+        all_data = pd.concat(
+            [sample_historical_data, pd.DataFrame(new_player_data)], ignore_index=True
+        )
         metadata = all_data[["player_id", "gameweek"]].copy()
         result = feature_engineer.transform(all_data)
         result = result.merge(metadata, left_index=True, right_index=True, how="left")
 
         # New player should get default value values
-        new_player_gw12 = result[(result["player_id"] == 4) & (result["gameweek"] == 12)]
+        new_player_gw12 = result[
+            (result["player_id"] == 4) & (result["gameweek"] == 12)
+        ]
         assert not new_player_gw12["points_per_pound"].isna().any()
         # Should default to neutral values
         assert new_player_gw12["points_per_pound"].iloc[0] == 0.5
@@ -648,7 +724,10 @@ class TestValueAnalysisFeaturesForwardFill:
         with pytest.raises(ValueError) as exc_info:
             feature_engineer.transform(gap_data)
         # Check that the error mentions value analysis or missing data
-        assert "value" in str(exc_info.value).lower() or "missing" in str(exc_info.value).lower()
+        assert (
+            "value" in str(exc_info.value).lower()
+            or "missing" in str(exc_info.value).lower()
+        )
 
 
 class TestCascadingPredictionScenario:
@@ -777,9 +856,7 @@ class TestCascadingPredictionScenario:
 
         return pd.DataFrame(historical), engineer
 
-    def test_cascading_predictions_gw11_through_15(
-        self, full_setup
-    ):
+    def test_cascading_predictions_gw11_through_15(self, full_setup):
         """Test that cascading predictions work for GW11-15."""
         historical_data, engineer = full_setup
 
@@ -819,7 +896,9 @@ class TestCascadingPredictionScenario:
                     }
                 )
 
-        all_data = pd.concat([historical_data, pd.DataFrame(future_data)], ignore_index=True)
+        all_data = pd.concat(
+            [historical_data, pd.DataFrame(future_data)], ignore_index=True
+        )
 
         # Preserve metadata for verification
         metadata = all_data[["player_id", "gameweek"]].copy()
@@ -833,13 +912,23 @@ class TestCascadingPredictionScenario:
         # Verify all future gameweeks have ownership and value data
         for gw in [11, 12, 13, 14, 15]:
             gw_data = result[result["gameweek"] == gw]
-            assert not gw_data["selected_by_percent"].isna().any(), f"GW{gw} ownership should be filled"
-            assert not gw_data["points_per_pound"].isna().any(), f"GW{gw} value should be filled"
+            assert not gw_data["selected_by_percent"].isna().any(), (
+                f"GW{gw} ownership should be filled"
+            )
+            assert not gw_data["points_per_pound"].isna().any(), (
+                f"GW{gw} value should be filled"
+            )
 
             # Verify forward-fill consistency: GW12+ should match GW11
             if gw > 11:
                 gw11_data = result[result["gameweek"] == 11]
                 for player_id in [1, 2]:
-                    gw11_ownership = gw11_data[gw11_data["player_id"] == player_id]["selected_by_percent"].iloc[0]
-                    gw_ownership = gw_data[gw_data["player_id"] == player_id]["selected_by_percent"].iloc[0]
-                    assert gw_ownership == gw11_ownership, f"Player {player_id} GW{gw} ownership should match GW11"
+                    gw11_ownership = gw11_data[gw11_data["player_id"] == player_id][
+                        "selected_by_percent"
+                    ].iloc[0]
+                    gw_ownership = gw_data[gw_data["player_id"] == player_id][
+                        "selected_by_percent"
+                    ].iloc[0]
+                    assert gw_ownership == gw11_ownership, (
+                        f"Player {player_id} GW{gw} ownership should match GW11"
+                    )

@@ -245,10 +245,15 @@ class TestDifferentialFiltering:
         # Test at boundaries
         test_cases = [
             # (xP, price, uncertainty, expected_allowed)
-            (5.0, 5.0, 1.4, True),   # Exactly 1.0 xP/£, exactly 30% uncertainty → marginal
+            (
+                5.0,
+                5.0,
+                1.4,
+                True,
+            ),  # Exactly 1.0 xP/£, exactly 30% uncertainty → marginal
             (4.99, 5.0, 1.4, False),  # Just below 1.0 xP/£ → blocked
             (5.0, 5.0, 1.51, False),  # Just above 30% uncertainty → blocked
-            (6.0, 5.0, 1.7, True),   # 1.2 xP/£, 28% uncertainty → allowed
+            (6.0, 5.0, 1.7, True),  # 1.2 xP/£, 28% uncertainty → allowed
         ]
 
         for xp, price, uncertainty, expected_allowed in test_cases:
@@ -292,9 +297,11 @@ class TestDifferentialFiltering:
             xp_per_price = xp / price
             uncertainty_ratio = uncertainty / xp
 
-            print(f"xP={xp}, price={price}, unc={uncertainty}: "
-                  f"xP/£={xp_per_price:.2f}, unc%={uncertainty_ratio:.1%}, "
-                  f"allowed={is_allowed} (expected={expected_allowed})")
+            print(
+                f"xP={xp}, price={price}, unc={uncertainty}: "
+                f"xP/£={xp_per_price:.2f}, unc%={uncertainty_ratio:.1%}, "
+                f"allowed={is_allowed} (expected={expected_allowed})"
+            )
 
 
 class TestTemplateAndPremiumExceptions:
@@ -419,12 +426,24 @@ class TestTemplateAndPremiumExceptions:
 
         test_cases = [
             # (ownership, price, should_pass_exception)
-            (14.9, 5.6, False),  # Just below ownership threshold (fails template, fails differential)
-            (15.0, 5.5, True),   # Exactly at both thresholds → PASSES template exception
-            (20.0, 6.0, True),   # Above both thresholds → PASSES template exception
-            (14.0, 9.1, True),   # Below ownership but premium → PASSES premium exception
-            (16.0, 5.5, True),   # Above ownership threshold, at price threshold → PASSES template exception
-            (5.0, 4.5, False),   # Low ownership, low price, low xP → fails differential check
+            (
+                14.9,
+                5.6,
+                False,
+            ),  # Just below ownership threshold (fails template, fails differential)
+            (15.0, 5.5, True),  # Exactly at both thresholds → PASSES template exception
+            (20.0, 6.0, True),  # Above both thresholds → PASSES template exception
+            (14.0, 9.1, True),  # Below ownership but premium → PASSES premium exception
+            (
+                16.0,
+                5.5,
+                True,
+            ),  # Above ownership threshold, at price threshold → PASSES template exception
+            (
+                5.0,
+                4.5,
+                False,
+            ),  # Low ownership, low price, low xP → fails differential check
         ]
 
         for ownership, price, should_pass in test_cases:

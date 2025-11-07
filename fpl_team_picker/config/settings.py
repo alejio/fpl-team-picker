@@ -377,6 +377,46 @@ class OptimizationConfig(BaseModel):
         ge=1,
         le=5,
     )
+    sa_random_seed: Optional[int] = Field(
+        default=None,
+        description="Random seed for SA reproducibility (None = different results each run). Set to integer for deterministic results.",
+    )
+    sa_deterministic_mode: bool = Field(
+        default=False,
+        description="Deterministic mode: prefer top candidates over random sampling when xP difference is large (>0.5). More stable but less exploration.",
+    )
+    sa_consensus_runs: int = Field(
+        default=5,
+        description="Number of full optimization runs for consensus mode. Runs multiple times and recommends most frequent optimal transfer. Higher = more reliable but slower.",
+        ge=1,
+        le=20,
+    )
+    sa_use_consensus_mode: bool = Field(
+        default=True,
+        description="Consensus mode: run optimization multiple times and aggregate results to find truly optimal solution. Recommended for finding best transfer.",
+    )
+    sa_exhaustive_search_max_transfers: int = Field(
+        default=2,
+        description="Use exhaustive search (guaranteed optimal) for 0-N transfers. Set to 0 to disable, 2 means exhaustive for 0-2 transfers. Higher = slower but guaranteed optimal.",
+        ge=0,
+        le=3,
+    )
+    sa_wildcard_iterations: int = Field(
+        default=5000,
+        description="Number of SA iterations for wildcard optimization (15 transfers). Higher than normal since search space is much larger.",
+        ge=1000,
+        le=20000,
+    )
+    sa_wildcard_restarts: int = Field(
+        default=5,
+        description="Number of SA restarts for wildcard optimization. More restarts = more reliable but slower.",
+        ge=1,
+        le=10,
+    )
+    sa_wildcard_use_consensus: bool = Field(
+        default=True,
+        description="Use consensus mode for wildcard: run multiple full optimizations and find consensus best squad. Recommended for finding truly optimal wildcard squad.",
+    )
 
     # Scenario analysis (greedy method)
     max_transfers: int = Field(

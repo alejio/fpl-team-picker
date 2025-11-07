@@ -148,12 +148,12 @@ class TestTemplateProtection:
         service = OptimizationService()
 
         test_cases = [
-            (50.0, 0.0),   # Exactly at threshold
+            (50.0, 0.0),  # Exactly at threshold
             (55.0, 0.25),  # 25% of range
-            (60.0, 0.5),   # 50% of range
+            (60.0, 0.5),  # 50% of range
             (65.0, 0.75),  # 75% of range
-            (70.0, 1.0),   # Max
-            (80.0, 1.0),   # Above max (capped)
+            (70.0, 1.0),  # Max
+            (80.0, 1.0),  # Above max (capped)
         ]
 
         for ownership, expected_factor in test_cases:
@@ -253,12 +253,12 @@ class TestBettingOddsIntegration:
         test_cases = [
             # (team_xg, expected_matchup_bonus)
             # Formula: xg_factor = max((xg - 1.0) / 1.0, 0.0), bonus = xg_factor * 0.25
-            (0.5, 0.0),     # Very low xG → 0% bonus (clamped at 0)
-            (1.0, 0.0),     # Neutral baseline → 0% bonus
-            (1.25, 0.0625), # PL average → 6.25% bonus (0.25 * 0.25)
-            (1.5, 0.125),   # Above average → 12.5% bonus (0.5 * 0.25)
-            (2.0, 0.25),    # High xG → 25% bonus (1.0 * 0.25)
-            (2.5, 0.25),    # Very high xG → 25% bonus (capped at 1.0)
+            (0.5, 0.0),  # Very low xG → 0% bonus (clamped at 0)
+            (1.0, 0.0),  # Neutral baseline → 0% bonus
+            (1.25, 0.0625),  # PL average → 6.25% bonus (0.25 * 0.25)
+            (1.5, 0.125),  # Above average → 12.5% bonus (0.5 * 0.25)
+            (2.0, 0.25),  # High xG → 25% bonus (1.0 * 0.25)
+            (2.5, 0.25),  # Very high xG → 25% bonus (capped at 1.0)
         ]
 
         for team_xg, expected_bonus in test_cases:

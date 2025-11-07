@@ -114,25 +114,27 @@ def mock_betting_features():
     data = []
     for gw in [5, 6, 7]:
         for player_id in [1, 2, 3, 4]:
-            data.append({
-                "player_id": player_id,
-                "gameweek": gw,
-                "team_win_probability": 0.40,
-                "opponent_win_probability": 0.30,
-                "draw_probability": 0.30,
-                "implied_clean_sheet_probability": 0.35,
-                "implied_total_goals": 2.5,
-                "team_expected_goals": 1.3,
-                "market_consensus_strength": 0.6,
-                "odds_movement_team": 0.0,
-                "odds_movement_magnitude": 0.1,
-                "favorite_status": 0.5,
-                "asian_handicap_line": 0.0,
-                "handicap_team_odds": 1.9,
-                "expected_goal_difference": 0.0,
-                "over_under_signal": 0.1,
-                "referee_encoded": 5,
-            })
+            data.append(
+                {
+                    "player_id": player_id,
+                    "gameweek": gw,
+                    "team_win_probability": 0.40,
+                    "opponent_win_probability": 0.30,
+                    "draw_probability": 0.30,
+                    "implied_clean_sheet_probability": 0.35,
+                    "implied_total_goals": 2.5,
+                    "team_expected_goals": 1.3,
+                    "market_consensus_strength": 0.6,
+                    "odds_movement_team": 0.0,
+                    "odds_movement_magnitude": 0.1,
+                    "favorite_status": 0.5,
+                    "asian_handicap_line": 0.0,
+                    "handicap_team_odds": 1.9,
+                    "expected_goal_difference": 0.0,
+                    "over_under_signal": 0.1,
+                    "referee_encoded": 5,
+                }
+            )
     return pd.DataFrame(data)
 
 
