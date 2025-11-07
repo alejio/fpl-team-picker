@@ -41,6 +41,64 @@ class OptimizationService:
         else:  # "5gw"
             return "xP_5gw"
 
+    def get_adjusted_xp(self, player: Dict, xp_col: str) -> float:
+        """Calculate availability-adjusted xP for a player.
+
+        Accounts for injury/availability risk by scaling xP based on:
+        - chance_of_playing_this_round (preferred) or chance_of_playing_next_round
+        - expected_minutes if available
+        - status (injured/doubtful players get penalty)
+
+        Args:
+            player: Player dictionary with xP and availability info
+            xp_col: Column name for xP values
+
+        Returns:
+            Adjusted xP accounting for availability risk
+        """
+        base_xp = player.get(xp_col, 0.0)
+        if base_xp <= 0:
+            return 0.0
+
+        # Get availability multiplier (0.0 to 1.0)
+        availability_multiplier = 1.0
+
+        # Prefer chance_of_playing_this_round for current gameweek
+        chance_this = player.get("chance_of_playing_this_round")
+        chance_next = player.get("chance_of_playing_next_round")
+
+        if chance_this is not None and not pd.isna(chance_this):
+            availability_multiplier = float(chance_this) / 100.0
+        elif chance_next is not None and not pd.isna(chance_next):
+            availability_multiplier = float(chance_next) / 100.0
+        else:
+            # Fallback to expected_minutes ratio if available
+            expected_mins = player.get("expected_minutes")
+            if expected_mins is not None and not pd.isna(expected_mins):
+                # Position-based default minutes
+                position = player.get("position", "MID")
+                position_defaults = {"GKP": 90, "DEF": 80, "MID": 75, "FWD": 70}
+                base_minutes = position_defaults.get(position, 75)
+                availability_multiplier = min(float(expected_mins) / base_minutes, 1.0)
+            else:
+                # Check status for injured/doubtful players
+                status = player.get("status", "a")
+                if status in ["i", "d"]:  # injured or doubtful
+                    # Apply penalty based on config
+                    if status == "i":
+                        availability_multiplier = (
+                            config.minutes_model.injury_full_game_multiplier
+                        )
+                    else:  # doubtful
+                        availability_multiplier = (
+                            config.minutes_model.injury_avg_minutes_multiplier
+                        )
+
+        # Clamp multiplier to valid range
+        availability_multiplier = max(0.0, min(1.0, availability_multiplier))
+
+        return base_xp * availability_multiplier
+
     def _count_players_per_team(self, team: List[Dict]) -> Dict[str, int]:
         """Count players per team.
 
@@ -1137,8 +1195,9 @@ class OptimizationService:
         max_transfers = config.optimization.max_transfers  # Typically 0-3
 
         # Calculate initial objective value (squad xP with no transfer penalty)
+        # Use availability-adjusted xP
         starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
-        current_objective = sum(p[xp_column] for p in starting_11)
+        current_objective = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
 
         best_team = [p.copy() for p in original_squad]
         best_objective = current_objective
@@ -1175,8 +1234,9 @@ class OptimizationService:
                 continue
 
             # Calculate new objective INCLUDING TRANSFER PENALTY
+            # Use availability-adjusted xP
             new_starting_11 = self._get_best_starting_11_from_squad(new_team, xp_column)
-            squad_xp = sum(p[xp_column] for p in new_starting_11)
+            squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in new_starting_11)
 
             # Calculate penalty for this number of transfers
             transfer_penalty = (
@@ -1669,10 +1729,18 @@ class OptimizationService:
                     if len(candidates) == 0:
                         return None
 
-                    # Prefer higher xP with randomness
-                    topk = min(8, len(candidates))
-                    candidates = candidates.nlargest(topk, xp_column)
-                    player = candidates.sample(n=1).iloc[0]
+                    # Prefer higher availability-adjusted xP with randomness
+                    # Calculate adjusted xP for all candidates
+                    candidates_list = candidates.to_dict("records")
+                    for candidate in candidates_list:
+                        candidate["_adjusted_xp"] = self.get_adjusted_xp(
+                            candidate, xp_column
+                        )
+                    candidates_df = pd.DataFrame(candidates_list)
+
+                    topk = min(8, len(candidates_df))
+                    candidates_df = candidates_df.nlargest(topk, "_adjusted_xp")
+                    player = candidates_df.sample(n=1).iloc[0]
 
                     team.append(player.to_dict())
                     remaining_budget -= player["price"]
@@ -1681,12 +1749,13 @@ class OptimizationService:
             return team if len(team) == 15 else None
 
         def calculate_team_xp(team: List[Dict]) -> float:
-            """Calculate total xP for team's best starting 11."""
+            """Calculate total xP for team's best starting 11, accounting for availability."""
             if len(team) != 15:
-                return sum(p[xp_column] for p in team)
+                return sum(self.get_adjusted_xp(p, xp_column) for p in team)
 
             starting_11 = self._get_best_starting_11_from_squad(team, xp_column)
-            base_xp = sum(p[xp_column] for p in starting_11)
+            # Use availability-adjusted xP for scoring
+            base_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
 
             # Penalty for constraint violations using shared utility
             team_counts = self._count_players_per_team(team)
@@ -1767,16 +1836,24 @@ class OptimizationService:
                 if len(affordable) == 0:
                     return None
 
-            # Prefer higher xP with weighting (or deterministic if enabled)
+            # Prefer higher availability-adjusted xP with weighting (or deterministic if enabled)
             if remaining_budget > 1.0 and len(affordable) > 1:
+                # Calculate adjusted xP for all candidates
+                affordable_list = affordable.to_dict("records")
+                for candidate in affordable_list:
+                    candidate["_adjusted_xp"] = self.get_adjusted_xp(
+                        candidate, xp_column
+                    )
+                affordable_df = pd.DataFrame(affordable_list)
+
                 if config.optimization.sa_deterministic_mode:
                     # In deterministic mode, check if top candidate is significantly better
-                    affordable_sorted = affordable.sort_values(
-                        xp_column, ascending=False
+                    affordable_sorted = affordable_df.sort_values(
+                        "_adjusted_xp", ascending=False
                     )
-                    top_xp = affordable_sorted.iloc[0][xp_column]
+                    top_xp = affordable_sorted.iloc[0]["_adjusted_xp"]
                     second_xp = (
-                        affordable_sorted.iloc[1][xp_column]
+                        affordable_sorted.iloc[1]["_adjusted_xp"]
                         if len(affordable_sorted) > 1
                         else top_xp
                     )
@@ -1786,8 +1863,10 @@ class OptimizationService:
                     if xp_gap > 0.5:
                         new_player = affordable_sorted.iloc[0].to_dict()
                     else:
-                        # Small gap: use weighted sampling
-                        weights = affordable[xp_column] * (1 + affordable["price"] / 20)
+                        # Small gap: use weighted sampling with adjusted xP
+                        weights = affordable_df["_adjusted_xp"] * (
+                            1 + affordable_df["price"] / 20
+                        )
                         min_weight = weights.min()
                         if min_weight < 0:
                             weights = weights - min_weight + 0.1
@@ -1795,15 +1874,17 @@ class OptimizationService:
                         if weights_array.sum() > 0:
                             weights_array = weights_array / weights_array.sum()
                             new_player = (
-                                affordable.sample(n=1, weights=weights_array)
+                                affordable_df.sample(n=1, weights=weights_array)
                                 .iloc[0]
                                 .to_dict()
                             )
                         else:
-                            new_player = affordable.sample(n=1).iloc[0].to_dict()
+                            new_player = affordable_df.sample(n=1).iloc[0].to_dict()
                 else:
-                    # Normal mode: use weighted sampling
-                    weights = affordable[xp_column] * (1 + affordable["price"] / 20)
+                    # Normal mode: use weighted sampling with adjusted xP
+                    weights = affordable_df["_adjusted_xp"] * (
+                        1 + affordable_df["price"] / 20
+                    )
                     min_weight = weights.min()
                     if min_weight < 0:
                         weights = weights - min_weight + 0.1
@@ -1812,14 +1893,26 @@ class OptimizationService:
                     if weights_array.sum() > 0:
                         weights_array = weights_array / weights_array.sum()
                         new_player = (
-                            affordable.sample(n=1, weights=weights_array)
+                            affordable_df.sample(n=1, weights=weights_array)
                             .iloc[0]
                             .to_dict()
                         )
                     else:
-                        new_player = affordable.sample(n=1).iloc[0].to_dict()
+                        new_player = affordable_df.sample(n=1).iloc[0].to_dict()
             else:
-                new_player = affordable.sample(n=1).iloc[0].to_dict()
+                # Budget too tight or only one option - still use adjusted xP if possible
+                if len(affordable) > 0:
+                    affordable_list = affordable.to_dict("records")
+                    for candidate in affordable_list:
+                        candidate["_adjusted_xp"] = self.get_adjusted_xp(
+                            candidate, xp_column
+                        )
+                    affordable_df = pd.DataFrame(affordable_list)
+                    new_player = (
+                        affordable_df.nlargest(1, "_adjusted_xp").iloc[0].to_dict()
+                    )
+                else:
+                    new_player = affordable.sample(n=1).iloc[0].to_dict()
 
             new_team[replace_idx] = new_player
 
