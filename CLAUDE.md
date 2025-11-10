@@ -2,6 +2,13 @@
 
 Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-start team building and weekly gameweek management. 2025-2026 season is in progress. We are competing in the FPL league and are using this tool to help us win. The tool is underperforming and needs to be improved. Clean architecture with domain-driven design, implementing mathematical frameworks for expected points, optimization, and fixture analysis.
 
+## 2025-26 Season Context
+
+**Promoted Teams** (from Championship): Leeds, Burnley, Sunderland
+**Relegated Teams** (from Premier League): Ipswich, Leicester, Southampton
+
+**Key Context**: Promoted teams often fight harder at home, making away fixtures tougher than raw team strength suggests. Avoid assuming promoted team fixtures are "easy" - they can be competitive, especially at their home grounds.
+
 ## Architecture
 
 **Clean Architecture**: domain/infrastructure/presentation separation. Business logic in `domain/services/`.
