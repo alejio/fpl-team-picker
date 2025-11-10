@@ -27,13 +27,16 @@
   - Goalkeeper/Defender: 6 points
   - Midfielder: 5 points
   - Forward: 4 points
-- **Assists**: 3 points (last player on same team to touch ball before goalscorer, excluding deflections)
+- **Assists**: 3 points (simplified definition for 2025/26 - player from goalscoring team with final touch before goal, better recognition of contributions)
 
 ### Defensive Actions
 - **Clean Sheet** (team doesn't concede while player on pitch):
   - Goalkeeper/Defender: 4 points
   - Midfielder: 1 point
 - **Goals Conceded**: Goalkeepers and defenders lose 1 point for every 2 goals conceded
+- **Defensive Contributions** (2025/26):
+  - **Defenders**: 2 points for reaching 10 combined clearances, blocks, interceptions, and tackles (CBIT) in a single match
+  - **Midfielders/Forwards**: 2 points for reaching 12 defensive contributions (CBIRT - includes clearances, blocks, interceptions, tackles, and ball recoveries) in a single match
 
 ### Negative Actions
 - **Yellow Card**: -1 point
@@ -44,23 +47,29 @@
 ### Bonus Points
 - **Bonus Point System (BPS)**: Top 3 BPS players in each match get 3, 2, 1 bonus points
 - BPS calculated from: goals, assists, clean sheets, saves, key passes, successful tackles, etc.
+- **BPS Changes (2025/26)**: Tweaks to points from goalkeeper saves, goalline clearances, penalty goals, and successful tackles
 - **Save**: Goalkeepers get 1 point per 3 saves
 
 ## Transfers and Team Management
 
 ### Free Transfers
 - **1 free transfer** per gameweek (unused transfers don't accumulate beyond 2)
+- **AFCON Extra Transfers (2025/26)**: Free transfers topped up to maximum of 5 in Gameweek 16 to help plan around Africa Cup of Nations
 - **Wildcard**: Unlimited free transfers for one gameweek (2 per season)
 
 ### Transfer Costs
 - **Points deduction**: -4 points for each additional transfer beyond free allocation
 - No transfer cost limit - can make unlimited paid transfers
 
-### Chips and Special Powers
-- **Wildcard**: Free transfers for one gameweek (available in first and second half of season)
-- **Bench Boost**: All substitute players' points count for one gameweek
-- **Triple Captain**: Captain scores triple points instead of double
-- **Free Hit**: Make unlimited transfers for one gameweek, team reverts next week
+### Chips and Special Powers (2025/26)
+- **Two sets of chips**: Managers have TWO sets of chips (8 chips total - 4 per half of season)
+- **First set deadline**: First set of chips must be used before Gameweek 19 deadline (30 December 18:30 GMT) and cannot be carried over
+- **Chip types**:
+  - **Wildcard**: Free transfers for one gameweek (available in first and second half of season)
+  - **Bench Boost**: All substitute players' points count for one gameweek
+  - **Triple Captain**: Captain scores triple points instead of double
+  - **Free Hit**: Make unlimited transfers for one gameweek, team reverts next week
+- **Note**: No Assistant Manager chip in 2025/26 season
 
 ## Captain and Vice-Captain
 
@@ -95,5 +104,6 @@
 
 - **Overall League**: All players ranked by total points
 - **Private Leagues**: Join custom leagues with friends/colleagues
+- **Elite Global Leagues (2025/26)**: Two new leagues - one for managers who finished in top 1% worldwide last season, one for top 10%
 - **Monthly prizes**: Best monthly scores win prizes
 - **Season prizes**: Overall winner and league winners receive prizes
