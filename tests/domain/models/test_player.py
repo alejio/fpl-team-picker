@@ -70,7 +70,7 @@ class TestPlayerDomain:
             "position": Position.GKP,
             "price": 4.5,
             "selected_by_percent": 10.0,
-            "as_of_utc": datetime.utcnow(),
+            "as_of_utc": datetime.now(UTC),
         }
 
         # Invalid team_id
@@ -366,7 +366,7 @@ class TestEnrichedPlayerDomain:
             "position": Position.MID,
             "price": 10.0,
             "selected_by_percent": 20.0,
-            "as_of_utc": datetime.utcnow(),
+            "as_of_utc": datetime.now(UTC),
             "total_points_season": 100,
             "form_season": 6.0,
             "points_per_game_season": 5.0,
