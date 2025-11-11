@@ -13,7 +13,7 @@ Test coverage:
 4. Features merge correctly by player_id + gameweek
 5. Features default to sensible values when data sources not provided
 6. Imputation uses domain-aware defaults (not generic .fillna(0))
-7. Feature count includes all 18 new features (117 total)
+7. Feature count includes all 18 new features + 5 data quality indicators (118 total, removed 4 redundant features)
 8. Ranking normalization works correctly (0-1 scale, lower rank = better)
 9. Position-aware imputation for defensive features
 """
@@ -735,7 +735,7 @@ class TestPhase4ImputationStrategy:
 
 
 class TestTotalFeatureCount:
-    """Test suite for total feature count (117 features)."""
+    """Test suite for total feature count (118 features)."""
 
     def test_total_feature_count_117(
         self,
@@ -748,7 +748,7 @@ class TestTotalFeatureCount:
         mock_players_enhanced,
         minimal_enhanced_data,
     ):
-        """Test that total feature count is 117 (99 + 18 new features)."""
+        """Test that total feature count is 118 (117 - 4 redundant + 5 data quality indicators)."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
@@ -766,12 +766,12 @@ class TestTotalFeatureCount:
         result = engineer.fit_transform(mock_player_data)
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 117 features total (99 base + 18 new)
-        assert len(feature_names) == 117, (
-            f"Expected 117 features, got {len(feature_names)}"
+        # Should be 118 features total (117 - 4 redundant + 5 data quality indicators)
+        assert len(feature_names) == 118, (
+            f"Expected 118 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 117, (
-            f"Result should have 117 columns, got {result.shape[1]}"
+        assert result.shape[1] == 118, (
+            f"Result should have 118 columns, got {result.shape[1]}"
         )
 
         # Verify all phase features are in the list

@@ -1,7 +1,7 @@
 """Tests for PlayerAnalyticsService."""
 
 import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import Mock
 
 from fpl_team_picker.domain.services.player_analytics_service import (
@@ -22,7 +22,7 @@ def mock_players():
             position=Position.MID,
             price=13.0,
             selected_by_percent=45.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             total_points_season=150,
             form_season=8.5,
             points_per_game_season=6.8,
@@ -82,7 +82,7 @@ def mock_players():
             position=Position.DEF,
             price=4.5,
             selected_by_percent=5.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             total_points_season=30,
             form_season=2.0,
             points_per_game_season=1.5,
@@ -141,7 +141,7 @@ def mock_players():
             position=Position.FWD,
             price=7.0,
             selected_by_percent=15.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             total_points_season=45,
             form_season=3.0,
             points_per_game_season=2.5,

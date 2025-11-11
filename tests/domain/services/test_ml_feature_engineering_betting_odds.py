@@ -354,7 +354,7 @@ class TestBettingOddsFeatures:
         mock_betting_features,
         minimal_enhanced_data,
     ):
-        """Test that total feature count is 117 (99 base + 18 Phase 1-4)."""
+        """Test that total feature count is 118 (117 - 4 redundant + 5 data quality indicators)."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
@@ -372,10 +372,10 @@ class TestBettingOddsFeatures:
 
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 117 features total (99 base + 18 Phase 1-4 with defaults)
-        assert len(feature_names) == 117, (
-            f"Expected 117 features, got {len(feature_names)}"
+        # Should be 118 features total (117 - 4 redundant + 5 data quality indicators)
+        assert len(feature_names) == 118, (
+            f"Expected 118 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 117, (
-            f"Result should have 117 columns, got {result.shape[1]}"
+        assert result.shape[1] == 118, (
+            f"Result should have 118 columns, got {result.shape[1]}"
         )

@@ -59,9 +59,8 @@ class TestOwnershipFeaturesForwardFill:
                         + player_id * 5
                         + gw * 0.1,  # Varies by player and GW
                         "net_transfers_gw": 100 * player_id,
-                        "avg_net_transfers_5gw": 80 * player_id,
+                        # Removed: avg_net_transfers_5gw, ownership_velocity (perfect correlation with net_transfers_gw)
                         "transfer_momentum": "rising" if player_id == 1 else "neutral",
-                        "ownership_velocity": 0.5 + player_id * 0.1,
                         "ownership_tier": "popular" if player_id == 1 else "budget",
                         "bandwagon_score": 0.5 + player_id * 0.1,
                     }
@@ -126,7 +125,7 @@ class TestOwnershipFeaturesForwardFill:
                         "gameweek": gw,
                         "points_per_pound": 0.5 + player_id * 0.1,
                         "value_vs_position": 1.0 + player_id * 0.1,
-                        "predicted_price_change_1gw": 0.1 * player_id,
+                        # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
                         "price_volatility": 0.05,
                         "price_risk": 0.02,
                     }
@@ -290,9 +289,8 @@ class TestOwnershipFeaturesForwardFill:
         ownership_cols = [
             "selected_by_percent",
             "net_transfers_gw",
-            "avg_net_transfers_5gw",
+            # Removed: avg_net_transfers_5gw, ownership_velocity (perfect correlation with net_transfers_gw)
             "bandwagon_score",
-            "ownership_velocity",
             "transfer_momentum",
             "ownership_tier",
         ]
@@ -421,7 +419,7 @@ class TestValueAnalysisFeaturesForwardFill:
                         + player_id * 0.1
                         + gw * 0.01,  # Varies by player and GW
                         "value_vs_position": 1.0 + player_id * 0.1,
-                        "predicted_price_change_1gw": 0.1 * player_id,
+                        # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
                         "price_volatility": 0.05 * player_id,
                         "price_risk": 0.02 * player_id,
                     }
@@ -644,7 +642,7 @@ class TestValueAnalysisFeaturesForwardFill:
         value_cols = [
             "points_per_pound",
             "value_vs_position",
-            "predicted_price_change_1gw",
+            # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
             "price_volatility",
             "price_risk",
         ]
@@ -706,7 +704,7 @@ class TestValueAnalysisFeaturesForwardFill:
         # Should default to neutral values
         assert new_player_gw12["points_per_pound"].iloc[0] == 0.5
         assert new_player_gw12["value_vs_position"].iloc[0] == 1.0
-        assert new_player_gw12["predicted_price_change_1gw"].iloc[0] == 0
+        # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
 
     def test_still_raises_error_for_historical_gaps(
         self, feature_engineer, sample_historical_data
@@ -797,7 +795,7 @@ class TestCascadingPredictionScenario:
                         "gameweek": gw,
                         "points_per_pound": 0.5 + player_id * 0.1,
                         "value_vs_position": 1.0 + player_id * 0.1,
-                        "predicted_price_change_1gw": 0.1 * player_id,
+                        # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
                         "price_volatility": 0.05,
                         "price_risk": 0.02,
                     }

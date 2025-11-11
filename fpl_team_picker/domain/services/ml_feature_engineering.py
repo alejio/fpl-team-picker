@@ -68,7 +68,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 117 features (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings):
+    Generates 118 features (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality indicators):
 
     Base features (65):
     - Cumulative season statistics (up to GW N-1)
@@ -557,14 +557,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             grouped["minutes"].shift(1).rolling(window=5, min_periods=2).std().fillna(0)
         )
 
-        rolling_5gw_games = (
-            grouped["gameweek"].shift(1).rolling(window=5, min_periods=1).count()
-        )
-        df["minutes_played_rate"] = np.where(
-            rolling_5gw_games > 0,
-            rolling_5gw_minutes_sum / (rolling_5gw_games * 90),
-            0,
-        )
+        # Removed: minutes_played_rate (perfect correlation with rolling_5gw_minutes)
+        # Use rolling_5gw_minutes directly instead
 
         def calc_form_trend(series):
             if len(series) < 2:
@@ -762,6 +756,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df["home_advantage"] = 0.0  # Default: no advantage
         df["venue_consistency"] = 0.5  # Default: moderate consistency
 
+        # Data quality indicator (Phase 1 improvement)
+        df["has_venue_strength_data"] = 0  # 1 if data available, 0 if imputed
+
         # Merge venue-specific team form data
         if not self.derived_team_form_df.empty:
             venue_cols = ["team_id", "gameweek"]
@@ -795,6 +792,27 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     how="left",
                     suffixes=("", "_venue"),
                 )
+
+                # Mark where venue data was available and forward-fill
+                has_venue_data = False
+                df_sorted = df.sort_values(["team_id", "gameweek"])
+                for col in existing_venue:
+                    merged_col = f"{col}_venue"
+                    if merged_col in df_sorted.columns:
+                        if not has_venue_data:
+                            df_sorted["has_venue_strength_data"] = (
+                                df_sorted[merged_col].notna().astype(int)
+                            )
+                            has_venue_data = True
+                        else:
+                            df_sorted["has_venue_strength_data"] = df_sorted[
+                                "has_venue_strength_data"
+                            ] | df_sorted[merged_col].notna().astype(int)
+                        # Forward-fill missing values from earliest available data per team
+                        df_sorted[merged_col] = df_sorted.groupby("team_id")[
+                            merged_col
+                        ].ffill()
+                df = df_sorted.sort_index()
 
                 # Update original columns with merged values (if they exist)
                 for col in existing_venue:
@@ -1045,14 +1063,13 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             )
 
         # Merge ownership data by player_id and gameweek
+        # Removed: avg_net_transfers_5gw, ownership_velocity (perfect correlation with net_transfers_gw)
         ownership_cols = [
             "player_id",
             "gameweek",
             "selected_by_percent",
             "net_transfers_gw",
-            "avg_net_transfers_5gw",
             "transfer_momentum",
-            "ownership_velocity",
             "ownership_tier",
             "bandwagon_score",
         ]
@@ -1125,9 +1142,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 gw1_mask = (df["gameweek"] == 1) & df["selected_by_percent"].isna()
                 df.loc[gw1_mask, "selected_by_percent"] = 5.0  # Median ownership
                 df.loc[gw1_mask, "net_transfers_gw"] = 0
-                df.loc[gw1_mask, "avg_net_transfers_5gw"] = 0
                 df.loc[gw1_mask, "bandwagon_score"] = 0
-                df.loc[gw1_mask, "ownership_velocity"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
 
             # Handle missing ownership for future gameweeks (cascading predictions)
@@ -1146,9 +1161,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     ownership_fill_cols = [
                         "selected_by_percent",
                         "net_transfers_gw",
-                        "avg_net_transfers_5gw",
                         "bandwagon_score",
-                        "ownership_velocity",
                     ]
                     for col in ownership_fill_cols:
                         if col in df_sorted.columns:
@@ -1173,9 +1186,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                                 )  # Median ownership
                             elif col in [
                                 "net_transfers_gw",
-                                "avg_net_transfers_5gw",
                                 "bandwagon_score",
-                                "ownership_velocity",
                             ]:
                                 df_sorted[col] = df_sorted[col].fillna(0)
 
@@ -1233,12 +1244,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             )
 
         # Merge value data
+        # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
         value_cols = [
             "player_id",
             "gameweek",
             "points_per_pound",
             "value_vs_position",
-            "predicted_price_change_1gw",
             "price_volatility",
             "price_risk",
         ]
@@ -1277,7 +1288,6 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 gw1_mask = (df["gameweek"] == 1) & df["points_per_pound"].isna()
                 df.loc[gw1_mask, "points_per_pound"] = 0.5  # Neutral value
                 df.loc[gw1_mask, "value_vs_position"] = 1.0  # Average
-                df.loc[gw1_mask, "predicted_price_change_1gw"] = 0
                 df.loc[gw1_mask, "price_volatility"] = 0
                 df.loc[gw1_mask, "price_risk"] = 0
                 missing_gws = [gw for gw in missing_gws if gw != 1]
@@ -1297,7 +1307,6 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     value_fill_cols = [
                         "points_per_pound",
                         "value_vs_position",
-                        "predicted_price_change_1gw",
                         "price_volatility",
                         "price_risk",
                     ]
@@ -1315,7 +1324,6 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                             "value_vs_position"
                         ].fillna(1.0)
                     for col in [
-                        "predicted_price_change_1gw",
                         "price_volatility",
                         "price_risk",
                     ]:
@@ -1605,6 +1613,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df["status_encoded"] = 0  # Default: available
         df["overperformance_risk"] = 0.0  # Default: no regression risk
 
+        # Data quality indicators (Phase 1 improvement)
+        df["has_injury_data"] = 0  # 1 if data available, 0 if imputed
+        df["has_rotation_data"] = 0
+        df["has_availability_data"] = 0
+
         # Merge derived_player_metrics (injury_risk, rotation_risk, overperformance_risk)
         if not self.derived_player_metrics_df.empty:
             metrics_cols = ["player_id", "gameweek"]
@@ -1636,6 +1649,31 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     how="left",
                     suffixes=("", "_merged"),
                 )
+
+                # Mark where data was available and forward-fill
+                df_sorted = df.sort_values(["player_id", "gameweek"])
+                for col in existing_metrics:
+                    merged_col = f"{col}_merged"
+                    if merged_col in df_sorted.columns:
+                        # Mark where data was available
+                        if col == "injury_risk":
+                            df_sorted["has_injury_data"] = (
+                                df_sorted[merged_col].notna().astype(int)
+                            )
+                        elif col == "rotation_risk":
+                            df_sorted["has_rotation_data"] = (
+                                df_sorted[merged_col].notna().astype(int)
+                            )
+                        elif col == "overperformance_risk":
+                            df_sorted["has_rotation_data"] = df_sorted[
+                                "has_rotation_data"
+                            ] | df_sorted[merged_col].notna().astype(int)
+
+                        # Forward-fill missing values from earliest available data per player
+                        df_sorted[merged_col] = df_sorted.groupby("player_id")[
+                            merged_col
+                        ].ffill()
+                df = df_sorted.sort_index()
 
                 # Update original columns with merged values (if they exist)
                 for col in existing_metrics:
@@ -1705,11 +1743,29 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     chance_col in df.columns
                     and chance_col != "chance_of_playing_next_round"
                 ):
+                    # Mark where availability data was available
+                    df["has_availability_data"] = df[chance_col].notna().astype(int)
+
+                    # Forward-fill missing values from earliest available data per player
+                    df_sorted = df.sort_values(["player_id", "gameweek"])
+                    df_sorted[chance_col] = df_sorted.groupby("player_id")[
+                        chance_col
+                    ].ffill()
+                    df = df_sorted.sort_index()
+
                     # Use merged value where available, keep default where null
                     df["chance_of_playing_next_round"] = df[chance_col].fillna(
                         df["chance_of_playing_next_round"]
                     )
                     df = df.drop(columns=[chance_col])
+
+                # Also mark availability data for status_encoded (already handled above in status encoding section)
+                # The status_encoded was already updated above, so we just need to forward-fill it
+                df_sorted = df.sort_values(["player_id", "gameweek"])
+                df_sorted["status_encoded"] = df_sorted.groupby("player_id")[
+                    "status_encoded"
+                ].ffill()
+                df = df_sorted.sort_index()
 
         return df
 
@@ -1746,6 +1802,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df["recoveries"] = 0.0
         df["form_momentum"] = 0.0  # Stable
 
+        # Data quality indicator (Phase 1 improvement)
+        df["has_ranking_data"] = 0  # 1 if data available, 0 if imputed
+
         # Merge players_enhanced data
         if not self.players_enhanced_df.empty:
             enhanced_cols = ["player_id", "gameweek"]
@@ -1765,7 +1824,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 if col in self.players_enhanced_df.columns
             ]
 
-            if existing_enhanced:
+            # Check if required merge columns exist
+            if (
+                all(col in self.players_enhanced_df.columns for col in enhanced_cols)
+                and existing_enhanced
+            ):
                 merge_cols = enhanced_cols + existing_enhanced
                 enhanced_df = self.players_enhanced_df[merge_cols].copy()
 
@@ -1779,6 +1842,27 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     how="left",
                     suffixes=("", "_enhanced"),
                 )
+
+                # Mark where ranking data was available and forward-fill
+                has_ranking_data_flag = False
+                df_sorted = df.sort_values(["player_id", "gameweek"])
+                for col in existing_enhanced:
+                    merged_col = f"{col}_enhanced"
+                    if merged_col in df_sorted.columns:
+                        if not has_ranking_data_flag:
+                            df_sorted["has_ranking_data"] = (
+                                df_sorted[merged_col].notna().astype(int)
+                            )
+                            has_ranking_data_flag = True
+                        else:
+                            df_sorted["has_ranking_data"] = df_sorted[
+                                "has_ranking_data"
+                            ] | df_sorted[merged_col].notna().astype(int)
+                        # Forward-fill missing values from earliest available data per player
+                        df_sorted[merged_col] = df_sorted.groupby("player_id")[
+                            merged_col
+                        ].ffill()
+                df = df_sorted.sort_index()
 
                 # Update original columns with merged values (if they exist)
                 # Track if any data was merged for position-aware imputation
@@ -1936,7 +2020,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         return df
 
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (117 features: 65 base + 15 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings)."""
+        """Get list of all feature columns (118 features: 65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality indicators)."""
         return [
             # Static (4)
             "price",
@@ -1986,10 +2070,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "rolling_5gw_saves",
             "rolling_5gw_xgi",
             "rolling_5gw_xgc",
-            # Consistency & volatility (4)
+            # Consistency & volatility (3)
             "rolling_5gw_points_std",
             "rolling_5gw_minutes_std",
-            "minutes_played_rate",
             "form_trend",
             # Team features (13)
             "team_encoded",
@@ -2012,18 +2095,17 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "opponent_rolling_5gw_goals_conceded",
             "opponent_rolling_5gw_clean_sheets",
             "opponent_rolling_5gw_xgc",
-            # Enhanced ownership features (7) - Issue #37
+            # Enhanced ownership features (4) - Issue #37
+            # Removed: avg_net_transfers_5gw, ownership_velocity (perfect correlation with net_transfers_gw)
             "selected_by_percent",
             "ownership_tier_encoded",
             "transfer_momentum_encoded",
             "net_transfers_gw",
-            "avg_net_transfers_5gw",
             "bandwagon_score",
-            "ownership_velocity",
-            # Enhanced value features (5) - Issue #37
+            # Enhanced value features (4) - Issue #37
+            # Removed: predicted_price_change_1gw (perfect correlation with net_transfers_gw)
             "points_per_pound",
             "value_vs_position",
-            "predicted_price_change_1gw",
             "price_volatility",
             "price_risk",
             # Enhanced fixture features (3) - Issue #37
@@ -2076,6 +2158,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "tackles",
             "recoveries",
             "form_momentum",
+            # Data quality indicators (Phase 1 improvement) - 5 features
+            "has_injury_data",
+            "has_rotation_data",
+            "has_availability_data",
+            "has_venue_strength_data",
+            "has_ranking_data",
         ]
 
     def _get_team_feature_columns(self) -> list:

@@ -2,11 +2,13 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class TeamDomain(BaseModel):
     """Domain model for FPL teams."""
+
+    model_config = ConfigDict(ser_json_timedelta="iso8601")
 
     team_id: int = Field(
         ..., ge=1, le=20, description="Team ID (1-20 for Premier League)"
@@ -17,7 +19,7 @@ class TeamDomain(BaseModel):
     )
     as_of_utc: datetime = Field(..., description="Data timestamp")
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {datetime: lambda v: v.isoformat()}
+    @field_serializer("as_of_utc", when_used="json")
+    def serialize_datetime(self, value: datetime) -> str:
+        """Serialize datetime to ISO format."""
+        return value.isoformat()

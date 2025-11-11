@@ -13,7 +13,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
     This transformer allows ML pipelines to be self-contained - they know which
     features they need and can extract them from the full feature set.
 
-    This is critical for deployment: MLExpectedPointsService can pass all 117
+    This is critical for deployment: MLExpectedPointsService can pass all 118
     features to any model, and the pipeline will internally select the subset
     it was trained on.
 

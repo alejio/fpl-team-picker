@@ -1,8 +1,8 @@
 """
-Integration tests for FPLFeatureEngineer with 117 features (including Phase 1-4 enhancements).
+Integration tests for FPLFeatureEngineer with 118 features (including Phase 1-4 enhancements + data quality indicators).
 
 Tests the feature engineering pipeline:
-1. Feature engineer produces exactly 117 features when all data sources provided
+1. Feature engineer produces exactly 118 features when all data sources provided
 2. Feature engineer fails fast without betting data (FAIL FAST principle)
 3. All 15 betting odds features are present in output
 4. All 18 Phase 1-3 features are present (with defaults if data not provided)
@@ -12,8 +12,8 @@ import pytest
 import pandas as pd
 
 
-class TestFPLFeatureEngineer117Features:
-    """Test FPLFeatureEngineer with 117-feature output (99 base + 18 Phase 1-4)."""
+class TestFPLFeatureEngineer118Features:
+    """Test FPLFeatureEngineer with 118-feature output (117 - 4 redundant + 5 data quality indicators)."""
 
     @pytest.fixture
     def sample_historical_data(self):
@@ -174,7 +174,7 @@ class TestFPLFeatureEngineer117Features:
         sample_fixture_difficulty,
         sample_betting_features,
     ):
-        """Test that FPLFeatureEngineer produces exactly 117 features (99 base + 18 Phase 1-4)."""
+        """Test that FPLFeatureEngineer produces exactly 118 features (117 - 4 redundant + 5 data quality indicators)."""
         from fpl_team_picker.domain.services.ml_feature_engineering import (
             FPLFeatureEngineer,
         )
@@ -194,8 +194,8 @@ class TestFPLFeatureEngineer117Features:
             sample_historical_data, sample_historical_data["total_points"]
         )
 
-        # Should have exactly 117 features (99 base + 18 Phase 1-4 with defaults)
-        assert result.shape[1] == 117, f"Expected 117 features, got {result.shape[1]}"
+        # Should have exactly 118 features (117 - 4 redundant + 5 data quality indicators)
+        assert result.shape[1] == 118, f"Expected 118 features, got {result.shape[1]}"
 
         # Verify betting odds features are present
         betting_features = [

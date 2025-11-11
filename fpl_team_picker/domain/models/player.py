@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class Position(str, Enum):
@@ -33,6 +33,8 @@ class PlayerDomain(BaseModel):
 
     Enforces FPL rules and data quality at the domain level.
     """
+
+    model_config = ConfigDict(use_enum_values=True, ser_json_timedelta="iso8601")
 
     player_id: int = Field(..., gt=0, description="Unique FPL player ID")
     web_name: str = Field(..., min_length=1, max_length=50, description="Display name")
@@ -80,16 +82,15 @@ class PlayerDomain(BaseModel):
             return f"{self.first_name} {self.last_name}".strip()
         return self.web_name
 
+    @field_serializer("as_of_utc", when_used="json")
+    def serialize_datetime(self, value: datetime) -> str:
+        """Serialize datetime to ISO format."""
+        return value.isoformat()
+
     @property
     def is_available(self) -> bool:
         """Check if player is available for selection."""
         return self.availability_status == AvailabilityStatus.AVAILABLE
-
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {datetime: lambda v: v.isoformat()}
-        use_enum_values = True
 
 
 class LiveDataDomain(BaseModel):
@@ -138,6 +139,12 @@ class EnrichedPlayerDomain(PlayerDomain):
     Extends base PlayerDomain with all available FPL statistics
     for comprehensive analysis and decision making.
     """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="forbid",  # Prevent extra fields for data integrity
+    )
 
     # Season Performance Stats (beyond basic PlayerDomain)
     total_points_season: int = Field(ge=0, description="Total FPL points this season")
@@ -450,12 +457,3 @@ class EnrichedPlayerDomain(PlayerDomain):
     def is_attacking_defender(self) -> bool:
         """Defender with attacking returns (goals + assists >= 3)."""
         return self.position == Position.DEF and (self.goals_scored + self.assists) >= 3
-
-    class Config:
-        """Pydantic configuration for enriched player data."""
-
-        str_strip_whitespace = True
-        validate_assignment = True
-        extra = "forbid"  # Prevent extra fields for data integrity
-        json_encoders = {datetime: lambda v: v.isoformat()}
-        use_enum_values = True

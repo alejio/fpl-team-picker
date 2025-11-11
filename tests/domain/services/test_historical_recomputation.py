@@ -234,6 +234,6 @@ class TestHistoricalRecomputation:
         # Validate price column exists
         assert "now_cost" in players.columns
 
-        # Validate prices are reasonable (between 3.9 and 15.0 typically)
-        assert players["now_cost"].min() >= 39  # API stores as 10x (£3.9m is valid)
+        # Validate prices are reasonable (between 3.8 and 15.0 typically)
+        assert players["now_cost"].min() >= 38  # API stores as 10x (£3.8m is valid minimum)
         assert players["now_cost"].max() <= 150

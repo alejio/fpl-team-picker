@@ -388,9 +388,16 @@ def engineer_features(
     historical_df_sorted = historical_df.sort_values(
         ["player_id", "gameweek"]
     ).reset_index(drop=True)
-    features_df["gameweek"] = historical_df_sorted["gameweek"].values
-    features_df["position"] = historical_df_sorted["position"].values
-    features_df["player_id"] = historical_df_sorted["player_id"].values
+    # Use pd.concat instead of multiple frame.insert to avoid fragmentation warnings
+    metadata_df = pd.DataFrame(
+        {
+            "gameweek": historical_df_sorted["gameweek"].values,
+            "position": historical_df_sorted["position"].values,
+            "player_id": historical_df_sorted["player_id"].values,
+        },
+        index=features_df.index,
+    )
+    features_df = pd.concat([features_df, metadata_df], axis=1)
 
     # Update target to match sorted order
     target = historical_df_sorted["total_points"].values

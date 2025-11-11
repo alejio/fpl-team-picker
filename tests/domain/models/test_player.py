@@ -1,7 +1,7 @@
 """Tests for PlayerDomain model."""
 
 import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fpl_team_picker.domain.models.player import (
     AvailabilityStatus,
@@ -27,7 +27,7 @@ class TestPlayerDomain:
             price=15.0,
             selected_by_percent=55.2,
             availability_status=AvailabilityStatus.AVAILABLE,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
         )
 
         assert player.player_id == 1
@@ -46,7 +46,7 @@ class TestPlayerDomain:
             position=Position.GKP,
             price=4.5,  # Valid 0.1m increment
             selected_by_percent=10.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
         )
 
         # Invalid price increment
@@ -58,7 +58,7 @@ class TestPlayerDomain:
                 position=Position.GKP,
                 price=4.55,  # Invalid increment
                 selected_by_percent=10.0,
-                as_of_utc=datetime.utcnow(),
+                as_of_utc=datetime.now(UTC),
             )
 
     def test_player_validation_errors(self):
@@ -100,7 +100,7 @@ class TestPlayerDomain:
             position=Position.GKP,
             price=4.5,
             selected_by_percent=10.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
         )
 
         assert player.web_name == "Test"  # web_name gets trimmed by validator
@@ -118,7 +118,7 @@ class TestPlayerDomain:
             price=4.5,
             selected_by_percent=10.0,
             availability_status=AvailabilityStatus.INJURED,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
         )
 
         assert player.availability_status == AvailabilityStatus.INJURED
@@ -213,7 +213,7 @@ class TestEnrichedPlayerDomain:
             price=13.0,
             selected_by_percent=45.2,
             availability_status=AvailabilityStatus.AVAILABLE,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             # Enhanced fields
             total_points_season=150,
             form_season=8.5,
@@ -286,7 +286,7 @@ class TestEnrichedPlayerDomain:
             position=Position.MID,
             price=10.0,
             selected_by_percent=20.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             # Enhanced fields
             total_points_season=100,
             form_season=6.0,
@@ -448,7 +448,7 @@ class TestEnrichedPlayerDomain:
             position=Position.DEF,
             price=5.0,
             selected_by_percent=10.0,
-            as_of_utc=datetime.utcnow(),
+            as_of_utc=datetime.now(UTC),
             total_points_season=50,
             form_season=3.0,
             points_per_game_season=2.5,
