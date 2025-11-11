@@ -20,7 +20,7 @@ class XPModelConfig(BaseModel):
     )
     ml_model_path: str = Field(
         default="models/custom/random-forest_gw1-10_20251107_143207_pipeline.joblib",
-        description="Path to pre-trained ML model with 99 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
+        description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
     ml_ensemble_rule_weight: float = Field(

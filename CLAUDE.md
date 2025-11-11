@@ -33,25 +33,37 @@ Uses `fpl-dataset-builder` client: `from client import FPLDataClient`
 
 Install: `uv sync`
 
-## ML Feature Engineering (99 features)
+## ML Feature Engineering (117 features)
 
 **FPLFeatureEngineer** (sklearn transformer):
 - **Base (65)**: Cumulative stats, rolling 5GW form, per-90 rates, team context, fixture features
 - **Enhanced (15 - #37)**: Ownership trends (7), value analysis (5), enhanced fixture difficulty (3)
 - **Penalty/set-piece (4)**: Primary/backup penalty takers, corner/FK takers
 - **Betting odds (15 - #38)**: Implied probabilities (6), market confidence (4), Asian Handicap (3), match context (2)
+- **Injury & rotation risk (5 - Phase 1)**: injury_risk, rotation_risk, chance_of_playing_next_round, status_encoded, overperformance_risk
+- **Venue-specific team strength (6 - Phase 2)**: home_attack_strength, away_attack_strength, home_defense_strength, away_defense_strength, home_advantage, venue_consistency
+- **Player rankings & context (7 - Phase 3)**: form_rank, ict_index_rank, points_per_game_rank, defensive_contribution, tackles, recoveries, form_momentum
 
 **Data sources**:
 - Base: `get_current_players()`, `get_gameweek_performance(gw)`, `get_fixtures_normalized()`
 - Enhanced: `get_derived_ownership_trends()`, `get_derived_value_analysis()`, `get_derived_fixture_difficulty()`
 - Betting: `get_derived_betting_features()`
+- Phase 1: `get_derived_player_metrics()`, `get_player_availability_snapshot(gw)`
+- Phase 2: `get_derived_team_form()`
+- Phase 3: `get_players_enhanced()`
 
 **Leak-free**: All features use shift(1) or historical lookback. Betting odds are forward-looking (available pre-match) - no shift needed.
+
+**Imputation Strategy (Phase 4)**: Domain-aware defaults replace generic `.fillna(0)`:
+- Risk/Probability: injury_risk=0.1, rotation_risk=0.2, chance_of_playing=100
+- Rankings: -1 for "unranked" instead of 0
+- Status: 0 (available) as default
+- Position-aware: DEF/MID have higher defaults for tackles/recoveries
 
 ## ML Pipeline Training
 
 **Reusable Training Infrastructure** (`scripts/ml_training_utils.py`):
-- `load_training_data()` - Load all 8 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players)
+- `load_training_data()` - Load all 12 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players, derived_player_metrics, player_availability_snapshot, derived_team_form, players_enhanced)
 - `engineer_features()` - FPLFeatureEngineer with leak-free per-GW team strength (FIXED: data alignment bug)
 - `create_temporal_cv_splits()` - Walk-forward validation (GW6→7, GW6-7→8, etc.)
 - `evaluate_fpl_comprehensive()` - MAE/RMSE/Spearman/top-15 overlap/captain accuracy

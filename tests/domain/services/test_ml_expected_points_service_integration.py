@@ -1,18 +1,19 @@
 """
-Integration tests for FPLFeatureEngineer with 99 features (including betting odds).
+Integration tests for FPLFeatureEngineer with 117 features (including Phase 1-4 enhancements).
 
 Tests the feature engineering pipeline:
-1. Feature engineer produces exactly 99 features when betting odds provided
+1. Feature engineer produces exactly 117 features when all data sources provided
 2. Feature engineer fails fast without betting data (FAIL FAST principle)
 3. All 15 betting odds features are present in output
+4. All 18 Phase 1-3 features are present (with defaults if data not provided)
 """
 
 import pytest
 import pandas as pd
 
 
-class TestFPLFeatureEngineer99Features:
-    """Test FPLFeatureEngineer with 99-feature output (84 + 15 betting odds)."""
+class TestFPLFeatureEngineer117Features:
+    """Test FPLFeatureEngineer with 117-feature output (99 base + 18 Phase 1-4)."""
 
     @pytest.fixture
     def sample_historical_data(self):
@@ -163,7 +164,7 @@ class TestFPLFeatureEngineer99Features:
                 )
         return pd.DataFrame(data)
 
-    def test_feature_engineer_produces_99_features_with_betting_odds(
+    def test_feature_engineer_produces_117_features_with_betting_odds(
         self,
         sample_historical_data,
         sample_teams_data,
@@ -173,7 +174,7 @@ class TestFPLFeatureEngineer99Features:
         sample_fixture_difficulty,
         sample_betting_features,
     ):
-        """Test that FPLFeatureEngineer produces exactly 99 features with betting odds."""
+        """Test that FPLFeatureEngineer produces exactly 117 features (99 base + 18 Phase 1-4)."""
         from fpl_team_picker.domain.services.ml_feature_engineering import (
             FPLFeatureEngineer,
         )
@@ -186,14 +187,15 @@ class TestFPLFeatureEngineer99Features:
             value_analysis_df=sample_value_analysis,
             fixture_difficulty_df=sample_fixture_difficulty,
             betting_features_df=sample_betting_features,
+            # Phase 1-3 data sources not provided - will use defaults
         )
 
         result = engineer.fit_transform(
             sample_historical_data, sample_historical_data["total_points"]
         )
 
-        # Should have exactly 99 features
-        assert result.shape[1] == 99, f"Expected 99 features, got {result.shape[1]}"
+        # Should have exactly 117 features (99 base + 18 Phase 1-4 with defaults)
+        assert result.shape[1] == 117, f"Expected 117 features, got {result.shape[1]}"
 
         # Verify betting odds features are present
         betting_features = [

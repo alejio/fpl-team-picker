@@ -57,7 +57,7 @@ python scripts/custom_pipeline_optimizer.py train \
 - `xgboost`, `lightgbm`, `random-forest`, `gradient-boost`, `adaboost`, `ridge`, `lasso`, `elasticnet`
 
 ### Feature Selection
-- `none` - Use all 99 features
+- `none` - Use all 117 features
 - `correlation` - Remove highly correlated features (|r| > 0.95)
 - `permutation` - Top 60 features by permutation importance
 - `rfe-smart` - RFE that keeps penalty features

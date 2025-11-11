@@ -4,7 +4,7 @@ Comprehensive feature importance analysis script that replicates the TPOT optimi
 
 ## Overview
 
-This script analyzes the importance of all 99 features used in the FPL ML xP prediction model using multiple complementary methods:
+This script analyzes the importance of all 117 features used in the FPL ML xP prediction model using multiple complementary methods:
 
 1. **Random Forest MDI** (Mean Decrease in Impurity): Fast, built-in feature importance
 2. **Permutation Importance**: Model-agnostic, tests real predictive power by shuffling
@@ -134,7 +134,7 @@ Features with correlation |r| > 0.8 are redundant:
 
 This script uses the **exact same** data loading and feature engineering pipeline as `scripts/tpot_pipeline_optimizer.py`:
 
-- ✅ Same 99 features (65 base + 15 enhanced + 4 set-piece + 15 betting)
+- ✅ Same 117 features (65 base + 15 enhanced + 4 set-piece + 15 betting + 18 new)
 - ✅ Same temporal CV splits (walk-forward validation)
 - ✅ Same leak-free feature engineering (only uses past data)
 - ✅ Same data sources (ownership trends, value analysis, betting odds)

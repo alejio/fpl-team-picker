@@ -68,7 +68,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 99 features (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting odds):
+    Generates 117 features (65 base + 15 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings):
 
     Base features (65):
     - Cumulative season statistics (up to GW N-1)
@@ -100,6 +100,30 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - Asian Handicap (3): asian_handicap_line, handicap_team_odds, expected_goal_difference
     - Match context (2): over_under_signal, referee_encoded
 
+    Injury & rotation risk features (5) - Phase 1:
+    - injury_risk: Quantified injury probability (0-1 scale)
+    - rotation_risk: Squad rotation likelihood (0-1 scale)
+    - chance_of_playing_next_round: FPL's own injury prediction (0-100%)
+    - status_encoded: Player availability status (available=0, doubtful=1, injured=2, suspended=3)
+    - overperformance_risk: Regression-to-mean indicator (0-1 scale)
+
+    Venue-specific team strength (6) - Phase 2:
+    - home_attack_strength: Home attacking rating (vs overall)
+    - away_attack_strength: Away attacking rating
+    - home_defense_strength: Home defensive rating
+    - away_defense_strength: Away defensive rating
+    - home_advantage: Strength differential between venues
+    - venue_consistency: Reliability of home/away performance split
+
+    Player rankings & context (7) - Phase 3:
+    - form_rank: Form ranking (lower = better form, normalized to 0-1)
+    - ict_index_rank: ICT ranking among all players (normalized to 0-1)
+    - points_per_game_rank: Points per game ranking (normalized to 0-1)
+    - defensive_contribution: Defensive actions score (tackles, recoveries, blocks)
+    - tackles: Total tackles (especially valuable for DEF/MID)
+    - recoveries: Ball recoveries count
+    - form_momentum: Form trajectory (+1 improving, 0 stable, -1 declining)
+
     All features are leak-free (only use past data).
     """
 
@@ -113,6 +137,10 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
         betting_features_df: Optional[pd.DataFrame] = None,
+        derived_player_metrics_df: Optional[pd.DataFrame] = None,
+        player_availability_snapshot_df: Optional[pd.DataFrame] = None,
+        derived_team_form_df: Optional[pd.DataFrame] = None,
+        players_enhanced_df: Optional[pd.DataFrame] = None,
     ):
         """
         Initialize feature engineer.
@@ -131,6 +159,14 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 [player_id, penalties_order, corners_and_indirect_freekicks_order, direct_freekicks_order]
             betting_features_df: Betting odds features from get_derived_betting_features() (NEW - Issue #38)
                 [gameweek, player_id, team_win_probability, ..., referee_encoded]
+            derived_player_metrics_df: Derived player metrics from get_derived_player_metrics() (NEW - Phase 1)
+                [player_id, gameweek, injury_risk, rotation_risk, overperformance_risk, ...]
+            player_availability_snapshot_df: Player availability snapshot from get_player_availability_snapshot() (NEW - Phase 1)
+                [player_id, gameweek, status, chance_of_playing_next_round, ...]
+            derived_team_form_df: Derived team form from get_derived_team_form() (NEW - Phase 2)
+                [team_id, gameweek, home_attack_strength, away_attack_strength, ...]
+            players_enhanced_df: Enhanced players data from get_players_enhanced() (NEW - Phase 3)
+                [player_id, gameweek, form_rank, ict_index_rank, tackles, recoveries, ...]
         """
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
@@ -160,6 +196,28 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # NEW: Betting odds features (Issue #38)
         self.betting_features_df = (
             betting_features_df if betting_features_df is not None else pd.DataFrame()
+        )
+
+        # NEW: Phase 1 - Injury & rotation risk features
+        self.derived_player_metrics_df = (
+            derived_player_metrics_df
+            if derived_player_metrics_df is not None
+            else pd.DataFrame()
+        )
+        self.player_availability_snapshot_df = (
+            player_availability_snapshot_df
+            if player_availability_snapshot_df is not None
+            else pd.DataFrame()
+        )
+
+        # NEW: Phase 2 - Venue-specific team strength
+        self.derived_team_form_df = (
+            derived_team_form_df if derived_team_form_df is not None else pd.DataFrame()
+        )
+
+        # NEW: Phase 3 - Player rankings & context
+        self.players_enhanced_df = (
+            players_enhanced_df if players_enhanced_df is not None else pd.DataFrame()
         )
 
         # Store feature names for reference
@@ -542,8 +600,17 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # ===== BETTING ODDS FEATURES (Issue #38) =====
         df = self._add_betting_odds_features(df)
 
-        # Fill missing values
-        df = df.fillna(0)
+        # ===== PHASE 1: INJURY & ROTATION RISK FEATURES =====
+        df = self._add_injury_rotation_features(df)
+
+        # ===== PHASE 2: VENUE-SPECIFIC TEAM STRENGTH (enhanced in _add_team_features) =====
+        # Already handled in _add_team_features() above
+
+        # ===== PHASE 3: PLAYER RANKINGS & CONTEXT =====
+        df = self._add_ranking_features(df)
+
+        # Fill missing values with smart imputation
+        df = self._impute_with_domain_defaults(df)
 
         # Store feature names on first call
         if self.feature_names_ is None:
@@ -685,6 +752,69 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 df[col] = df[col].fillna(0)
 
         df["team_encoded"] = df["team_id"].astype("category").cat.codes
+
+        # ===== PHASE 2: VENUE-SPECIFIC TEAM STRENGTH =====
+        # Add venue-specific attack/defense strength features
+        df["home_attack_strength"] = 1.0  # Default: neutral
+        df["away_attack_strength"] = 1.0
+        df["home_defense_strength"] = 1.0
+        df["away_defense_strength"] = 1.0
+        df["home_advantage"] = 0.0  # Default: no advantage
+        df["venue_consistency"] = 0.5  # Default: moderate consistency
+
+        # Merge venue-specific team form data
+        if not self.derived_team_form_df.empty:
+            venue_cols = ["team_id", "gameweek"]
+            available_venue = [
+                "home_attack_strength",
+                "away_attack_strength",
+                "home_defense_strength",
+                "away_defense_strength",
+                "home_advantage",
+                "venue_consistency",
+            ]
+
+            # Check which venue columns exist
+            existing_venue = [
+                col
+                for col in available_venue
+                if col in self.derived_team_form_df.columns
+            ]
+
+            if existing_venue:
+                merge_cols = venue_cols + existing_venue
+                venue_df = self.derived_team_form_df[merge_cols].copy()
+
+                # Shift by 1 gameweek (consistent with other temporal features)
+                venue_df_shifted = venue_df.copy()
+                venue_df_shifted["gameweek"] = venue_df_shifted["gameweek"] + 1
+
+                df = df.merge(
+                    venue_df_shifted,
+                    on=["team_id", "gameweek"],
+                    how="left",
+                    suffixes=("", "_venue"),
+                )
+
+                # Update original columns with merged values (if they exist)
+                for col in existing_venue:
+                    merged_col = f"{col}_venue"
+                    if merged_col in df.columns:
+                        # Use merged value where available, keep default where null
+                        if col == "venue_consistency":
+                            df[col] = df[merged_col].fillna(0.5)
+                        elif col == "home_advantage":
+                            df[col] = df[merged_col].fillna(0.0)
+                        else:
+                            df[col] = df[merged_col].fillna(1.0)
+                        df = df.drop(columns=[merged_col])
+                    # If no merged column, keep the default we set earlier
+
+        # Conditionally use home vs away strength based on is_home feature
+        # This replaces single opponent_strength with venue-aware ratings
+        # Note: is_home is added in _add_fixture_features(), so we need to handle this
+        # after fixture features are added, but we'll set defaults here
+        # The actual conditional selection happens during model training/inference
 
         return df
 
@@ -1445,8 +1575,368 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         return df
 
+    def _add_injury_rotation_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add injury and rotation risk features (Phase 1).
+
+        Creates 5 features:
+        - injury_risk: Quantified injury probability (0-1 scale)
+        - rotation_risk: Squad rotation likelihood (0-1 scale)
+        - chance_of_playing_next_round: FPL's own injury prediction (0-100%)
+        - status_encoded: Player availability status (available=0, doubtful=1, injured=2, suspended=3)
+        - overperformance_risk: Regression-to-mean indicator (0-1 scale)
+
+        Data sources:
+        - derived_player_metrics_df: injury_risk, rotation_risk, overperformance_risk
+        - player_availability_snapshot_df: status, chance_of_playing_next_round
+
+        For historical training: Uses get_player_availability_snapshot(gw) for accurate historical status.
+
+        Args:
+            df: Player performance DataFrame with [player_id, gameweek] columns
+
+        Returns:
+            DataFrame with 5 additional injury/rotation features
+        """
+        # Phase 1 features - initialize with defaults
+        df["injury_risk"] = 0.1  # Default: 10% base risk
+        df["rotation_risk"] = 0.2  # Default: 20% base rotation
+        df["chance_of_playing_next_round"] = 100.0  # Default: healthy
+        df["status_encoded"] = 0  # Default: available
+        df["overperformance_risk"] = 0.0  # Default: no regression risk
+
+        # Merge derived_player_metrics (injury_risk, rotation_risk, overperformance_risk)
+        if not self.derived_player_metrics_df.empty:
+            metrics_cols = ["player_id", "gameweek"]
+            available_metrics = [
+                "injury_risk",
+                "rotation_risk",
+                "overperformance_risk",
+            ]
+
+            # Check which metrics columns exist
+            existing_metrics = [
+                col
+                for col in available_metrics
+                if col in self.derived_player_metrics_df.columns
+            ]
+
+            if existing_metrics:
+                merge_cols = metrics_cols + existing_metrics
+                metrics_df = self.derived_player_metrics_df[merge_cols].copy()
+
+                # Shift by 1 gameweek (consistent with other temporal features)
+                metrics_df_shifted = metrics_df.copy()
+                metrics_df_shifted["gameweek"] = metrics_df_shifted["gameweek"] + 1
+
+                # Merge with suffixes to avoid column name conflicts
+                df = df.merge(
+                    metrics_df_shifted,
+                    on=["player_id", "gameweek"],
+                    how="left",
+                    suffixes=("", "_merged"),
+                )
+
+                # Update original columns with merged values (if they exist)
+                for col in existing_metrics:
+                    merged_col = f"{col}_merged"
+                    if merged_col in df.columns:
+                        # Use merged value where available, keep default where null
+                        df[col] = df[merged_col].fillna(df[col])
+                        df = df.drop(columns=[merged_col])
+                    # If no merged column, keep the default we set earlier
+
+        # Merge player_availability_snapshot (status, chance_of_playing_next_round)
+        if not self.player_availability_snapshot_df.empty:
+            snapshot_cols = ["player_id", "gameweek"]
+            available_snapshot = ["status", "chance_of_playing_next_round"]
+
+            # Check which snapshot columns exist
+            existing_snapshot = [
+                col
+                for col in available_snapshot
+                if col in self.player_availability_snapshot_df.columns
+            ]
+
+            if existing_snapshot:
+                merge_cols = snapshot_cols + existing_snapshot
+                snapshot_df = self.player_availability_snapshot_df[merge_cols].copy()
+
+                # For historical training: snapshot is already at correct gameweek
+                # No shift needed - snapshot represents state at that gameweek
+                df = df.merge(
+                    snapshot_df,
+                    on=["player_id", "gameweek"],
+                    how="left",
+                    suffixes=("", "_snapshot"),
+                )
+
+                # Encode status if available
+                # After merge, status column might be "status" or "status_snapshot" depending on conflicts
+                status_col = (
+                    "status_snapshot" if "status_snapshot" in df.columns else "status"
+                )
+                if status_col in df.columns:
+                    status_map = {
+                        "a": 0,  # available
+                        "d": 1,  # doubtful
+                        "i": 2,  # injured
+                        "s": 3,  # suspended
+                        "u": 0,  # unknown -> available
+                    }
+                    # Update status_encoded with merged values where available
+                    # Only update where status is not null (merge found a match)
+                    status_encoded_merged = df[status_col].str.lower().map(status_map)
+                    # Use merged value where available (not null), keep default (0) where null
+                    mask = status_encoded_merged.notna()
+                    df.loc[mask, "status_encoded"] = status_encoded_merged[mask]
+                    # Drop the merged status column
+                    if status_col != "status_encoded":  # Avoid dropping if same name
+                        df = df.drop(columns=[status_col])
+
+                # Handle chance_of_playing_next_round
+                # After merge, column might be "chance_of_playing_next_round" or "chance_of_playing_next_round_snapshot"
+                chance_col = (
+                    "chance_of_playing_next_round_snapshot"
+                    if "chance_of_playing_next_round_snapshot" in df.columns
+                    else "chance_of_playing_next_round"
+                )
+                if (
+                    chance_col in df.columns
+                    and chance_col != "chance_of_playing_next_round"
+                ):
+                    # Use merged value where available, keep default where null
+                    df["chance_of_playing_next_round"] = df[chance_col].fillna(
+                        df["chance_of_playing_next_round"]
+                    )
+                    df = df.drop(columns=[chance_col])
+
+        return df
+
+    def _add_ranking_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Add player rankings and context features (Phase 3).
+
+        Creates 7 features:
+        - form_rank: Form ranking (lower = better form, normalized to 0-1)
+        - ict_index_rank: ICT ranking among all players (normalized to 0-1)
+        - points_per_game_rank: Points per game ranking (normalized to 0-1)
+        - defensive_contribution: Defensive actions score (tackles, recoveries, blocks)
+        - tackles: Total tackles (especially valuable for DEF/MID)
+        - recoveries: Ball recoveries count
+        - form_momentum: Form trajectory (+1 improving, 0 stable, -1 declining)
+
+        Data sources:
+        - players_enhanced_df: form_rank, ict_index_rank, points_per_game_rank, tackles, recoveries, defensive_contribution
+        - derived_player_metrics_df: form_momentum
+
+        Args:
+            df: Player performance DataFrame with [player_id, gameweek] columns
+
+        Returns:
+            DataFrame with 7 additional ranking/context features
+        """
+        # Phase 3 features - initialize with defaults
+        df["form_rank"] = -1.0  # Unranked
+        df["ict_index_rank"] = -1.0
+        df["points_per_game_rank"] = -1.0
+        # Initialize defensive features to 0.0 (will be updated by position-aware imputation if data is partially available)
+        df["defensive_contribution"] = 0.0
+        df["tackles"] = 0.0
+        df["recoveries"] = 0.0
+        df["form_momentum"] = 0.0  # Stable
+
+        # Merge players_enhanced data
+        if not self.players_enhanced_df.empty:
+            enhanced_cols = ["player_id", "gameweek"]
+            available_enhanced = [
+                "form_rank",
+                "ict_index_rank",
+                "points_per_game_rank",
+                "tackles",
+                "recoveries",
+                "defensive_contribution",
+            ]
+
+            # Check which enhanced columns exist
+            existing_enhanced = [
+                col
+                for col in available_enhanced
+                if col in self.players_enhanced_df.columns
+            ]
+
+            if existing_enhanced:
+                merge_cols = enhanced_cols + existing_enhanced
+                enhanced_df = self.players_enhanced_df[merge_cols].copy()
+
+                # Shift by 1 gameweek (consistent with other temporal features)
+                enhanced_df_shifted = enhanced_df.copy()
+                enhanced_df_shifted["gameweek"] = enhanced_df_shifted["gameweek"] + 1
+
+                df = df.merge(
+                    enhanced_df_shifted,
+                    on=["player_id", "gameweek"],
+                    how="left",
+                    suffixes=("", "_enhanced"),
+                )
+
+                # Update original columns with merged values (if they exist)
+                # Track if any data was merged for position-aware imputation
+                data_was_merged = False
+                for col in existing_enhanced:
+                    merged_col = f"{col}_enhanced"
+                    if merged_col in df.columns:
+                        data_was_merged = True
+                        # Use merged value where available, keep default where null
+                        if "rank" in col:
+                            df[col] = df[merged_col].fillna(-1.0)  # Unranked
+                        else:
+                            # For defensive features, use NaN where no data (for position-aware imputation)
+                            if col in [
+                                "tackles",
+                                "recoveries",
+                                "defensive_contribution",
+                            ]:
+                                df[col] = df[merged_col]  # Keep NaN where no match
+                            else:
+                                df[col] = df[merged_col].fillna(0.0)
+                        df = df.drop(columns=[merged_col])
+                    # If no merged column, keep the default we set earlier
+
+                # Store flag for position-aware imputation
+                if data_was_merged:
+                    df["_phase3_data_merged"] = True
+
+                # Normalize ranks to 0-1 scale (rank/max_rank)
+                # Lower rank = better, so invert: normalized = 1 - (rank/max_rank)
+                for rank_col in ["form_rank", "ict_index_rank", "points_per_game_rank"]:
+                    if rank_col in df.columns and rank_col in existing_enhanced:
+                        # Convert to float first to avoid dtype warnings
+                        df[rank_col] = df[rank_col].astype(float)
+                        # Normalize ranks: lower rank = better form
+                        # If rank is null or -1 (unranked), skip normalization
+                        # Otherwise, normalize: 1 - (rank / max_rank_in_gw)
+                        for gw in df["gameweek"].unique():
+                            gw_mask = df["gameweek"] == gw
+                            gw_ranks = df.loc[gw_mask, rank_col].copy()
+                            valid_ranks = gw_ranks[gw_ranks >= 0]
+
+                            if len(valid_ranks) > 0:
+                                max_rank = valid_ranks.max()
+                                if max_rank > 0:
+                                    # Normalize: 1 - (rank/max_rank) so lower rank = higher value
+                                    valid_mask = gw_mask & (df[rank_col] >= 0)
+                                    df.loc[valid_mask, rank_col] = (
+                                        1.0 - df.loc[valid_mask, rank_col] / max_rank
+                                    )
+
+        # Merge form_momentum from derived_player_metrics
+        if not self.derived_player_metrics_df.empty:
+            if "form_momentum" in self.derived_player_metrics_df.columns:
+                momentum_df = self.derived_player_metrics_df[
+                    ["player_id", "gameweek", "form_momentum"]
+                ].copy()
+
+                # Shift by 1 gameweek
+                momentum_df_shifted = momentum_df.copy()
+                momentum_df_shifted["gameweek"] = momentum_df_shifted["gameweek"] + 1
+
+                df = df.merge(
+                    momentum_df_shifted,
+                    on=["player_id", "gameweek"],
+                    how="left",
+                    suffixes=("", "_momentum"),
+                )
+
+                # Update form_momentum if merged
+                if "form_momentum_momentum" in df.columns:
+                    df["form_momentum"] = df["form_momentum_momentum"].fillna(0.0)
+                    df = df.drop(columns=["form_momentum_momentum"])
+
+        return df
+
+    def _impute_with_domain_defaults(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Impute missing values with domain-aware defaults (Phase 4).
+
+        Replaces generic .fillna(0) with position-aware and feature-type-aware defaults:
+        - Risk/Probability fields: Neutral defaults (injury_risk=0.1, rotation_risk=0.2, chance_of_playing=100)
+        - Rankings: -1 for "unranked" instead of 0
+        - Status encoding: 0 (available) as default, not null
+        - Position-aware imputation: DEF vs FWD have different typical values
+
+        Args:
+            df: DataFrame with potentially missing values
+
+        Returns:
+            DataFrame with imputed values
+        """
+        # Risk/Probability fields: Use neutral defaults
+        risk_defaults = {
+            "injury_risk": 0.1,  # Assume 10% base risk
+            "rotation_risk": 0.2,  # Assume 20% base rotation
+            "chance_of_playing_next_round": 100.0,  # Assume healthy if null
+        }
+
+        for col, default in risk_defaults.items():
+            if col in df.columns:
+                df[col] = df[col].fillna(default)
+
+        # Rankings: Use -1 for "unranked" instead of 0
+        rank_cols = ["form_rank", "ict_index_rank", "points_per_game_rank"]
+        for col in rank_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna(-1.0)
+
+        # Status encoding: 0 (available) as default
+        if "status_encoded" in df.columns:
+            df["status_encoded"] = df["status_encoded"].fillna(0)
+
+        # Position-aware imputation for defensive features
+        # Only apply when we have some data but it's missing for some players
+        # If no data source was provided at all, use uniform defaults (0.0)
+        if "position" in df.columns:
+            # DEF/MID typically have more tackles/recoveries than FWD/GKP
+            defensive_cols = ["tackles", "recoveries", "defensive_contribution"]
+            # Only apply position-aware imputation if Phase 3 data was merged (some players have data)
+            apply_position_aware = (
+                "_phase3_data_merged" in df.columns and df["_phase3_data_merged"].any()
+                if "_phase3_data_merged" in df.columns
+                else False
+            )
+
+            for col in defensive_cols:
+                if col in df.columns:
+                    def_mask = df["position"].isin(["DEF", "MID"])
+                    other_mask = ~def_mask
+
+                    if apply_position_aware:
+                        # Fill nulls with position-aware defaults (data was merged but missing for some)
+                        df.loc[def_mask & df[col].isna(), col] = 2.0
+                        df.loc[other_mask & df[col].isna(), col] = 0.0
+                    else:
+                        # No data was merged - fill all nulls with 0.0 (uniform default)
+                        df[col] = df[col].fillna(0.0)
+
+            # Clean up temporary flag
+            if "_phase3_data_merged" in df.columns:
+                df = df.drop(columns=["_phase3_data_merged"])
+
+        # Fill all other numeric columns with 0 (backward compatible)
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            if (
+                col not in risk_defaults
+                and col not in rank_cols
+                and col != "status_encoded"
+            ):
+                if col not in ["tackles", "recoveries", "defensive_contribution"]:
+                    df[col] = df[col].fillna(0)
+
+        return df
+
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (99 features: 65 base + 15 enhanced + 4 penalty/set-piece + 15 betting odds)."""
+        """Get list of all feature columns (117 features: 65 base + 15 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings)."""
         return [
             # Static (4)
             "price",
@@ -1565,6 +2055,27 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             # Match context (2)
             "over_under_signal",
             "referee_encoded",
+            # Phase 1: Injury & rotation risk features (5)
+            "injury_risk",
+            "rotation_risk",
+            "chance_of_playing_next_round",
+            "status_encoded",
+            "overperformance_risk",
+            # Phase 2: Venue-specific team strength (6)
+            "home_attack_strength",
+            "away_attack_strength",
+            "home_defense_strength",
+            "away_defense_strength",
+            "home_advantage",
+            "venue_consistency",
+            # Phase 3: Player rankings & context (7)
+            "form_rank",
+            "ict_index_rank",
+            "points_per_game_rank",
+            "defensive_contribution",
+            "tackles",
+            "recoveries",
+            "form_momentum",
         ]
 
     def _get_team_feature_columns(self) -> list:

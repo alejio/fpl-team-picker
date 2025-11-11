@@ -611,6 +611,10 @@ def main():
             fixture_difficulty_df,
             betting_features_df,
             raw_players_df,
+            derived_player_metrics_df,
+            player_availability_snapshot_df,
+            derived_team_form_df,
+            players_enhanced_df,
         ) = load_training_data(start_gw=args.start_gw, end_gw=args.end_gw, verbose=True)
 
         # 2. Engineer features using reusable utilities
@@ -623,6 +627,10 @@ def main():
             fixture_difficulty_df,
             betting_features_df,
             raw_players_df,
+            derived_player_metrics_df,
+            player_availability_snapshot_df,
+            derived_team_form_df,
+            players_enhanced_df,
             verbose=True,
         )
 

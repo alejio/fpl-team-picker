@@ -13,7 +13,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
     This transformer allows ML pipelines to be self-contained - they know which
     features they need and can extract them from the full feature set.
 
-    This is critical for deployment: MLExpectedPointsService can pass all 99
+    This is critical for deployment: MLExpectedPointsService can pass all 117
     features to any model, and the pipeline will internally select the subset
     it was trained on.
 
@@ -28,7 +28,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
     >>> from sklearn.preprocessing import StandardScaler
     >>> from sklearn.ensemble import RandomForestRegressor
     >>>
-    >>> # Pipeline that accepts 99 features but only uses 60
+    >>> # Pipeline that accepts 117 features but only uses 60
     >>> pipeline = Pipeline([
     ...     ('feature_selector', FeatureSelector(['feature1', 'feature2', ...])),
     ...     ('scaler', StandardScaler()),
@@ -36,7 +36,7 @@ class FeatureSelector(BaseEstimator, TransformerMixin):
     ... ])
     >>>
     >>> # Can pass all features - selector extracts the ones it needs
-    >>> X_all = df[all_99_features]
+    >>> X_all = df[all_117_features]
     >>> pipeline.fit(X_all, y)
     >>> pipeline.predict(X_all)
     """

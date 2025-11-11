@@ -6,7 +6,7 @@ used across different modeling approaches (TPOT, custom pipelines, experiments).
 
 Ensures "apples to apples" comparison by standardizing:
 - Data loading (GW range, features, target)
-- Feature engineering (FPLFeatureEngineer with 99 features)
+- Feature engineering (FPLFeatureEngineer with 117 features)
 - Temporal cross-validation splits (walk-forward validation)
 - Evaluation metrics (MAE, RMSE, Spearman correlation)
 """
@@ -67,6 +67,10 @@ def load_training_data(
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
 ]:
     """
     Load all data required for ML training.
@@ -78,7 +82,8 @@ def load_training_data(
 
     Returns:
         Tuple of (historical_df, fixtures_df, teams_df, ownership_trends_df,
-                  value_analysis_df, fixture_difficulty_df, betting_features_df, raw_players_df)
+                  value_analysis_df, fixture_difficulty_df, betting_features_df, raw_players_df,
+                  derived_player_metrics_df, player_availability_snapshot_df, derived_team_form_df, players_enhanced_df)
     """
     client = FPLDataClient()
 
@@ -187,6 +192,77 @@ def load_training_data(
             logger.error(f"   ❌ Error loading penalty data: {e}")
         raw_players_df = pd.DataFrame()
 
+    # Load Phase 1: Injury & rotation risk data sources
+    if verbose:
+        logger.info("\n🏥 Loading injury & rotation risk data sources...")
+    try:
+        derived_player_metrics_df = client.get_derived_player_metrics()
+        if verbose:
+            logger.info(
+                f"   ✅ Derived player metrics: {len(derived_player_metrics_df)} records"
+            )
+    except (AttributeError, Exception) as e:
+        if verbose:
+            logger.warning(f"   ⚠️  Derived player metrics unavailable: {e}")
+        derived_player_metrics_df = pd.DataFrame()
+
+    # Load player availability snapshots for historical training
+    # For each gameweek in range, load snapshot
+    player_availability_snapshot_df = pd.DataFrame()
+    try:
+        availability_snapshots = []
+        for gw in range(start_gw, end_gw + 1):
+            try:
+                snapshot = client.get_player_availability_snapshot(
+                    gameweek=gw, include_backfilled=True
+                )
+                if not snapshot.empty:
+                    snapshot["gameweek"] = gw
+                    availability_snapshots.append(snapshot)
+            except Exception:
+                # Skip if snapshot not available for this gameweek
+                pass
+
+        if availability_snapshots:
+            player_availability_snapshot_df = pd.concat(
+                availability_snapshots, ignore_index=True
+            )
+            if verbose:
+                logger.info(
+                    f"   ✅ Player availability snapshots: {len(player_availability_snapshot_df)} records"
+                )
+        else:
+            if verbose:
+                logger.warning("   ⚠️  No player availability snapshots available")
+    except (AttributeError, Exception) as e:
+        if verbose:
+            logger.warning(f"   ⚠️  Player availability snapshots unavailable: {e}")
+        player_availability_snapshot_df = pd.DataFrame()
+
+    # Load Phase 2: Venue-specific team strength
+    if verbose:
+        logger.info("\n🏟️  Loading venue-specific team strength data...")
+    try:
+        derived_team_form_df = client.get_derived_team_form()
+        if verbose:
+            logger.info(f"   ✅ Derived team form: {len(derived_team_form_df)} records")
+    except (AttributeError, Exception) as e:
+        if verbose:
+            logger.warning(f"   ⚠️  Derived team form unavailable: {e}")
+        derived_team_form_df = pd.DataFrame()
+
+    # Load Phase 3: Player rankings & context
+    if verbose:
+        logger.info("\n📊 Loading player rankings & context data...")
+    try:
+        players_enhanced_df = client.get_players_enhanced()
+        if verbose:
+            logger.info(f"   ✅ Players enhanced: {len(players_enhanced_df)} records")
+    except (AttributeError, Exception) as e:
+        if verbose:
+            logger.warning(f"   ⚠️  Players enhanced unavailable: {e}")
+        players_enhanced_df = pd.DataFrame()
+
     if verbose:
         logger.info(f"\n✅ Total records: {len(historical_df):,}")
         logger.info(f"   Unique players: {historical_df['player_id'].nunique():,}")
@@ -201,6 +277,10 @@ def load_training_data(
         fixture_difficulty_df,
         betting_features_df,
         raw_players_df,
+        derived_player_metrics_df,
+        player_availability_snapshot_df,
+        derived_team_form_df,
+        players_enhanced_df,
     )
 
 
@@ -213,6 +293,10 @@ def engineer_features(
     fixture_difficulty_df: pd.DataFrame,
     betting_features_df: pd.DataFrame,
     raw_players_df: pd.DataFrame,
+    derived_player_metrics_df: pd.DataFrame,
+    player_availability_snapshot_df: pd.DataFrame,
+    derived_team_form_df: pd.DataFrame,
+    players_enhanced_df: pd.DataFrame,
     verbose: bool = True,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """
@@ -227,6 +311,10 @@ def engineer_features(
         fixture_difficulty_df: Enhanced fixture difficulty data
         betting_features_df: Betting odds features data
         raw_players_df: Raw players data with penalty orders
+        derived_player_metrics_df: Derived player metrics data (Phase 1)
+        player_availability_snapshot_df: Player availability snapshot data (Phase 1)
+        derived_team_form_df: Derived team form data (Phase 2)
+        players_enhanced_df: Enhanced players data (Phase 3)
         verbose: Print progress messages
 
     Returns:
@@ -234,7 +322,7 @@ def engineer_features(
     """
     if verbose:
         logger.info(
-            "\n🔧 Engineering features (FPLFeatureEngineer with 99 features)..."
+            "\n🔧 Engineering features (FPLFeatureEngineer with 117 features)..."
         )
 
     # Calculate per-gameweek team strength (no data leakage)
@@ -268,6 +356,18 @@ def engineer_features(
         if not betting_features_df.empty
         else None,
         raw_players_df=raw_players_df if not raw_players_df.empty else None,
+        derived_player_metrics_df=derived_player_metrics_df
+        if not derived_player_metrics_df.empty
+        else None,
+        player_availability_snapshot_df=player_availability_snapshot_df
+        if not player_availability_snapshot_df.empty
+        else None,
+        derived_team_form_df=derived_team_form_df
+        if not derived_team_form_df.empty
+        else None,
+        players_enhanced_df=players_enhanced_df
+        if not players_enhanced_df.empty
+        else None,
     )
 
     # Transform

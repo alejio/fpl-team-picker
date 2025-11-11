@@ -354,7 +354,7 @@ class TestBettingOddsFeatures:
         mock_betting_features,
         minimal_enhanced_data,
     ):
-        """Test that total feature count is 99 (84 + 15 betting odds)."""
+        """Test that total feature count is 117 (99 base + 18 Phase 1-4)."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
@@ -363,6 +363,7 @@ class TestBettingOddsFeatures:
             ownership_trends_df=minimal_enhanced_data["ownership"],
             value_analysis_df=minimal_enhanced_data["value"],
             fixture_difficulty_df=minimal_enhanced_data["fixture_difficulty"],
+            # Phase 1-3 data sources not provided - will use defaults
         )
 
         result = engineer.fit_transform(
@@ -371,10 +372,10 @@ class TestBettingOddsFeatures:
 
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 99 features total (65 base + 15 enhanced + 4 penalty + 15 betting)
-        assert len(feature_names) == 99, (
-            f"Expected 99 features, got {len(feature_names)}"
+        # Should be 117 features total (99 base + 18 Phase 1-4 with defaults)
+        assert len(feature_names) == 117, (
+            f"Expected 117 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 99, (
-            f"Result should have 99 columns, got {result.shape[1]}"
+        assert result.shape[1] == 117, (
+            f"Result should have 117 columns, got {result.shape[1]}"
         )

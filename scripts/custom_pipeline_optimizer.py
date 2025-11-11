@@ -11,7 +11,7 @@ Fully configurable alternative to TPOT with:
 
 Key Difference from TPOT:
 - TPOT uses RFE which dropped penalty features (perm importance rank 4-8, MDI rank 92-96)
-- This pipeline KEEPS all 99 features or uses smarter feature selection
+- This pipeline KEEPS all 117 features or uses smarter feature selection
 
 Usage:
     # Evaluate mode: Test configuration on holdout set (GW9-10) before full training
@@ -390,7 +390,7 @@ def get_feature_groups() -> Dict[str, List[str]]:
     """
     Define feature groups for grouped preprocessing.
 
-    Categorizes all 99 FPL features into appropriate preprocessing groups based on their
+    Categorizes all 117 FPL features into appropriate preprocessing groups based on their
     distribution characteristics and semantic meaning.
 
     Returns:
@@ -785,7 +785,7 @@ def run_evaluate_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (default: none = keep all 99 features)",
+            help="Feature selection strategy (default: none = keep all 117 features)",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -931,6 +931,10 @@ def run_evaluate_mode(
         train_fixture_diff_df,
         train_betting_df,
         train_raw_players_df,
+        train_derived_player_metrics_df,
+        train_player_availability_snapshot_df,
+        train_derived_team_form_df,
+        train_players_enhanced_df,
     ) = train_data
 
     # 2. Engineer features for training data
@@ -944,6 +948,10 @@ def run_evaluate_mode(
         train_fixture_diff_df,
         train_betting_df,
         train_raw_players_df,
+        train_derived_player_metrics_df,
+        train_player_availability_snapshot_df,
+        train_derived_team_form_df,
+        train_players_enhanced_df,
         verbose=True,
     )
 
@@ -1005,6 +1013,10 @@ def run_evaluate_mode(
         holdout_fixture_diff_df,
         holdout_betting_df,
         holdout_raw_players_df,
+        holdout_derived_player_metrics_df,
+        holdout_player_availability_snapshot_df,
+        holdout_derived_team_form_df,
+        holdout_players_enhanced_df,
     ) = holdout_data
 
     # Engineer features for full dataset
@@ -1017,6 +1029,10 @@ def run_evaluate_mode(
         holdout_fixture_diff_df,
         holdout_betting_df,
         holdout_raw_players_df,
+        holdout_derived_player_metrics_df,
+        holdout_player_availability_snapshot_df,
+        holdout_derived_team_form_df,
+        holdout_players_enhanced_df,
         verbose=False,
     )
 
@@ -1126,7 +1142,7 @@ def run_train_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 99 features",
+            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 117 features",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1288,6 +1304,10 @@ def run_train_mode(
         fixture_diff_df,
         betting_df,
         raw_players_df,
+        derived_player_metrics_df,
+        player_availability_snapshot_df,
+        derived_team_form_df,
+        players_enhanced_df,
     ) = data
 
     # 2. Engineer features (reusable utility)
@@ -1300,6 +1320,10 @@ def run_train_mode(
         fixture_diff_df,
         betting_df,
         raw_players_df,
+        derived_player_metrics_df,
+        player_availability_snapshot_df,
+        derived_team_form_df,
+        players_enhanced_df,
         verbose=True,
     )
 
@@ -1522,7 +1546,7 @@ def run_train_mode(
     logger.info("\n💾 Model saved:")
     logger.info(f"   Pipeline (for deployment): {pipeline_path.name}")
     logger.info(f"   Metadata (for analysis): {metadata_path.name}")
-    logger.info(f"   Features: {len(selected_features)}/99")
+    logger.info(f"   Features: {len(selected_features)}/117")
     logger.info(f"   Training samples: {len(y_final):,}")
 
     logger.info("\n" + "=" * 80)

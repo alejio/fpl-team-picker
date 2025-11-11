@@ -11,11 +11,11 @@ Key Analysis Features:
 - Position-specific error breakdown (where model struggles)
 - Prediction bias detection (systematic over/under-prediction)
 - Model comparison against rule-based baseline
-- Comprehensive feature engineering (99 features) with all enhanced data sources
+- Comprehensive feature engineering (117 features) with all enhanced data sources
 
 Analysis Strategy:
 - Load historical gameweek data (GW6+ for rolling features)
-- Engineer 99 features using production FPLFeatureEngineer
+- Engineer 117 features using production FPLFeatureEngineer
 - Load latest TPOT model automatically
 - Use temporal walk-forward validation (test on future gameweeks)
 - Deep dive into predictions, errors, and model behavior
@@ -134,7 +134,7 @@ def _(mo):
 @app.cell
 def _(client, end_gw, mo, pd, start_gw):
     # Load historical gameweek performance data + fixtures & teams for opponent features
-    # Also load enhanced data sources for 99-feature FPLFeatureEngineer
+    # Also load enhanced data sources for 117-feature FPLFeatureEngineer
     # NOTE: TPOT model was trained on GW1-9, so we load data in that range for analysis
     historical_data = []
     data_load_status = []
@@ -203,7 +203,7 @@ def _(client, end_gw, mo, pd, start_gw):
                     f"⚠️ Warning: Could not load fixtures/teams: {str(e)}"
                 )
 
-            # Load enhanced data sources for 99-feature FPLFeatureEngineer
+            # Load enhanced data sources for 117-feature FPLFeatureEngineer
             try:
                 ownership_trends_df = client.get_derived_ownership_trends()
                 value_analysis_df = client.get_derived_value_analysis()
@@ -407,7 +407,7 @@ def _(
     # ===================================================================
 
     if not historical_df.empty:
-        # Initialize production feature engineer with ALL data sources for 99 features
+        # Initialize production feature engineer with ALL data sources for 117 features
         # This matches what TPOT models were trained with
         feature_engineer = FPLFeatureEngineer(
             fixtures_df=fixtures_df if not fixtures_df.empty else None,
@@ -574,7 +574,7 @@ def _(
                 ),
                 mo.md(""),
                 mo.md(
-                    f"**Total features created:** {len(production_feature_cols)} (99 when all data sources available)"
+                    f"**Total features created:** {len(production_feature_cols)} (117 when all data sources available)"
                 ),
                 mo.md(
                     "**Features using 5GW windows:** All rolling features use 5-gameweek lookback"
@@ -700,7 +700,7 @@ def _(
                     f"**Players:** {cv_data['player_id'].nunique():,} unique players"
                 ),
                 mo.md(
-                    f"**Features:** {len(feature_cols)} columns (99-feature TPOT model)"
+                    f"**Features:** {len(feature_cols)} columns (117-feature TPOT model)"
                 ),
                 mo.md(""),
                 mo.md("**✅ No Data Leakage:**"),
@@ -710,7 +710,7 @@ def _(
                 mo.md("- Temporal validation will test on future gameweeks"),
                 mo.md(""),
                 mo.md(
-                    f"**Total: {len(feature_cols)} features** (65 base + 15 enhanced + 4 penalty + 15 betting)"
+                    f"**Total: {len(feature_cols)} features** (65 base + 15 enhanced + 4 penalty + 15 betting + 18 new)"
                 ),
                 mo.md("---"),
             ]
@@ -811,7 +811,7 @@ def _(
                 for i, (name, step) in enumerate(tpot_model.steps, 1):
                     print(f"   {i}. {name}: {type(step).__name__}")
 
-                # Validate feature count matches (TPOT models expect 99 features)
+                # Validate feature count matches (TPOT models expect 117 features)
                 try:
                     first_step = tpot_model.steps[0][1]
                     if hasattr(first_step, "n_features_in_"):
