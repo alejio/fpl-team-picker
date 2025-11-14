@@ -102,7 +102,9 @@ Install: `uv sync`
 
 **PRIMARY: ML-Based** (`MLExpectedPointsService`):
 - Pre-trained sklearn pipelines (99 features), position-specific models, temporal validation
-- **Uncertainty Quantification**: Random Forest tree-level variance (returns `xP_uncertainty` column)
+- **Uncertainty Quantification**: Tree-level variance for ensemble models (returns `xP_uncertainty` column)
+  - **Random Forest**: Standard deviation across individual tree predictions
+  - **XGBoost**: Standard deviation of incremental tree contributions, scaled by learning rate
 - Extracts per-player prediction uncertainty from ensemble disagreement
 - Requires .joblib artifact from custom_pipeline_optimizer.py
 - Config: `config.xp_model.ml_model_path = "models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib"`

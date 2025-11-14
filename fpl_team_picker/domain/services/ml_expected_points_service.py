@@ -715,7 +715,9 @@ class MLExpectedPointsService:
             from .expected_points_service import ExpectedPointsService
 
             temp_xp_service = ExpectedPointsService()
-            result = temp_xp_service._calculate_expected_minutes(result)
+            result = temp_xp_service._calculate_expected_minutes(
+                result, live_data, target_gameweek
+            )
 
             # If rule-based model provided, create weighted ensemble
             if rule_based_model is not None and self.ensemble_rule_weight > 0:
@@ -1145,9 +1147,10 @@ class MLExpectedPointsService:
 
     def _extract_uncertainty(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Extract prediction uncertainty from ensemble models (Random Forest, GradientBoosting).
+        Extract prediction uncertainty from ensemble models (Random Forest, XGBoost, GradientBoosting).
 
         For Random Forest: Uses tree-level predictions to calculate standard deviation.
+        For XGBoost: Uses booster tree predictions to calculate standard deviation.
         For other models: Returns zeros (no uncertainty available).
 
         Args:
@@ -1164,10 +1167,15 @@ class MLExpectedPointsService:
         if model is None:
             return np.zeros(len(X))
 
-        # Check if this is a RandomForest-based model
+        # Check if this is a RandomForest or XGBoost model
         from sklearn.ensemble import RandomForestRegressor
 
-        # Handle nested pipelines (e.g., RFE -> RandomForest)
+        try:
+            from xgboost import XGBRegressor
+        except ImportError:
+            XGBRegressor = None
+
+        # Handle nested pipelines (e.g., RFE -> RandomForest/XGBoost)
         actual_model = model
         if hasattr(model, "named_steps"):
             # It's a pipeline, extract the final estimator
@@ -1261,6 +1269,133 @@ class MLExpectedPointsService:
                 raise ValueError(
                     f"Uncertainty extraction failed for Random Forest model. "
                     f"This should not happen with properly trained RF models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
+
+        # Extract tree predictions for XGBoost
+        if XGBRegressor and isinstance(actual_model, XGBRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
+                    # Model is a pipeline, transform through all steps except final
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        _service_logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
+
+                # Convert to DMatrix for XGBoost (more efficient)
+                import xgboost as xgb
+
+                # Ensure X_transformed is a DataFrame (XGBoost works with both)
+                if not isinstance(X_transformed, pd.DataFrame):
+                    X_transformed = pd.DataFrame(X_transformed)
+
+                dmatrix = xgb.DMatrix(X_transformed)
+
+                # Get the booster object
+                booster = actual_model.get_booster()
+
+                # Get number of trees
+                n_trees = len(booster.get_dump())
+
+                if n_trees == 0:
+                    _service_logger.warning(
+                        "XGBoost model has no trees - returning zero uncertainty"
+                    )
+                    return np.zeros(len(X))
+
+                # Get predictions from individual trees by computing incremental contributions
+                # For XGBoost, we'll use cumulative predictions at each iteration to infer
+                # individual tree contributions, then calculate variance
+
+                # Get cumulative predictions at each iteration
+                cumulative_preds = []
+                for i in range(n_trees):
+                    pred = booster.predict(dmatrix, iteration_range=(0, i + 1))
+                    cumulative_preds.append(pred)
+
+                # Convert to array: shape (n_iterations, n_samples)
+                cumulative_preds = np.array(cumulative_preds)
+
+                # Calculate individual tree contributions (differences between iterations)
+                # First tree's contribution is just its prediction
+                # Subsequent trees add incremental predictions
+                tree_contributions = np.zeros_like(cumulative_preds)
+                tree_contributions[0] = cumulative_preds[0]
+                for i in range(1, n_trees):
+                    tree_contributions[i] = (
+                        cumulative_preds[i] - cumulative_preds[i - 1]
+                    )
+
+                # Transpose to shape (n_samples, n_trees)
+                tree_contributions = tree_contributions.T
+
+                # Calculate standard deviation across tree contributions
+                # This captures disagreement between trees, similar to Random Forest
+                uncertainty = np.std(tree_contributions, axis=1)
+
+                # XGBoost trees are typically weaker learners (lower learning rate)
+                # Scale uncertainty to account for this (empirical scaling factor)
+                # Typical XGBoost learning rate is 0.1-0.3, so individual tree variance is smaller
+                # We scale by sqrt(n_trees) to get comparable uncertainty to RF
+                learning_rate = getattr(actual_model, "learning_rate", 0.3)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                self._log_debug(
+                    f"✅ Extracted uncertainty from {n_trees} XGBoost trees ({len(uncertainty)} samples). "
+                    f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}, "
+                    f"Learning rate: {learning_rate}"
+                )
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract XGBoost uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has get_booster: {hasattr(actual_model, 'get_booster')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for XGBoost model. "
+                    f"This should not happen with properly trained XGBoost models. "
                     f"Check model training and pipeline structure. Error: {e}"
                 ) from e
 
