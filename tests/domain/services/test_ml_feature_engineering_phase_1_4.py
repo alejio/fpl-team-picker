@@ -91,7 +91,14 @@ def mock_derived_player_metrics():
             "injury_risk": [0.15, 0.20, 0.05, 0.10, 0.30, 0.25],
             "rotation_risk": [0.10, 0.15, 0.05, 0.08, 0.40, 0.35],
             "overperformance_risk": [0.25, 0.30, 0.10, 0.15, 0.50, 0.45],
-            "form_momentum": [1.0, 0.5, 1.0, 0.0, -1.0, -0.5],  # +1 improving, 0 stable, -1 declining
+            "form_momentum": [
+                1.0,
+                0.5,
+                1.0,
+                0.0,
+                -1.0,
+                -0.5,
+            ],  # +1 improving, 0 stable, -1 declining
         }
     )
 
@@ -102,8 +109,22 @@ def mock_player_availability_snapshot():
     return pd.DataFrame(
         {
             "player_id": [1, 1, 2, 2, 3, 3],
-            "gameweek": [6, 7, 6, 7, 6, 7],  # No shift - snapshot is at correct gameweek
-            "status": ["a", "a", "a", "d", "i", "i"],  # a=available, d=doubtful, i=injured
+            "gameweek": [
+                6,
+                7,
+                6,
+                7,
+                6,
+                7,
+            ],  # No shift - snapshot is at correct gameweek
+            "status": [
+                "a",
+                "a",
+                "a",
+                "d",
+                "i",
+                "i",
+            ],  # a=available, d=doubtful, i=injured
             "chance_of_playing_next_round": [100, 100, 100, 75, 0, 0],
         }
     )
@@ -581,9 +602,15 @@ class TestPhase3RankingFeatures:
         )
 
         # All normalized ranks should be between 0 and 1
-        assert 0 <= player1_gw6["form_rank"] <= 1, "form_rank should be normalized to 0-1"
-        assert 0 <= player2_gw6["form_rank"] <= 1, "form_rank should be normalized to 0-1"
-        assert 0 <= player3_gw6["form_rank"] <= 1, "form_rank should be normalized to 0-1"
+        assert 0 <= player1_gw6["form_rank"] <= 1, (
+            "form_rank should be normalized to 0-1"
+        )
+        assert 0 <= player2_gw6["form_rank"] <= 1, (
+            "form_rank should be normalized to 0-1"
+        )
+        assert 0 <= player3_gw6["form_rank"] <= 1, (
+            "form_rank should be normalized to 0-1"
+        )
 
     def test_phase3_features_default_when_data_missing(
         self,
@@ -801,4 +828,6 @@ class TestTotalFeatureCount:
         ]
 
         for feature in phase1_features + phase2_features + phase3_features:
-            assert feature in feature_names, f"Missing feature in feature_names: {feature}"
+            assert feature in feature_names, (
+                f"Missing feature in feature_names: {feature}"
+            )

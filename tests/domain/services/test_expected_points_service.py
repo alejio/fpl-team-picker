@@ -70,7 +70,9 @@ class TestEWMAMinutesCalculation:
         new_player_minutes = result[result["player_id"] == 3][
             "expected_minutes"
         ].values[0]
-        assert new_player_minutes == 70, f"Expected 70 (FWD default), got {new_player_minutes}"
+        assert new_player_minutes == 70, (
+            f"Expected 70 (FWD default), got {new_player_minutes}"
+        )
 
         # Verify all players have expected_minutes
         assert result["expected_minutes"].notna().all()
