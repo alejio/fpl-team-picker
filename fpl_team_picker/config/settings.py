@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-11_20251111_004041_pipeline.joblib",
+        default="models/custom/xgboost_gw1-11_20251114_210304_pipeline.joblib",
         description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
@@ -103,6 +103,20 @@ class TeamStrengthConfig(BaseModel):
 
 class MinutesModelConfig(BaseModel):
     """Enhanced Minutes Prediction Configuration"""
+
+    # EWMA (Exponential Weighted Moving Average) parameters
+    use_ewma: bool = Field(
+        default=True, description="Use EWMA for expected minutes calculation"
+    )
+    ewma_span: int = Field(
+        default=5, description="EWMA span (lookback window in games)", ge=2, le=10
+    )
+    ewma_min_games: int = Field(
+        default=1,
+        description="Minimum games required to use EWMA (otherwise fallback to position default)",
+        ge=1,
+        le=5,
+    )
 
     # Selected By Percentage (SBP) thresholds
     sbp_very_high_threshold: float = Field(

@@ -112,6 +112,27 @@ Install: `uv sync`
 - Used for GW1-5 (insufficient ML training data) and as ML benchmark only
 - No uncertainty quantification
 
+## Expected Minutes Model (EWMA)
+
+**Implementation** (`ExpectedPointsService._calculate_expected_minutes()`):
+- **EWMA (Exponential Weighted Moving Average)** with configurable span (default: 5 games)
+- Uses historical minutes data from `live_data_historical`
+- Automatically adapts to rotation patterns, injuries, and manager trust
+- Fallback to position-based estimates (GKP:90, DEF:80, MID:75, FWD:70) for new players
+
+**Configuration** (`MinutesModelConfig`):
+- `use_ewma`: Enable/disable EWMA (default: True)
+- `ewma_span`: Lookback window in games (default: 5)
+- `ewma_min_games`: Minimum games required for EWMA (default: 1, otherwise fallback)
+
+**Key Features**:
+- Recency bias: Recent games weighted more heavily
+- Smoothing: Reduces noise from one-off benchings
+- Injury adjustment: Scales by `chance_of_playing_next_round`
+- Non-negative guarantee: xP clipped to >= 0
+
+**Example**: Player with [90, 90, 85, 90, 75] minutes → EWMA = 84.3 (weighted toward recent 75)
+
 ## Captain Selection (Uncertainty-Aware)
 
 **OptimizationService.get_captain_recommendation()** implements:

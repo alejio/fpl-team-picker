@@ -230,7 +230,9 @@ class ExpectedPointsService:
             )
 
         # Calculate expected minutes
-        players_xp = self._calculate_expected_minutes(players_xp)
+        players_xp = self._calculate_expected_minutes(
+            players_xp, live_data_historical, target_gameweek
+        )
 
         # Calculate fixture difficulty for target gameweek(s)
         fixture_difficulty = self._calculate_fixture_difficulty(
@@ -729,33 +731,146 @@ class ExpectedPointsService:
 
         return form_data
 
-    def _calculate_expected_minutes(self, players_df: pd.DataFrame) -> pd.DataFrame:
-        """Enhanced minutes prediction model"""
+    def _calculate_expected_minutes(
+        self,
+        players_df: pd.DataFrame,
+        live_data_historical: Optional[pd.DataFrame],
+        target_gameweek: int,
+    ) -> pd.DataFrame:
+        """Calculate expected minutes using EWMA from historical data.
+
+        Uses exponentially weighted moving average of recent minutes played,
+        with configurable span (default 5 games). Falls back to position-based
+        estimates for new players or when historical data is unavailable.
+
+        Args:
+            players_df: DataFrame with player data
+            live_data_historical: Historical gameweek performance data (with 'minutes' column)
+            target_gameweek: Target gameweek for prediction
+
+        Returns:
+            DataFrame with 'expected_minutes' column added
+        """
         from fpl_team_picker.config import config
 
-        # Use recent minutes trend if available (last 3 gameweeks weighted)
-        if "minutes_3gw_avg" in players_df.columns:
-            players_df["expected_minutes"] = (
-                players_df["minutes_3gw_avg"]
-                .fillna(0)
-                .clip(
-                    config.minutes_prediction.min_predicted_minutes,
-                    config.minutes_prediction.max_predicted_minutes,
-                )
+        # Position-based fallback estimates
+        position_minutes = {"GKP": 90, "DEF": 80, "MID": 75, "FWD": 70}
+
+        # Check if EWMA is enabled and we have historical data
+        if (
+            config.minutes_model.use_ewma
+            and live_data_historical is not None
+            and not live_data_historical.empty
+        ):
+            # Calculate EWMA from historical minutes data
+            players_df = self._calculate_ewma_minutes(
+                players_df, live_data_historical, target_gameweek
             )
+
+            if self.debug:
+                ewma_count = players_df["expected_minutes"].notna().sum()
+                fallback_count = len(players_df) - ewma_count
+                logger.debug(
+                    f"📊 Expected minutes: {ewma_count} from EWMA, {fallback_count} from position fallback"
+                )
         else:
             # Fallback to position-based estimates
-            position_minutes = {"GKP": 90, "DEF": 80, "MID": 75, "FWD": 70}
             players_df["expected_minutes"] = players_df["position"].map(
                 position_minutes
             )
 
-        # Reduce for high-risk players (injury concerns, suspensions, rotations)
+            if self.debug:
+                logger.debug("⚠️ Using position-based minutes (no historical data)")
+
+        # Fill any remaining NaN values with position-based estimates
+        for position, minutes in position_minutes.items():
+            mask = (players_df["position"] == position) & (
+                players_df["expected_minutes"].isna()
+            )
+            players_df.loc[mask, "expected_minutes"] = minutes
+
+        # Apply injury/availability adjustments
         if "chance_of_playing_next_round" in players_df.columns:
             injury_risk = players_df["chance_of_playing_next_round"].fillna(100) / 100.0
             players_df["expected_minutes"] = (
                 players_df["expected_minutes"] * injury_risk
             )
+
+        # Ensure expected_minutes is within valid range [0, 90]
+        players_df["expected_minutes"] = players_df["expected_minutes"].clip(0, 90)
+
+        return players_df
+
+    def _calculate_ewma_minutes(
+        self,
+        players_df: pd.DataFrame,
+        live_data_historical: pd.DataFrame,
+        target_gameweek: int,
+    ) -> pd.DataFrame:
+        """Calculate EWMA of minutes from historical gameweek data.
+
+        Args:
+            players_df: DataFrame with player data
+            live_data_historical: Historical performance data with 'player_id', 'gameweek', 'minutes'
+            target_gameweek: Target gameweek for prediction
+
+        Returns:
+            DataFrame with 'expected_minutes' column calculated via EWMA
+        """
+        from fpl_team_picker.config import config
+
+        # Filter historical data to gameweeks before target
+        historical = live_data_historical[
+            live_data_historical["gameweek"] < target_gameweek
+        ].copy()
+
+        if historical.empty:
+            # No historical data available - expected_minutes will be filled later
+            players_df["expected_minutes"] = pd.NA
+            return players_df
+
+        # Sort by gameweek (ascending) for proper EWMA calculation
+        historical = historical.sort_values(["player_id", "gameweek"])
+
+        # Calculate EWMA per player
+        ewma_minutes = (
+            historical.groupby("player_id")["minutes"]
+            .ewm(span=config.minutes_model.ewma_span, adjust=False)
+            .mean()
+        )
+
+        # Take the most recent EWMA value for each player (last gameweek)
+        ewma_latest = (
+            ewma_minutes.groupby(level=0).last().reset_index()
+        )  # level=0 is player_id
+        ewma_latest.columns = ["player_id", "expected_minutes_ewma"]
+
+        # Count games played per player (for minimum games filter)
+        games_played = (
+            historical.groupby("player_id").size().reset_index(name="games_played")
+        )
+
+        # Merge EWMA and games played count
+        ewma_latest = ewma_latest.merge(games_played, on="player_id", how="left")
+
+        # Filter: only use EWMA if player has minimum required games
+        min_games = config.minutes_model.ewma_min_games
+        ewma_latest.loc[
+            ewma_latest["games_played"] < min_games, "expected_minutes_ewma"
+        ] = pd.NA
+
+        # Merge EWMA back to players DataFrame
+        players_df = players_df.merge(
+            ewma_latest[["player_id", "expected_minutes_ewma"]],
+            on="player_id",
+            how="left",
+        )
+
+        # Use EWMA as expected_minutes
+        players_df["expected_minutes"] = players_df["expected_minutes_ewma"]
+
+        # Clean up temporary column
+        players_df = players_df.drop("expected_minutes_ewma", axis=1)
 
         return players_df
 
@@ -983,7 +1098,9 @@ class ExpectedPointsService:
 
         # 6. Expected yellow/red cards (FPL: yellow=-1, red=-3)
         # Heuristic: ~0.1 yellow cards per game, 0.01 red cards per game
-        xP_cards = -0.1 * 1 - 0.01 * 3
+        # Scale by minutes played (players who don't play can't get carded)
+        cards_per_90 = -0.1 * 1 - 0.01 * 3  # -0.13 per full game
+        xP_cards = cards_per_90 * (minutes_per_gw / 90.0)
 
         # === Total XP for 1 gameweek ===
         players_df["xP_1gw"] = (
@@ -992,6 +1109,9 @@ class ExpectedPointsService:
 
         # === Scale to multiple gameweeks ===
         players_df["xP"] = players_df["xP_1gw"] * gameweeks_ahead
+
+        # Ensure xP is non-negative (can't have negative expected points)
+        players_df["xP"] = players_df["xP"].clip(lower=0)
 
         return players_df
 
