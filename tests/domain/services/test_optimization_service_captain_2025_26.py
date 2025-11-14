@@ -409,15 +409,15 @@ class TestCombinedScoring:
         # Haaland's final score should be higher despite slightly lower xP
         assert haaland["captain_score"] > kudus["captain_score"]
 
-    def test_uncertainty_penalty_preserved(self):
-        """Test that uncertainty penalty is still applied correctly."""
+    def test_upside_boost_for_high_uncertainty(self):
+        """Test that high uncertainty INCREASES captain score (seeking ceiling)."""
         service = OptimizationService()
 
         players_df = pd.DataFrame(
             [
                 {
                     "player_id": 1,
-                    "web_name": "Confident",
+                    "web_name": "LowVariance",
                     "position": "FWD",
                     "xP": 8.0,
                     "xP_uncertainty": 0.5,  # Low uncertainty
@@ -431,7 +431,7 @@ class TestCombinedScoring:
                 },
                 {
                     "player_id": 2,
-                    "web_name": "Uncertain",
+                    "web_name": "HighVariance",
                     "position": "MID",
                     "xP": 8.0,
                     "xP_uncertainty": 3.0,  # High uncertainty
@@ -449,20 +449,21 @@ class TestCombinedScoring:
         result = service.get_captain_recommendation(players_df, top_n=2)
         candidates = {c["web_name"]: c for c in result["top_candidates"]}
 
-        confident = candidates["Confident"]
-        uncertain = candidates["Uncertain"]
+        low_var = candidates["LowVariance"]
+        high_var = candidates["HighVariance"]
 
-        # Confident prediction should score higher
-        assert confident["captain_score"] > uncertain["captain_score"]
+        # NEW LOGIC: High uncertainty should score HIGHER (seeking ceiling)
+        assert high_var["captain_score"] > low_var["captain_score"]
 
-        # Check uncertainty penalties
-        # confident: 0.5/8.0 * 0.30 = 0.01875 penalty
-        # uncertain: 3.0/8.0 * 0.30 = 0.1125 penalty
-        confident_penalty = confident["uncertainty_penalty"]
-        uncertain_penalty = uncertain["uncertainty_penalty"]
+        # Check upside boosts (90th percentile calculation)
+        # low_var: upside = 8.0 + 1.28 * 0.5 = 8.64 → boost = 0.64
+        # high_var: upside = 8.0 + 1.28 * 3.0 = 11.84 → boost = 3.84
+        low_var_boost = low_var["upside_boost"]
+        high_var_boost = high_var["upside_boost"]
 
-        assert confident_penalty < uncertain_penalty
-        assert uncertain_penalty > 0.10  # High uncertainty → significant penalty
+        assert abs(low_var_boost - 0.64) < 0.1
+        assert abs(high_var_boost - 3.84) < 0.1
+        assert high_var_boost > low_var_boost  # Higher uncertainty = higher boost
 
     def test_premium_differential_with_high_xp(self):
         """Test that high-xP differentials can compete if matchup is much better."""
@@ -539,14 +540,16 @@ class TestScoringComponentsOutput:
         # Check all scoring components are present
         assert "captain_score" in candidate
         assert "base_score" in candidate
-        assert "uncertainty_penalty" in candidate
+        assert "upside_boost" in candidate
+        assert "xP_upside" in candidate
         assert "ownership_bonus" in candidate
         assert "matchup_bonus" in candidate
 
         # Check they are numeric
         assert isinstance(candidate["captain_score"], (int, float))
         assert isinstance(candidate["base_score"], (int, float))
-        assert isinstance(candidate["uncertainty_penalty"], (int, float))
+        assert isinstance(candidate["upside_boost"], (int, float))
+        assert isinstance(candidate["xP_upside"], (int, float))
         assert isinstance(candidate["ownership_bonus"], (int, float))
         assert isinstance(candidate["matchup_bonus"], (int, float))
 
@@ -576,22 +579,28 @@ class TestScoringComponentsOutput:
         result = service.get_captain_recommendation(players_df, top_n=1)
         candidate = result["top_candidates"][0]
 
+        xp = 8.0
+        uncertainty = 1.0
         base_score = candidate["base_score"]
-        uncertainty_penalty = candidate["uncertainty_penalty"]
+        upside_boost = candidate["upside_boost"]
+        xp_upside = candidate["xP_upside"]
         ownership_bonus = candidate["ownership_bonus"]
         matchup_bonus = candidate["matchup_bonus"]
         final_score = candidate["captain_score"]
 
-        # Base score should be xP * 2
-        assert abs(base_score - 16.0) < 0.01
+        # Upside boost should be 1.28 * uncertainty
+        assert abs(upside_boost - (1.28 * uncertainty)) < 0.1
 
-        # Risk-adjusted = base / (1 + penalty)
-        risk_adjusted = base_score / (1 + uncertainty_penalty)
+        # xP_upside should be xP + upside_boost
+        assert abs(xp_upside - (xp + upside_boost)) < 0.1
 
-        # Final = risk_adjusted * (1 + ownership_bonus + matchup_bonus)
-        expected_final = risk_adjusted * (1 + ownership_bonus + matchup_bonus)
+        # Base score should be upside * 2
+        assert abs(base_score - (xp_upside * 2)) < 0.1
 
-        assert abs(final_score - expected_final) < 0.01
+        # Final = base * (1 + ownership_bonus + matchup_bonus)
+        expected_final = base_score * (1 + ownership_bonus + matchup_bonus)
+
+        assert abs(final_score - expected_final) < 0.1
 
 
 class TestBackwardsCompatibility:

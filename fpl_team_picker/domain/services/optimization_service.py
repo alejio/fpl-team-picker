@@ -333,14 +333,17 @@ class OptimizationService:
     def get_captain_recommendation(
         self, players: pd.DataFrame, top_n: int = 5, xp_column: str = "xP"
     ) -> Dict[str, Any]:
-        """Get captain recommendation with risk-adjusted analysis.
+        """Get captain recommendation with upside-focused analysis.
 
         Returns structured data only - no UI generation.
 
-        Implements uncertainty-aware + ownership-adjusted captain selection:
-        1. Considers prediction uncertainty (xP_uncertainty) to prefer reliable picks
-        2. Template protection: High ownership (>50%) players favored if within 10% xP of leader
-        3. Risk-adjusted scoring: xP / (1 + uncertainty_penalty)
+        Implements ceiling-seeking captain selection (prioritizes explosive upside):
+        1. Uses 90th percentile (xP + 1.28*uncertainty) instead of mean - seeks high ceiling
+        2. Template protection: High ownership (>50%) players get 20-40% boost in good fixtures
+        3. Matchup quality: Betting odds integration for explosive game identification
+
+        Philosophy: Captaincy should maximize ceiling (potential hauls), not minimize risk.
+        High uncertainty = high upside potential (15+ point hauls vs weak opposition).
 
         Args:
             players: DataFrame of players to consider (squad or all players)
@@ -352,7 +355,7 @@ class OptimizationService:
                 "captain": {dict with recommended captain},
                 "vice_captain": {dict with vice captain},
                 "top_candidates": [list of top 5 candidates with analysis],
-                "captain_upside": float (xP * 2),
+                "captain_upside": float (upside * 2),
                 "differential": float (captain vs vice diff)
             }
         """
@@ -377,19 +380,20 @@ class OptimizationService:
             uncertainty = player.get("xP_uncertainty", 0)
             ownership_pct = player.get("selected_by_percent", 0)
 
-            # Base captain score (xP * 2)
-            base_score = xp_value * 2
-
-            # Apply uncertainty penalty if available
-            # Higher uncertainty = lower score (prefer reliable players)
-            uncertainty_penalty = 0
+            # Calculate upside (90th percentile) instead of penalizing uncertainty
+            # Philosophy: Captaincy seeks ceiling/explosive potential, not safety
+            # 90th percentile = mean + 1.28 * std_dev (normal distribution)
+            xp_upside = xp_value
             if has_uncertainty and uncertainty > 0:
-                # Penalty scales with uncertainty relative to xP
-                # If uncertainty is 50% of xP, reduce score by ~15%
-                uncertainty_ratio = uncertainty / max(xp_value, 0.1)
-                uncertainty_penalty = uncertainty_ratio * 0.3  # Max 30% penalty
+                # Players with high uncertainty have higher ceiling potential
+                # Example: Haaland vs Leeds (8.5 ± 2.2 xP) → upside = 11.3 xP
+                xp_upside = xp_value + (1.28 * uncertainty)
 
-            risk_adjusted_score = base_score / (1 + uncertainty_penalty)
+            # Base captain score uses upside (seeking ceiling, not mean)
+            base_score = xp_upside * 2
+
+            # Store upside for transparency (used in candidate analysis)
+            upside_boost = xp_upside - xp_value
 
             # Template protection + Matchup quality: Boost high ownership in good fixtures
             # UPGRADED 2025/26: Increased from 5-10% to 20-40% + betting odds integration
@@ -444,12 +448,14 @@ class OptimizationService:
                 else:
                     matchup_bonus = 0.10  # Average matchup
 
-            final_score = risk_adjusted_score * (1 + ownership_bonus + matchup_bonus)
+            # Apply bonuses to upside-based score
+            final_score = base_score * (1 + ownership_bonus + matchup_bonus)
 
             # Store scoring components for analysis
             player["_captain_score"] = final_score
             player["_base_score"] = base_score
-            player["_uncertainty_penalty"] = uncertainty_penalty
+            player["_upside_boost"] = upside_boost
+            player["_xp_upside"] = xp_upside
             player["_ownership_bonus"] = ownership_bonus
             player["_matchup_bonus"] = matchup_bonus
 
@@ -528,10 +534,11 @@ class OptimizationService:
                 "status": player.get("status", "a"),
             }
 
-            # Add uncertainty and ownership metrics if available
+            # Add uncertainty and upside metrics if available
             if has_uncertainty:
                 candidate["xP_uncertainty"] = uncertainty
-                candidate["uncertainty_penalty"] = player.get("_uncertainty_penalty", 0)
+                candidate["upside_boost"] = player.get("_upside_boost", 0)
+                candidate["xP_upside"] = player.get("_xp_upside", xp_value)
 
             if has_ownership:
                 candidate["ownership_pct"] = ownership_pct
