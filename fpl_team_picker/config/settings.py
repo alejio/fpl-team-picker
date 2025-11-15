@@ -366,18 +366,18 @@ class OptimizationConfig(BaseModel):
             )
         return v
 
-    # Transfer optimization method (only simulated annealing is supported)
+    # Transfer optimization method
     transfer_optimization_method: str = Field(
-        default="simulated_annealing",
-        description="Transfer optimization method: 'simulated_annealing' for SA exploration",
+        default="linear_programming",
+        description="Transfer optimization method: 'linear_programming' (optimal, fast) or 'simulated_annealing' (exploratory)",
     )
 
     @field_validator("transfer_optimization_method")
     @classmethod
     def validate_transfer_method(cls, v):
-        if v != "simulated_annealing":
+        if v not in ["linear_programming", "simulated_annealing"]:
             raise ValueError(
-                "transfer_optimization_method must be 'simulated_annealing' (greedy method has been removed)"
+                "transfer_optimization_method must be 'linear_programming' or 'simulated_annealing'"
             )
         return v
 

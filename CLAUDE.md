@@ -18,7 +18,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **ExpectedPointsService**: Rule-based XP (1GW + 5GW projections)
 - **MLExpectedPointsService**: Pre-trained ML predictions (99 features)
 - **TeamAnalyticsService**: Dynamic team strength ratings
-- **OptimizationService**: Simulated annealing for transfers, XI selection, captain picks
+- **OptimizationService**: LP/SA for transfers (optimal/exploratory), XI selection, captain picks
 - **ChipAssessmentService**: Traffic light chip recommendations
 - **PerformanceAnalyticsService**: Historical recomputation & accuracy tracking
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
@@ -175,6 +175,22 @@ marimo check fpl_team_picker/interfaces/ --fix
 ```
 
 **Tests**: `pytest tests/domain/services/ -v`
+- LP optimization: `pytest tests/domain/services/test_optimization_service_lp.py -v`
+
+## Transfer Optimization (LP vs SA)
+
+**LINEAR PROGRAMMING (default)**: Guarantees optimal solution, fast (~1-2s), deterministic
+- Uses PuLP with CBC solver for Integer Linear Programming
+- Maximizes expected points subject to FPL constraints (budget, positions, teams, transfers)
+- Perfect for weekly transfers (1-3 players) and wildcards
+- Configure: `config.optimization.transfer_optimization_method = "linear_programming"`
+
+**SIMULATED ANNEALING (exploratory)**: Good for non-linear objectives, exploration
+- Probabilistic search with temperature-based acceptance
+- Useful for generating diverse options or complex heuristics
+- Configure: `config.optimization.transfer_optimization_method = "simulated_annealing"`
+
+**Performance**: LP is 10-50x faster than SA and finds provably optimal solutions. SA still used for initial squad generation and exploratory scenarios.
 
 ## Configuration
 
@@ -210,6 +226,6 @@ See `fpl_rules.md`. Key: 2 GKP, 5 DEF, 5 MID, 3 FWD; £100m budget; max 3 player
 
 ## Tech Stack
 
-uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
+uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder, pulp
 
-**Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models, repository pattern, 29/29 tests passing
+**Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models, repository pattern, 48/48 tests passing
