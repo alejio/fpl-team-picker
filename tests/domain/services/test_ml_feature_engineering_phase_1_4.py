@@ -762,9 +762,9 @@ class TestPhase4ImputationStrategy:
 
 
 class TestTotalFeatureCount:
-    """Test suite for total feature count (118 features)."""
+    """Test suite for total feature count (122 features)."""
 
-    def test_total_feature_count_117(
+    def test_total_feature_count_122(
         self,
         mock_player_data,
         mock_teams_data,
@@ -775,7 +775,7 @@ class TestTotalFeatureCount:
         mock_players_enhanced,
         minimal_enhanced_data,
     ):
-        """Test that total feature count is 118 (117 - 4 redundant + 5 data quality indicators)."""
+        """Test that total feature count is 122 (118 + 4 elite interactions)."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
@@ -793,12 +793,12 @@ class TestTotalFeatureCount:
         result = engineer.fit_transform(mock_player_data)
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 118 features total (117 - 4 redundant + 5 data quality indicators)
-        assert len(feature_names) == 118, (
-            f"Expected 118 features, got {len(feature_names)}"
+        # Should be 122 features total (118 + 4 elite interactions)
+        assert len(feature_names) == 122, (
+            f"Expected 122 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 118, (
-            f"Result should have 118 columns, got {result.shape[1]}"
+        assert result.shape[1] == 122, (
+            f"Result should have 122 columns, got {result.shape[1]}"
         )
 
         # Verify all phase features are in the list

@@ -33,7 +33,7 @@ Uses `fpl-dataset-builder` client: `from client import FPLDataClient`
 
 Install: `uv sync`
 
-## ML Feature Engineering (117 features)
+## ML Feature Engineering (122 features)
 
 **FPLFeatureEngineer** (sklearn transformer):
 - **Base (65)**: Cumulative stats, rolling 5GW form, per-90 rates, team context, fixture features
@@ -43,6 +43,7 @@ Install: `uv sync`
 - **Injury & rotation risk (5 - Phase 1)**: injury_risk, rotation_risk, chance_of_playing_next_round, status_encoded, overperformance_risk
 - **Venue-specific team strength (6 - Phase 2)**: home_attack_strength, away_attack_strength, home_defense_strength, away_defense_strength, home_advantage, venue_consistency
 - **Player rankings & context (7 - Phase 3)**: form_rank, ict_index_rank, points_per_game_rank, defensive_contribution, tackles, recoveries, form_momentum
+- **Elite player × fixture interactions (4 - Phase 4)**: is_elite (price>=£10m), elite_x_fixture_difficulty, elite_x_opponent_strength, elite_x_is_away
 
 **Data sources**:
 - Base: `get_current_players()`, `get_gameweek_performance(gw)`, `get_fixtures_normalized()`

@@ -2672,6 +2672,14 @@ class OptimizationService:
                     f"Algorithm error: Excluded players found in final team: {violations}"
                 )
 
+        # For 1GW optimization, replace expensive bench with cheapest alternatives
+        if xp_column == "xP":
+            best_team = self._optimize_bench_for_1gw(
+                best_team, valid_players, must_include_ids, must_exclude_ids, xp_column
+            )
+            # Recalculate xP after bench optimization
+            best_xp = calculate_team_xp(best_team)
+
         remaining_budget = budget - calculate_team_cost(best_team)
 
         return {
@@ -2710,6 +2718,86 @@ class OptimizationService:
         # Use shared formation enumeration logic (return just the players, ignore formation name)
         best_11, _, _ = self._enumerate_formations_for_players(by_position, xp_column)
         return best_11
+
+    def _optimize_bench_for_1gw(
+        self,
+        squad: List[Dict],
+        valid_players: pd.DataFrame,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+    ) -> List[Dict]:
+        """Replace expensive bench players with cheapest valid alternatives for 1GW.
+
+        For 1GW optimization, bench players don't contribute points, so we want
+        the cheapest valid bench to maximize budget for starters.
+
+        Args:
+            squad: 15-player squad
+            valid_players: All available players
+            must_include_ids: Players that must stay in squad
+            must_exclude_ids: Players to exclude
+            xp_column: XP column name
+
+        Returns:
+            Optimized squad with cheap bench
+        """
+        if len(squad) != 15:
+            return squad
+
+        # Identify starting 11 and bench
+        starting_11 = self._get_best_starting_11_from_squad(squad, xp_column)
+        starting_11_ids = {p["player_id"] for p in starting_11}
+        bench_players = [p for p in squad if p["player_id"] not in starting_11_ids]
+
+        # Get team counts from starting 11 (bench replacements must respect 3-per-team)
+        team_counts = {}
+        for p in starting_11:
+            team = p.get("team", p.get("team_id"))
+            team_counts[team] = team_counts.get(team, 0) + 1
+
+        # For each bench position, find cheapest valid replacement
+        new_squad = [p.copy() for p in starting_11]
+        squad_ids = starting_11_ids.copy()
+
+        for bench_player in bench_players:
+            position = bench_player["position"]
+            old_team = bench_player.get("team", bench_player.get("team_id"))
+
+            # Skip must-include players
+            if bench_player["player_id"] in must_include_ids:
+                new_squad.append(bench_player.copy())
+                squad_ids.add(bench_player["player_id"])
+                team_counts[old_team] = team_counts.get(old_team, 0) + 1
+                continue
+
+            # Find cheapest valid replacement
+            candidates = valid_players[
+                (valid_players["position"] == position)
+                & (~valid_players["player_id"].isin(squad_ids))
+                & (~valid_players["player_id"].isin(must_exclude_ids))
+            ].copy()
+
+            # Apply 3-per-team constraint
+            def team_ok(team):
+                return team_counts.get(team, 0) < 3
+
+            candidates = candidates[candidates["team"].apply(team_ok)]
+
+            if len(candidates) == 0:
+                # No replacement found, keep original
+                new_squad.append(bench_player.copy())
+                squad_ids.add(bench_player["player_id"])
+                team_counts[old_team] = team_counts.get(old_team, 0) + 1
+            else:
+                # Pick cheapest
+                cheapest = candidates.nsmallest(1, "price").iloc[0]
+                new_squad.append(cheapest.to_dict())
+                squad_ids.add(cheapest["player_id"])
+                new_team = cheapest["team"]
+                team_counts[new_team] = team_counts.get(new_team, 0) + 1
+
+        return new_squad
 
     def get_optimal_team_from_database(
         self, players_with_xp: pd.DataFrame

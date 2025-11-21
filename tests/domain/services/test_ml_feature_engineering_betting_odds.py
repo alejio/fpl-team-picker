@@ -372,10 +372,10 @@ class TestBettingOddsFeatures:
 
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 118 features total (117 - 4 redundant + 5 data quality indicators)
-        assert len(feature_names) == 118, (
-            f"Expected 118 features, got {len(feature_names)}"
+        # Should be 122 features total (118 + 4 elite interactions)
+        assert len(feature_names) == 122, (
+            f"Expected 122 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 118, (
-            f"Result should have 118 columns, got {result.shape[1]}"
+        assert result.shape[1] == 122, (
+            f"Result should have 122 columns, got {result.shape[1]}"
         )

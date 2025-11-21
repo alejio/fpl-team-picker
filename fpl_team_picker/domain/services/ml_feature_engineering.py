@@ -68,7 +68,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 118 features (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality indicators):
+    Generates 122 features (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions):
 
     Base features (65):
     - Cumulative season statistics (up to GW N-1)
@@ -602,6 +602,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         # ===== PHASE 3: PLAYER RANKINGS & CONTEXT =====
         df = self._add_ranking_features(df)
+
+        # ===== PHASE 4: ELITE PLAYER × FIXTURE INTERACTION =====
+        df = self._add_elite_fixture_interactions(df)
 
         # Fill missing values with smart imputation
         df = self._impute_with_domain_defaults(df)
@@ -2019,8 +2022,45 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         return df
 
+    def _add_elite_fixture_interactions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add elite player × fixture interaction features.
+
+        Elite players (price >= £10m) are historically less affected by fixture difficulty.
+        These interaction features allow the model to learn this relationship.
+
+        Features added (4):
+        - is_elite: Binary indicator (price >= £10m)
+        - elite_x_fixture_difficulty: Elite status × fixture difficulty
+        - elite_x_opponent_strength: Elite status × opponent strength
+        - elite_x_is_away: Elite status × away fixture (elite players perform better away)
+        """
+        # Define elite threshold (£10m+)
+        elite_threshold = 10.0
+
+        # Create elite indicator (1 if price >= £10m, else 0)
+        if "price" in df.columns:
+            df["is_elite"] = (df["price"] >= elite_threshold).astype(int)
+        else:
+            df["is_elite"] = 0
+
+        # Interaction features
+        # Elite × fixture_difficulty: Lower value for elite players = less penalty
+        df["elite_x_fixture_difficulty"] = df["is_elite"] * df.get(
+            "fixture_difficulty", 1.0
+        )
+
+        # Elite × opponent_strength: Elite players handle strong opponents better
+        df["elite_x_opponent_strength"] = df["is_elite"] * df.get(
+            "opponent_strength", 1.0
+        )
+
+        # Elite × is_away: Elite players perform relatively better in away games
+        df["elite_x_is_away"] = df["is_elite"] * (1 - df.get("is_home", 0.5))
+
+        return df
+
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (118 features: 65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality indicators)."""
+        """Get list of all feature columns (122 features: 65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions)."""
         return [
             # Static (4)
             "price",
@@ -2164,6 +2204,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "has_availability_data",
             "has_venue_strength_data",
             "has_ranking_data",
+            # Phase 4: Elite player × fixture interactions (4)
+            "is_elite",
+            "elite_x_fixture_difficulty",
+            "elite_x_opponent_strength",
+            "elite_x_is_away",
         ]
 
     def _get_team_feature_columns(self) -> list:

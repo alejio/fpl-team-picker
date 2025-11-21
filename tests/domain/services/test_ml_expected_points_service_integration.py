@@ -1,8 +1,8 @@
 """
-Integration tests for FPLFeatureEngineer with 118 features (including Phase 1-4 enhancements + data quality indicators).
+Integration tests for FPLFeatureEngineer with 122 features (including Phase 1-4 enhancements + elite interactions).
 
 Tests the feature engineering pipeline:
-1. Feature engineer produces exactly 118 features when all data sources provided
+1. Feature engineer produces exactly 122 features when all data sources provided
 2. Feature engineer fails fast without betting data (FAIL FAST principle)
 3. All 15 betting odds features are present in output
 4. All 18 Phase 1-3 features are present (with defaults if data not provided)
@@ -174,7 +174,7 @@ class TestFPLFeatureEngineer118Features:
         sample_fixture_difficulty,
         sample_betting_features,
     ):
-        """Test that FPLFeatureEngineer produces exactly 118 features (117 - 4 redundant + 5 data quality indicators)."""
+        """Test that FPLFeatureEngineer produces exactly 122 features (118 + 4 elite interactions)."""
         from fpl_team_picker.domain.services.ml_feature_engineering import (
             FPLFeatureEngineer,
         )
@@ -194,8 +194,8 @@ class TestFPLFeatureEngineer118Features:
             sample_historical_data, sample_historical_data["total_points"]
         )
 
-        # Should have exactly 118 features (117 - 4 redundant + 5 data quality indicators)
-        assert result.shape[1] == 118, f"Expected 118 features, got {result.shape[1]}"
+        # Should have exactly 122 features (118 + 4 elite interactions)
+        assert result.shape[1] == 122, f"Expected 122 features, got {result.shape[1]}"
 
         # Verify betting odds features are present
         betting_features = [

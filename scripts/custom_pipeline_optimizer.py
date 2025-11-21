@@ -11,7 +11,7 @@ Fully configurable alternative to TPOT with:
 
 Key Difference from TPOT:
 - TPOT uses RFE which dropped penalty features (perm importance rank 4-8, MDI rank 92-96)
-- This pipeline KEEPS all 117 features or uses smarter feature selection
+- This pipeline KEEPS all 122 features or uses smarter feature selection
 
 Usage:
     # Evaluate mode: Test configuration on holdout set (GW9-10) before full training
@@ -390,7 +390,7 @@ def get_feature_groups() -> Dict[str, List[str]]:
     """
     Define feature groups for grouped preprocessing.
 
-    Categorizes all 117 FPL features into appropriate preprocessing groups based on their
+    Categorizes all 122 FPL features into appropriate preprocessing groups based on their
     distribution characteristics and semantic meaning.
 
     Returns:
@@ -785,7 +785,7 @@ def run_evaluate_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (default: none = keep all 117 features)",
+            help="Feature selection strategy (default: none = keep all 122 features)",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1142,7 +1142,7 @@ def run_train_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 117 features",
+            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 122 features",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1546,7 +1546,7 @@ def run_train_mode(
     logger.info("\n💾 Model saved:")
     logger.info(f"   Pipeline (for deployment): {pipeline_path.name}")
     logger.info(f"   Metadata (for analysis): {metadata_path.name}")
-    logger.info(f"   Features: {len(selected_features)}/117")
+    logger.info(f"   Features: {len(selected_features)}/122")
     logger.info(f"   Training samples: {len(y_final):,}")
 
     logger.info("\n" + "=" * 80)

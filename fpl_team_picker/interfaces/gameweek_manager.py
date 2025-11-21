@@ -670,7 +670,7 @@ def _(gameweek_data, mo):
             model_info = {
                 "type": model_type_label,
                 # TODO: these features are hardcoded. Should be a variable count
-                "features": "117 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures, betting odds, injury/rotation, venue-specific, rankings)",
+                "features": "122 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures, betting odds, injury/rotation, venue-specific, rankings, elite interactions)",
                 "status": "✅ ML predictions generated",
             }
         else:
