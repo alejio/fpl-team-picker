@@ -368,7 +368,7 @@ class OptimizationConfig(BaseModel):
 
     # Transfer optimization method
     transfer_optimization_method: str = Field(
-        default="simulated_annealing",
+        default="linear_programming",
         description="Transfer optimization method: 'linear_programming' (optimal, fast) or 'simulated_annealing' (exploratory)",
     )
 
@@ -439,6 +439,30 @@ class OptimizationConfig(BaseModel):
     sa_wildcard_use_consensus: bool = Field(
         default=True,
         description="Use consensus mode for wildcard: run multiple full optimizations and find consensus best squad. Recommended for finding truly optimal wildcard squad.",
+    )
+
+    # Free Hit parameters
+    free_hit_budget: float = Field(
+        default=100.0,
+        description="Budget for Free Hit chip in millions. FPL rules give exactly £100m regardless of team value.",
+        ge=100.0,
+        le=100.0,
+    )
+    sa_free_hit_iterations: int = Field(
+        default=5000,
+        description="Number of SA iterations for Free Hit optimization (15 transfers). Same as wildcard since search space is identical.",
+        ge=1000,
+        le=20000,
+    )
+    sa_free_hit_restarts: int = Field(
+        default=5,
+        description="Number of SA restarts for Free Hit optimization.",
+        ge=1,
+        le=10,
+    )
+    sa_free_hit_use_consensus: bool = Field(
+        default=True,
+        description="Use consensus mode for Free Hit optimization.",
     )
 
     # Scenario analysis (greedy method)

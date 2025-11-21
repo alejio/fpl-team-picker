@@ -715,6 +715,7 @@ class OptimizationService:
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
         free_transfers_override: Optional[int] = None,
+        is_free_hit: bool = False,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Unified transfer optimization supporting normal gameweeks and chips.
 
@@ -725,7 +726,7 @@ class OptimizationService:
         - Normal gameweek: free_transfers=1 (analyze 0-3 transfers)
         - Saved transfer: free_transfers=2 (analyze 0-4 transfers)
         - Wildcard chip: free_transfers=15 (rebuild entire squad, budget resets to £100m)
-        - Free Hit chip: free_transfers=15 + revert_after_gw flag (future extension)
+        - Free Hit chip: free_transfers=15 + is_free_hit=True (1GW optimization, squad reverts after)
 
         **Optimization Methods:**
         - Linear Programming (default): Guarantees optimal solution, fast (~1-2s), deterministic
@@ -744,6 +745,7 @@ class OptimizationService:
                 - None: Use team_data['free_transfers'] (default 1)
                 - 15: Wildcard chip (rebuild entire squad)
                 - 2: Saved transfer from previous week
+            is_free_hit: If True, optimize for 1GW only (squad reverts after deadline)
 
         Returns:
             Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
@@ -754,13 +756,17 @@ class OptimizationService:
             team_data = team_data.copy()
             team_data["free_transfers"] = free_transfers_override
 
-            # Wildcard chip: Budget resets to £100m (ignore current squad value)
+            # Wildcard/Free Hit chip: Budget resets to £100m (ignore current squad value)
             if free_transfers_override >= 15:
-                team_data["bank"] = 100.0
+                team_data["bank"] = (
+                    config.optimization.free_hit_budget if is_free_hit else 100.0
+                )
                 # Note: Selling prices will be ignored since we can replace all 15 players
+                chip_name = "Free Hit" if is_free_hit else "Wildcard"
                 logger.info(
-                    f"🃏 Wildcard/Chip Active: {free_transfers_override} free transfers, "
+                    f"🃏 {chip_name} Active: {free_transfers_override} free transfers, "
                     f"£{team_data['bank']:.1f}m budget"
+                    + (" (1GW only, squad reverts)" if is_free_hit else "")
                 )
 
         # Route to appropriate optimizer based on configuration
@@ -773,6 +779,7 @@ class OptimizationService:
                 players_with_xp,
                 must_include_ids,
                 must_exclude_ids,
+                is_free_hit=is_free_hit,
             )
         elif method == "simulated_annealing":
             return self._optimize_transfers_sa(
@@ -781,6 +788,7 @@ class OptimizationService:
                 players_with_xp,
                 must_include_ids,
                 must_exclude_ids,
+                is_free_hit=is_free_hit,
             )
         else:
             raise ValueError(
@@ -795,6 +803,7 @@ class OptimizationService:
         players_with_xp: pd.DataFrame,
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
+        is_free_hit: bool = False,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Transfer optimization using Simulated Annealing (exploration-based).
 
@@ -840,13 +849,21 @@ class OptimizationService:
             logger.debug(f"🚫 Must exclude {len(must_exclude_ids)} players")
 
         # Get optimization column based on configuration
-        xp_column = self.get_optimization_xp_column()
-        if xp_column == "xP":
+        # Free Hit always uses 1GW (squad reverts after deadline)
+        if is_free_hit:
+            xp_column = "xP"
             horizon_label = "1-GW"
-        elif xp_column == "xP_3gw":
-            horizon_label = "3-GW"
+            logger.info(
+                "🎯 Free Hit mode: Optimizing for 1GW only (squad reverts after)"
+            )
         else:
-            horizon_label = "5-GW"
+            xp_column = self.get_optimization_xp_column()
+            if xp_column == "xP":
+                horizon_label = "1-GW"
+            elif xp_column == "xP_3gw":
+                horizon_label = "3-GW"
+            else:
+                horizon_label = "5-GW"
 
         # Update current squad with 1-GW, 3-GW, and 5-GW XP data
         merge_columns = ["player_id", "xP"]
@@ -944,21 +961,39 @@ class OptimizationService:
             f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
         )
 
-        # For wildcard (15 free transfers), use initial squad generation instead of transfer-based SA
+        # For wildcard/free hit (15 free transfers), use initial squad generation instead of transfer-based SA
         if is_wildcard:
-            logger.info(
-                "🃏 Wildcard mode: Building optimal squad from scratch (ignoring current squad)"
+            chip_name = "Free Hit" if is_free_hit else "Wildcard"
+            budget = config.optimization.free_hit_budget if is_free_hit else 100.0
+            iterations = (
+                config.optimization.sa_free_hit_iterations
+                if is_free_hit
+                else config.optimization.sa_wildcard_iterations
+            )
+            restarts = (
+                config.optimization.sa_free_hit_restarts
+                if is_free_hit
+                else config.optimization.sa_wildcard_restarts
+            )
+            use_consensus = (
+                config.optimization.sa_free_hit_use_consensus
+                if is_free_hit
+                else config.optimization.sa_wildcard_use_consensus
             )
 
-            # Check if consensus mode is enabled for wildcard
-            if config.optimization.sa_wildcard_use_consensus:
+            logger.info(
+                f"🃏 {chip_name} mode: Building optimal squad from scratch (ignoring current squad)"
+            )
+
+            # Check if consensus mode is enabled
+            if use_consensus:
                 logger.info(
-                    f"🎯 Wildcard Consensus: Running {config.optimization.sa_wildcard_restarts} restarts "
-                    f"× {config.optimization.sa_wildcard_iterations} iterations each to find truly optimal squad..."
+                    f"🎯 {chip_name} Consensus: Running {restarts} restarts "
+                    f"× {iterations} iterations each to find truly optimal squad..."
                 )
                 wildcard_result = self._consensus_wildcard_optimization(
                     players_with_xp=all_players,
-                    budget=100.0,
+                    budget=budget,
                     formation=(2, 5, 5, 3),
                     must_include_ids=must_include_ids,
                     must_exclude_ids=must_exclude_ids,
@@ -968,9 +1003,9 @@ class OptimizationService:
                 # Single run mode (faster but less reliable)
                 wildcard_result = self.optimize_initial_squad(
                     players_with_xp=all_players,
-                    budget=100.0,  # Wildcard always £100m
+                    budget=budget,
                     formation=(2, 5, 5, 3),
-                    iterations=config.optimization.sa_wildcard_iterations,
+                    iterations=iterations,
                     must_include_ids=must_include_ids,
                     must_exclude_ids=must_exclude_ids,
                     xp_column=xp_column,
@@ -1227,6 +1262,7 @@ class OptimizationService:
         players_with_xp: pd.DataFrame,
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
+        is_free_hit: bool = False,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Transfer optimization using Linear Programming (optimal solution).
 
@@ -1268,13 +1304,21 @@ class OptimizationService:
             logger.debug(f"🚫 Must exclude {len(must_exclude_ids)} players")
 
         # Get optimization column based on configuration
-        xp_column = self.get_optimization_xp_column()
-        if xp_column == "xP":
+        # Free Hit always uses 1GW (squad reverts after deadline)
+        if is_free_hit:
+            xp_column = "xP"
             horizon_label = "1-GW"
-        elif xp_column == "xP_3gw":
-            horizon_label = "3-GW"
+            logger.info(
+                "🎯 Free Hit mode: Optimizing for 1GW only (squad reverts after)"
+            )
         else:
-            horizon_label = "5-GW"
+            xp_column = self.get_optimization_xp_column()
+            if xp_column == "xP":
+                horizon_label = "1-GW"
+            elif xp_column == "xP_3gw":
+                horizon_label = "3-GW"
+            else:
+                horizon_label = "5-GW"
 
         # Update current squad with XP data (same as SA)
         merge_columns = ["player_id", "xP"]
@@ -1390,15 +1434,126 @@ class OptimizationService:
             pid = player["player_id"]
             player_vars[pid] = pulp.LpVariable(f"player_{pid}", cat="Binary")
 
-        # Objective: Maximize total availability-adjusted xP of squad
-        # We'll handle transfer penalty separately in post-processing
-        objective_terms = []
-        for _, player in all_players.iterrows():
-            pid = player["player_id"]
-            adjusted_xp = self.get_adjusted_xp(player.to_dict(), xp_column)
-            objective_terms.append(adjusted_xp * player_vars[pid])
+        # For 1GW optimization, maximize starting XI xP (not total squad)
+        # For 3GW/5GW, keep total squad xP (bench players rotate in)
+        optimize_starting_xi = xp_column == "xP"
 
-        prob += pulp.lpSum(objective_terms), "Total_Squad_XP"
+        if optimize_starting_xi:
+            # Add starter variables: s[pid] = 1 if starting, 0 otherwise
+            starter_vars = {}
+            for _, player in all_players.iterrows():
+                pid = player["player_id"]
+                starter_vars[pid] = pulp.LpVariable(f"starter_{pid}", cat="Binary")
+
+            # Constraint: Can only start if in squad (s[i] <= x[i])
+            for pid in player_vars:
+                prob += starter_vars[pid] <= player_vars[pid], f"Starter_In_Squad_{pid}"
+
+            # Constraint: Exactly 11 starters
+            prob += (
+                pulp.lpSum([starter_vars[pid] for pid in starter_vars]) == 11,
+                "Starting_XI_Size",
+            )
+
+            # Formation constraints for starters (valid FPL formations)
+            # GKP: exactly 1 starter
+            gkp_players = all_players[all_players["position"] == "GKP"][
+                "player_id"
+            ].tolist()
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in gkp_players if pid in starter_vars]
+                )
+                == 1,
+                "Starting_GKP",
+            )
+
+            # DEF: 3-5 starters
+            def_players = all_players[all_players["position"] == "DEF"][
+                "player_id"
+            ].tolist()
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in def_players if pid in starter_vars]
+                )
+                >= 3,
+                "Starting_DEF_Min",
+            )
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in def_players if pid in starter_vars]
+                )
+                <= 5,
+                "Starting_DEF_Max",
+            )
+
+            # MID: 2-5 starters
+            mid_players = all_players[all_players["position"] == "MID"][
+                "player_id"
+            ].tolist()
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in mid_players if pid in starter_vars]
+                )
+                >= 2,
+                "Starting_MID_Min",
+            )
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in mid_players if pid in starter_vars]
+                )
+                <= 5,
+                "Starting_MID_Max",
+            )
+
+            # FWD: 1-3 starters
+            fwd_players = all_players[all_players["position"] == "FWD"][
+                "player_id"
+            ].tolist()
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in fwd_players if pid in starter_vars]
+                )
+                >= 1,
+                "Starting_FWD_Min",
+            )
+            prob += (
+                pulp.lpSum(
+                    [starter_vars[pid] for pid in fwd_players if pid in starter_vars]
+                )
+                <= 3,
+                "Starting_FWD_Max",
+            )
+
+            # Objective: Maximize starting XI xP, penalize expensive bench
+            # Bench cost penalty ensures we don't waste budget on bench players
+            bench_cost_penalty = 0.1  # Penalize £1m bench cost as 0.1 xP
+            objective_terms = []
+            for _, player in all_players.iterrows():
+                pid = player["player_id"]
+                adjusted_xp = self.get_adjusted_xp(player.to_dict(), xp_column)
+                player_price = player["price"]
+                # Starting XI gets full xP weight
+                objective_terms.append(adjusted_xp * starter_vars[pid])
+                # Bench gets cost penalty (prefer cheap bench to free budget for starters)
+                # bench_var = player_vars[pid] - starter_vars[pid] (1 if bench, 0 otherwise)
+                objective_terms.append(
+                    -bench_cost_penalty
+                    * player_price
+                    * (player_vars[pid] - starter_vars[pid])
+                )
+
+            prob += pulp.lpSum(objective_terms), "Starting_XI_XP"
+            logger.info("🎯 1GW mode: Optimizing starting XI xP (not total squad)")
+        else:
+            # Multi-GW: Maximize total squad xP (bench players rotate in)
+            objective_terms = []
+            for _, player in all_players.iterrows():
+                pid = player["player_id"]
+                adjusted_xp = self.get_adjusted_xp(player.to_dict(), xp_column)
+                objective_terms.append(adjusted_xp * player_vars[pid])
+
+            prob += pulp.lpSum(objective_terms), "Total_Squad_XP"
 
         # CONSTRAINT 1: Squad size (exactly 15 players)
         prob += (
@@ -1493,9 +1648,25 @@ class OptimizationService:
             pid for pid in player_vars if pulp.value(player_vars[pid]) == 1
         ]
 
+        # For 1GW, also extract which players the LP chose as starters
+        lp_starter_ids = None
+        if optimize_starting_xi:
+            lp_starter_ids = set(
+                pid for pid in starter_vars if pulp.value(starter_vars[pid]) == 1
+            )
+            logger.debug(f"LP selected {len(lp_starter_ids)} starters")
+
         optimal_squad_df = all_players[
             all_players["player_id"].isin(selected_player_ids)
         ].copy()
+
+        # Mark starters in DataFrame for UI display
+        if lp_starter_ids is not None:
+            optimal_squad_df["is_starter"] = optimal_squad_df["player_id"].isin(
+                lp_starter_ids
+            )
+        else:
+            optimal_squad_df["is_starter"] = True  # Will be determined by UI
 
         logger.debug(f"✅ LP solved in {solve_time:.2f}s - found optimal squad")
 
@@ -1508,22 +1679,37 @@ class OptimizationService:
 
         # Calculate optimal squad xP (for best starting 11)
         optimal_squad_list = optimal_squad_df.to_dict("records")
-        best_starting_11 = self._get_best_starting_11_from_squad(
-            optimal_squad_list, xp_column
-        )
+
+        # For 1GW, use LP's starter decisions; otherwise compute best 11
+        if lp_starter_ids is not None:
+            best_starting_11 = [
+                p for p in optimal_squad_list if p["player_id"] in lp_starter_ids
+            ]
+            # Determine formation from LP starters
+            pos_counts = {"GKP": 0, "DEF": 0, "MID": 0, "FWD": 0}
+            for p in best_starting_11:
+                pos_counts[p["position"]] += 1
+            best_formation = (
+                f"{pos_counts['DEF']}-{pos_counts['MID']}-{pos_counts['FWD']}"
+            )
+        else:
+            best_starting_11 = self._get_best_starting_11_from_squad(
+                optimal_squad_list, xp_column
+            )
+            # Get best formation
+            by_position_best = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
+            for player in optimal_squad_list:
+                by_position_best[player["position"]].append(player)
+            for pos in by_position_best:
+                by_position_best[pos].sort(
+                    key=lambda p: self.get_adjusted_xp(p, xp_column), reverse=True
+                )
+            _, best_formation, _ = self._enumerate_formations_for_players(
+                by_position_best, xp_column
+            )
+
         optimal_squad_xp = sum(
             self.get_adjusted_xp(p, xp_column) for p in best_starting_11
-        )
-        # Get best formation
-        by_position_best = {"GKP": [], "DEF": [], "MID": [], "FWD": []}
-        for player in optimal_squad_list:
-            by_position_best[player["position"]].append(player)
-        for pos in by_position_best:
-            by_position_best[pos].sort(
-                key=lambda p: self.get_adjusted_xp(p, xp_column), reverse=True
-            )
-        _, best_formation, _ = self._enumerate_formations_for_players(
-            by_position_best, xp_column
         )
 
         # Calculate transfer penalty
@@ -1662,7 +1848,19 @@ class OptimizationService:
         # Calculate initial objective value (squad xP with no transfer penalty)
         # Use availability-adjusted xP
         starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
-        current_objective = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
+        starting_11_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
+
+        # For 1GW optimization, penalize expensive bench in objective
+        initial_bench_penalty = 0.0
+        if xp_column == "xP":
+            starting_11_ids = {p["player_id"] for p in starting_11}
+            bench_players = [
+                p for p in original_squad if p["player_id"] not in starting_11_ids
+            ]
+            bench_cost = sum(p["price"] for p in bench_players)
+            initial_bench_penalty = bench_cost * 0.1  # Matches LP penalty
+
+        current_objective = starting_11_xp - initial_bench_penalty
 
         best_team = [p.copy() for p in original_squad]
         best_objective = current_objective
@@ -1703,12 +1901,22 @@ class OptimizationService:
             new_starting_11 = self._get_best_starting_11_from_squad(new_team, xp_column)
             squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in new_starting_11)
 
+            # For 1GW optimization, penalize expensive bench
+            bench_cost_penalty = 0.0
+            if xp_column == "xP":
+                starting_11_ids = {p["player_id"] for p in new_starting_11}
+                bench_players = [
+                    p for p in new_team if p["player_id"] not in starting_11_ids
+                ]
+                bench_cost = sum(p["price"] for p in bench_players)
+                bench_cost_penalty = bench_cost * 0.1  # Matches LP penalty
+
             # Calculate penalty for this number of transfers
             transfer_penalty = (
                 max(0, num_transfers_from_original - free_transfers)
                 * config.optimization.transfer_cost
             )
-            new_objective = squad_xp - transfer_penalty  # Net XP after penalty
+            new_objective = squad_xp - bench_cost_penalty - transfer_penalty
 
             # Accept if better or with probability
             delta = new_objective - current_objective
@@ -2214,11 +2422,17 @@ class OptimizationService:
             return team if len(team) == 15 else None
 
         def calculate_team_xp(team: List[Dict]) -> float:
-            """Calculate total xP for team's best starting 11, accounting for availability."""
+            """Calculate total xP for team's best starting 11, accounting for availability.
+
+            For 1GW optimization (xp_column == 'xP'), adds bench efficiency penalty
+            to avoid wasting budget on expensive bench players.
+            """
             if len(team) != 15:
                 return sum(self.get_adjusted_xp(p, xp_column) for p in team)
 
             starting_11 = self._get_best_starting_11_from_squad(team, xp_column)
+            starting_11_ids = {p["player_id"] for p in starting_11}
+
             # Use availability-adjusted xP for scoring
             base_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
 
@@ -2228,7 +2442,18 @@ class OptimizationService:
                 (count - 3) * -10.0 for count in team_counts.values() if count > 3
             )
 
-            return base_xp + constraint_penalty
+            # For 1GW optimization, penalize expensive bench players
+            # This prevents selecting £14.9m Haaland just to bench him
+            bench_cost_penalty = 0.0
+            if xp_column == "xP":
+                bench_players = [
+                    p for p in team if p["player_id"] not in starting_11_ids
+                ]
+                bench_cost = sum(p["price"] for p in bench_players)
+                # Penalize £1m bench cost as 0.1 xP (matches LP penalty)
+                bench_cost_penalty = bench_cost * 0.1
+
+            return base_xp + constraint_penalty - bench_cost_penalty
 
         def calculate_team_cost(team: List[Dict]) -> float:
             """Calculate total cost of team."""

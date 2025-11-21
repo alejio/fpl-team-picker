@@ -1238,6 +1238,11 @@ def _(mo):
         label="Free Transfers:",
     )
 
+    free_hit_checkbox = mo.ui.checkbox(
+        value=False,
+        label="Free Hit (1GW only, squad reverts after deadline)",
+    )
+
     optimization_horizon_toggle = mo.ui.radio(
         options=["5gw", "3gw", "1gw"], value="5gw", label="Optimization Horizon:"
     )
@@ -1251,6 +1256,12 @@ def _(mo):
             mo.md("- **15**: Wildcard chip (rebuild entire squad, £100m reset)"),
             free_transfer_selector,
             mo.md(""),
+            mo.md("**Chip:**"),
+            free_hit_checkbox,
+            mo.md(
+                "*When checked, uses 15 free transfers with £100m budget, optimizes for 1GW only*"
+            ),
+            mo.md(""),
             mo.md("**Optimization Horizon:**"),
             optimization_horizon_toggle,
             mo.md(
@@ -1263,11 +1274,12 @@ def _(mo):
             mo.md("---"),
         ]
     )
-    return free_transfer_selector, optimization_horizon_toggle
+    return free_hit_checkbox, free_transfer_selector, optimization_horizon_toggle
 
 
 @app.cell
 def _(
+    free_hit_checkbox,
     free_transfer_selector,
     mo,
     optimization_horizon_toggle,
@@ -1368,7 +1380,13 @@ def _(
 
         # Get free transfer count and create appropriate button label
         free_transfers_count = int(free_transfer_selector.value)
-        if free_transfers_count >= 15:
+        is_free_hit = free_hit_checkbox.value
+
+        if is_free_hit:
+            button_label = "🎯 Run Free Hit Optimization (1GW)"
+            button_kind = "danger"  # Red for free hit
+            description = "*Free Hit chip: Rebuild squad for this gameweek only using 1GW strategy. £100m budget, squad reverts after deadline.*"
+        elif free_transfers_count >= 15:
             button_label = f"🃏 Run Wildcard Optimization ({horizon.upper()})"
             button_kind = "warn"  # Yellow for wildcard
             description = f"*Wildcard chip: Rebuild entire squad from scratch using {horizon.upper()} strategy. £100m budget reset, no transfer penalties.*"
@@ -1419,6 +1437,7 @@ def _(
 
 @app.cell
 def _(
+    free_hit_checkbox,
     free_transfer_selector,
     gameweek_data,
     mo,
@@ -1640,9 +1659,17 @@ def _(
                 try:
                     # Get free transfer count from selector
                     _free_transfers_count = int(free_transfer_selector.value)
-                    _free_transfers_override = (
-                        _free_transfers_count if _free_transfers_count != 1 else None
-                    )
+                    _is_free_hit = free_hit_checkbox.value
+
+                    # Free Hit forces 15 free transfers
+                    if _is_free_hit:
+                        _free_transfers_override = 15
+                    else:
+                        _free_transfers_override = (
+                            _free_transfers_count
+                            if _free_transfers_count != 1
+                            else None
+                        )
 
                     optimal_squad_df, best_scenario, optimization_metadata = (
                         _optimization_service.optimize_transfers(
@@ -1652,6 +1679,7 @@ def _(
                             must_include_ids=must_include_ids,
                             must_exclude_ids=must_exclude_ids,
                             free_transfers_override=_free_transfers_override,
+                            is_free_hit=_is_free_hit,
                         )
                     )
 
