@@ -1230,8 +1230,79 @@ def _(
         # Calculate max single acquisition
         max_single_acquisition = min(budget_pool_info.get("total_budget", 0.0), 15.0)
 
-        # Only simulated annealing is supported
-        if method == "simulated_annealing":
+        if method == "linear_programming":
+            free_transfers = optimization_metadata.get("free_transfers", 1)
+            transfers_out = optimization_metadata.get("transfers_out", [])
+            transfers_in = optimization_metadata.get("transfers_in", [])
+            current_xp = optimization_metadata.get("current_xp", 0.0)
+            lp_solve_time = optimization_metadata.get("lp_solve_time", 0.0)
+            num_transfers = len(transfers_out)
+
+            # Calculate penalty
+            transfer_penalty = (
+                max(0, num_transfers - free_transfers)
+                * _config.optimization.transfer_cost
+            )
+            new_squad_xp = best_scenario["net_xp"] + transfer_penalty
+            net_xp = best_scenario["net_xp"]
+            xp_gain = best_scenario["xp_gain"]
+
+            # Create before/after comparison
+            comparison_data = [
+                {
+                    "Option": "❌ No Transfers",
+                    "Squad XP": round(current_xp, 2),
+                    "Transfer Penalty": 0,
+                    "Net XP": round(current_xp, 2),
+                    "vs Current": 0.0,
+                },
+                {
+                    "Option": f"✅ {num_transfers} Transfer(s)",
+                    "Squad XP": round(new_squad_xp, 2),
+                    "Transfer Penalty": -round(transfer_penalty, 2)
+                    if transfer_penalty > 0
+                    else 0,
+                    "Net XP": round(net_xp, 2),
+                    "vs Current": round(xp_gain, 2),
+                },
+            ]
+            comparison_df = _pd.DataFrame(comparison_data)
+
+            strategic_summary = f"""
+    ## 🏆 Strategic {horizon_label} Decision: {best_scenario["transfers"]} Transfer(s) Optimal (Linear Programming)
+
+    **Recommended Strategy:** {best_scenario["description"]}
+
+    *Optimal solution found via Integer Linear Programming in {lp_solve_time:.2f}s*
+
+    ### 📊 Impact Analysis:
+    """
+
+            budget_summary = f"""
+    ### 💰 Budget Pool Analysis:
+    - **Bank:** £{available_budget:.1f}m | **Sellable Value:** £{budget_pool_info.get("sellable_value", 0.0):.1f}m | **Total Pool:** £{budget_pool_info.get("total_budget", 0.0):.1f}m
+    - **Max Single Acquisition:** £{max_single_acquisition:.1f}m
+    - **Free Transfers Available:** {free_transfers}
+    """
+
+            components = [
+                mo.md(strategic_summary),
+                mo.ui.table(comparison_df, page_size=5),
+                mo.md(budget_summary),
+            ]
+
+            # Add transfer details if applicable
+            if transfers_out and transfers_in:
+                transfer_details = "### 🔄 Recommended Transfers:\n\n"
+                for out_player, in_player in zip(transfers_out, transfers_in):
+                    transfer_details += f"- **OUT:** {out_player['web_name']} ({out_player['position']}, £{out_player['price']:.1f}m)\n"
+                    transfer_details += f"  **IN:** {in_player['web_name']} ({in_player['position']}, £{in_player['price']:.1f}m)\n\n"
+
+                components.append(mo.md(transfer_details))
+
+            return mo.vstack(components)
+
+        elif method == "simulated_annealing":
             sa_iterations = optimization_metadata.get("sa_iterations", 0)
             sa_improvements = optimization_metadata.get("sa_improvements", 0)
             free_transfers = optimization_metadata.get("free_transfers", 1)
