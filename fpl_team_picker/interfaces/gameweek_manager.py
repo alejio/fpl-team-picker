@@ -2,7 +2,7 @@
 
 import marimo
 
-__generated_with = "0.17.0"
+__generated_with = "0.17.7"
 app = marimo.App(width="full")
 
 
@@ -101,8 +101,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     # 🎯 FPL Gameweek Manager
     ## Advanced Weekly Decision Making Tool with Form Analytics
 
@@ -110,8 +109,7 @@ def _(mo):
 
 
     ---
-    """
-    )
+    """)
     return
 
 
@@ -194,8 +192,7 @@ def _(mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
+    mo.md(r"""
     ## 1️⃣ Configure Gameweek
 
     **Start by selecting your target gameweek for optimization.**
@@ -203,8 +200,7 @@ def _(mo):
     The system will load your team from the previous gameweek and analyze transfer opportunities for the upcoming fixtures.
 
     ---
-    """
-    )
+    """)
     return
 
 
@@ -371,7 +367,9 @@ def _(gameweek_data, gameweek_input, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 2️⃣ Team Strength Analysis""")
+    mo.md(r"""
+    ## 2️⃣ Team Strength Analysis
+    """)
     return
 
 
@@ -400,7 +398,9 @@ def _(gameweek_input, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 3️⃣ Expected Points Engine""")
+    mo.md(r"""
+    ## 3️⃣ Expected Points Engine
+    """)
     return
 
 
@@ -853,7 +853,9 @@ def _(gameweek_data, mo):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 4️⃣ Form Analytics Dashboard""")
+    mo.md(r"""
+    ## 4️⃣ Form Analytics Dashboard
+    """)
     return
 
 
@@ -902,7 +904,9 @@ def _(gameweek_data, mo, players_with_xp):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 5️⃣ Player Performance Trends""")
+    mo.md(r"""
+    ## 5️⃣ Player Performance Trends
+    """)
     return
 
 
@@ -954,7 +958,9 @@ def _(gameweek_data, mo, players_with_xp):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 6️⃣ Fixture Difficulty Analysis""")
+    mo.md(r"""
+    ## 6️⃣ Fixture Difficulty Analysis
+    """)
     return
 
 
@@ -981,9 +987,225 @@ def _(gameweek_input, mo):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-    ## 7️⃣ Transfer & Chip Optimization
+    mo.md(r"""
+    ## 7️⃣ Chip Assessment
+
+    **Analyze optimal timing for your chips based on fixture difficulty and DGW opportunities.**
+
+    ---
+    """)
+    return
+
+
+@app.cell
+def _(gameweek_data, gameweek_input, mo, players_with_xp):
+    # Chip Assessment using domain service - clean architecture
+    def _format_chip_metrics(metrics: dict) -> str:
+        """Format chip metrics for display"""
+        formatted_lines = []
+        for key, value in metrics.items():
+            if isinstance(value, float):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value:.2f}"
+                )
+            elif isinstance(value, int):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value}"
+                )
+            elif isinstance(value, str):
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {value}"
+                )
+            else:
+                formatted_lines.append(
+                    f"- **{key.replace('_', ' ').title()}:** {str(value)}"
+                )
+        return "\n".join(formatted_lines)
+
+    if (
+        gameweek_input.value
+        and not players_with_xp.empty
+        and "xP" in players_with_xp.columns
+        and gameweek_data
+    ):
+        _current_squad = gameweek_data.get("current_squad")
+        _team_data = gameweek_data.get("manager_team")
+
+        if _current_squad is not None and not _current_squad.empty and _team_data:
+            from fpl_team_picker.domain.services import ChipAssessmentService
+
+            # Get available chips from team data
+            available_chips = _team_data.get(
+                "chips_available",
+                ["wildcard", "bench_boost", "triple_captain", "free_hit"],
+            )
+            used_chips = _team_data.get("chips_used", [])
+
+            if available_chips:
+                # Use domain service for chip assessment
+                chip_service = ChipAssessmentService()
+
+                # Get chip deadline warning
+                _current_gw = gameweek_input.value
+                chip_set = chip_service.get_current_chip_set(_current_gw)
+                deadline_warning = chip_service.get_chip_deadline_warning(
+                    _current_gw, chip_set
+                )
+
+                # Merge current squad with xP data for chip assessment
+                merge_xp_cols = ["player_id", "xP"]
+                if "xP_3gw" in players_with_xp.columns:
+                    merge_xp_cols.append("xP_3gw")
+                if "xP_5gw" in players_with_xp.columns:
+                    merge_xp_cols.append("xP_5gw")
+                current_squad_with_xp = _current_squad.merge(
+                    players_with_xp[merge_xp_cols],
+                    on="player_id",
+                    how="left",
+                )
+
+                # Update gameweek_data with squad and target gameweek for domain service
+                chip_gameweek_data = gameweek_data.copy()
+                chip_gameweek_data["target_gameweek"] = gameweek_input.value
+                chip_gameweek_data["team_data"] = _team_data
+
+                # Run chip assessments using domain service
+                try:
+                    chip_assessment_result = chip_service.assess_all_chips(
+                        gameweek_data=chip_gameweek_data,
+                        current_squad=current_squad_with_xp,
+                        available_chips=available_chips,
+                        target_gameweek=gameweek_input.value,
+                    )
+
+                    chip_recommendations = chip_assessment_result.get(
+                        "recommendations", {}
+                    )
+
+                    # Create display components for each chip
+                    chip_displays = []
+
+                    # Add deadline warning if applicable
+                    if deadline_warning:
+                        chip_displays.append(
+                            mo.md(f"""
+    <div style="background: #fef3c7; border: 1px solid #f59e0b; padding: 12px; margin: 8px 0; border-radius: 8px;">
+    <strong>{deadline_warning}</strong>
+    </div>
+    """)
+                        )
+
+                    # Chip status overview
+                    deadline_gw = chip_service.get_chip_deadline(_current_gw, chip_set)
+                    remaining_gws = chip_service.get_remaining_gameweeks_for_chips(
+                        _current_gw, chip_set
+                    )
+                    chip_displays.append(
+                        mo.md(f"""
+    ### 🎯 Chip Status Overview
+    - **Available:** {", ".join(available_chips) if available_chips else "None"}
+    - **Used this season:** {", ".join(used_chips) if used_chips else "None"}
+    - **Chip Set:** {chip_set.title()} (deadline: GW{deadline_gw}, {remaining_gws} GWs remaining)
+    """)
+                    )
+
+                    # Find optimal gameweeks for each chip
+                    fixtures = gameweek_data.get("fixtures")
+                    if fixtures is not None and not fixtures.empty:
+                        for chip_name in available_chips:
+                            optimal_gw, score = chip_service.find_optimal_chip_gameweek(
+                                chip_name=chip_name,
+                                fixtures=fixtures,
+                                current_squad=current_squad_with_xp,
+                                all_players=players_with_xp,
+                                current_gw=_current_gw,
+                                deadline_gw=deadline_gw,
+                            )
+                            recommendation = chip_recommendations.get(chip_name, {})
+                            _status = recommendation.get("status", "❓")
+                            chip_title = recommendation.get(
+                                "chip_name", chip_name.replace("_", " ").title()
+                            )
+                            reasoning = recommendation.get(
+                                "reasoning", "No reasoning provided"
+                            )
+                            key_metrics = recommendation.get("key_metrics", {})
+
+                            # Add optimal GW recommendation
+                            optimal_gw_text = (
+                                f"**Best GW to use:** GW{optimal_gw} (score: {score:.1f})"
+                                if optimal_gw
+                                else "No optimal GW found"
+                            )
+
+                            chip_displays.append(
+                                mo.md(f"""
+    ### {_status} {chip_title}
+    **{reasoning}**
+
+    {optimal_gw_text}
+
+    **Key Metrics:**
+    {_format_chip_metrics(key_metrics)}
+    """)
+                            )
+                    else:
+                        # Fallback without optimal GW calculation
+                        for chip_name, recommendation in chip_recommendations.items():
+                            _status = recommendation.get("status", "❓")
+                            chip_title = recommendation.get(
+                                "chip_name", chip_name.title()
+                            )
+                            reasoning = recommendation.get(
+                                "reasoning", "No reasoning provided"
+                            )
+                            key_metrics = recommendation.get("key_metrics", {})
+
+                            chip_displays.append(
+                                mo.md(f"""
+    ### {_status} {chip_title}
+    **{reasoning}**
+
+    **Key Metrics:**
+    {_format_chip_metrics(key_metrics)}
+    """)
+                            )
+
+                    chip_assessment_display = mo.vstack(chip_displays)
+
+                except ValueError as e:
+                    chip_assessment_display = mo.md(
+                        f"❌ **Chip assessment data error:** {str(e)}"
+                    )
+                except (KeyError, TypeError, AttributeError) as e:
+                    chip_assessment_display = mo.md(
+                        f"❌ **Chip data structure error:** {str(e)} - Fix data upstream"
+                    )
+                except Exception as e:
+                    chip_assessment_display = mo.md(
+                        f"⚠️ **Unexpected chip assessment error:** {str(e)}"
+                    )
+            else:
+                chip_assessment_display = mo.md(
+                    "✅ **All chips used** - No chips available for this season"
+                )
+        else:
+            chip_assessment_display = mo.md(
+                "⚠️ **Load team data and calculate xP first** to enable chip assessment"
+            )
+    else:
+        chip_assessment_display = mo.md(
+            "⚠️ **Select gameweek and calculate expected points** to enable chip assessment"
+        )
+
+    chip_assessment_display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 8️⃣ Transfer & Chip Optimization
 
     **Unified optimization for normal gameweeks and chip usage.**
 
@@ -993,8 +1215,7 @@ def _(mo):
     - **15 Free Transfers (Wildcard)**: Rebuild entire squad, £100m budget reset, no penalties
 
     ---
-    """
-    )
+    """)
     return
 
 
@@ -1609,7 +1830,9 @@ def _(
 
 @app.cell
 def _(mo):
-    mo.md(r"""## 8️⃣ Captain Selection""")
+    mo.md(r"""
+    ## 9️⃣ Captain Selection
+    """)
     return
 
 
@@ -1647,159 +1870,6 @@ def _(mo, optimal_starting_11):
     """)
 
     captain_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## 9️⃣ Chip Assessment
-
-    ---
-    """
-    )
-    return
-
-
-@app.cell
-def _(gameweek_data, gameweek_input, mo, players_with_xp):
-    # TODO: Wildcard and free hit assessment should be included
-    # right after we run optimization leveraging the yet-to-be-created
-    # best squad analysis.
-    # Chip Assessment using domain service - clean architecture
-    def _format_chip_metrics(metrics: dict) -> str:
-        """Format chip metrics for display"""
-        formatted_lines = []
-        for key, value in metrics.items():
-            if isinstance(value, float):
-                formatted_lines.append(
-                    f"- **{key.replace('_', ' ').title()}:** {value:.2f}"
-                )
-            elif isinstance(value, int):
-                formatted_lines.append(
-                    f"- **{key.replace('_', ' ').title()}:** {value}"
-                )
-            elif isinstance(value, str):
-                formatted_lines.append(
-                    f"- **{key.replace('_', ' ').title()}:** {value}"
-                )
-            else:
-                formatted_lines.append(
-                    f"- **{key.replace('_', ' ').title()}:** {str(value)}"
-                )
-        return "\n".join(formatted_lines)
-
-    if gameweek_input.value and not players_with_xp.empty and gameweek_data:
-        _current_squad = gameweek_data.get("current_squad")
-        _team_data = gameweek_data.get("manager_team")
-
-        if _current_squad is not None and not _current_squad.empty and _team_data:
-            from fpl_team_picker.domain.services import ChipAssessmentService
-
-            # Get available chips from team data
-            available_chips = _team_data.get(
-                "chips_available",
-                ["wildcard", "bench_boost", "triple_captain", "free_hit"],
-            )
-            used_chips = _team_data.get("chips_used", [])
-
-            if available_chips:
-                # Use domain service for chip assessment
-                chip_service = ChipAssessmentService()
-
-                # Merge current squad with xP data for chip assessment
-                merge_xp_cols = ["player_id", "xP"]
-                if "xP_3gw" in players_with_xp.columns:
-                    merge_xp_cols.append("xP_3gw")
-                if "xP_5gw" in players_with_xp.columns:
-                    merge_xp_cols.append("xP_5gw")
-                current_squad_with_xp = _current_squad.merge(
-                    players_with_xp[merge_xp_cols],
-                    on="player_id",
-                    how="left",
-                )
-
-                # Update gameweek_data with squad and target gameweek for domain service
-                chip_gameweek_data = gameweek_data.copy()
-                chip_gameweek_data["target_gameweek"] = gameweek_input.value
-                chip_gameweek_data["team_data"] = _team_data
-
-                # Run chip assessments using domain service
-                try:
-                    chip_assessment_result = chip_service.assess_all_chips(
-                        gameweek_data=chip_gameweek_data,
-                        current_squad=current_squad_with_xp,
-                        available_chips=available_chips,
-                        target_gameweek=gameweek_input.value,
-                    )
-
-                    chip_recommendations = chip_assessment_result.get(
-                        "recommendations", {}
-                    )
-
-                    # Create display components for each chip
-                    chip_displays = []
-
-                    # Chip status overview
-                    chip_displays.append(
-                        mo.md(f"""
-    ### 🎯 Chip Status Overview
-    - **Available:** {", ".join(available_chips) if available_chips else "None"}
-    - **Used this season:** {", ".join(used_chips) if used_chips else "None"}
-    """)
-                    )
-
-                    # Individual chip recommendations
-                    for chip_name, recommendation in chip_recommendations.items():
-                        _status = recommendation.get("status", "❓")
-                        chip_title = recommendation.get("chip_name", chip_name.title())
-                        reasoning = recommendation.get(
-                            "reasoning", "No reasoning provided"
-                        )
-                        key_metrics = recommendation.get("key_metrics", {})
-
-                        chip_displays.append(
-                            mo.md(f"""
-    ### {_status} {chip_title}
-    **{reasoning}**
-
-    **Key Metrics:**
-    {_format_chip_metrics(key_metrics)}
-    """)
-                        )
-
-                    chip_assessment_display = mo.vstack(chip_displays)
-
-                except ValueError as e:
-                    # Data contract violations in chip assessment
-                    chip_assessment_display = mo.md(
-                        f"❌ **Chip assessment data error:** {str(e)}"
-                    )
-                except (KeyError, TypeError, AttributeError) as e:
-                    # Missing fields or structure issues in chip data
-                    chip_assessment_display = mo.md(
-                        f"❌ **Chip data structure error:** {str(e)} - Fix data upstream"
-                    )
-                except Exception as e:
-                    # Unexpected chip assessment errors
-                    chip_assessment_display = mo.md(
-                        f"⚠️ **Unexpected chip assessment error:** {str(e)}"
-                    )
-            else:
-                chip_assessment_display = mo.md(
-                    "✅ **All chips used** - No chips available for this season"
-                )
-        else:
-            chip_assessment_display = mo.md(
-                "⚠️ **Load team data and calculate xP first** to enable chip assessment"
-            )
-    else:
-        chip_assessment_display = mo.md(
-            "⚠️ **Select gameweek and calculate expected points** to enable chip assessment"
-        )
-
-    chip_assessment_display
     return
 
 

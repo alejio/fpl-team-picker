@@ -48,6 +48,439 @@ class ChipAssessmentService:
             "double_gameweek_bonus": 10.0,
         }
 
+        # Load chip calendar config
+        try:
+            from fpl_team_picker.config import config as fpl_config
+
+            self.chip_calendar = fpl_config.chip_calendar
+        except ImportError:
+            # Fallback defaults if config not available
+            self.chip_calendar = None
+
+    # =========================================================================
+    # Chip Deadline Methods
+    # =========================================================================
+
+    def get_chip_deadline(self, current_gw: int, chip_set: str = "first") -> int:
+        """Get the deadline gameweek for a chip set.
+
+        Args:
+            current_gw: Current gameweek number
+            chip_set: 'first' or 'second' chip set
+
+        Returns:
+            Deadline gameweek number
+        """
+        if self.chip_calendar:
+            if chip_set == "first":
+                return self.chip_calendar.first_set_deadline_gw
+            return self.chip_calendar.second_set_deadline_gw
+        # Fallback defaults
+        return 19 if chip_set == "first" else 38
+
+    def get_remaining_gameweeks_for_chips(
+        self, current_gw: int, chip_set: str = "first"
+    ) -> int:
+        """Calculate remaining gameweeks to use chips before deadline.
+
+        Args:
+            current_gw: Current gameweek number
+            chip_set: 'first' or 'second' chip set
+
+        Returns:
+            Number of gameweeks remaining (excluding current GW)
+        """
+        deadline = self.get_chip_deadline(current_gw, chip_set)
+        return max(0, deadline - current_gw)
+
+    def get_chip_deadline_warning(
+        self, current_gw: int, chip_set: str = "first"
+    ) -> Optional[str]:
+        """Get a warning message if chips are expiring soon.
+
+        Args:
+            current_gw: Current gameweek number
+            chip_set: 'first' or 'second' chip set
+
+        Returns:
+            Warning message if chips expiring soon, None otherwise
+        """
+        remaining = self.get_remaining_gameweeks_for_chips(current_gw, chip_set)
+        threshold = (
+            self.chip_calendar.expiry_warning_threshold if self.chip_calendar else 3
+        )
+
+        if remaining <= threshold and remaining > 0:
+            deadline = self.get_chip_deadline(current_gw, chip_set)
+            return f"⚠️ {remaining} gameweeks remaining to use {chip_set} set chips (deadline: GW{deadline})"
+        elif remaining == 0:
+            return f"🚨 Last chance to use {chip_set} set chips this gameweek!"
+        return None
+
+    def get_current_chip_set(self, current_gw: int) -> str:
+        """Determine which chip set is active based on current gameweek.
+
+        Args:
+            current_gw: Current gameweek number
+
+        Returns:
+            'first' or 'second' chip set
+        """
+        first_deadline = self.get_chip_deadline(current_gw, "first")
+        return "first" if current_gw <= first_deadline else "second"
+
+    # =========================================================================
+    # DGW/BGW Detection Methods
+    # =========================================================================
+
+    def detect_double_gameweek_teams(
+        self, fixtures: pd.DataFrame, gameweek: int
+    ) -> List[int]:
+        """Detect teams playing twice in a gameweek (DGW teams).
+
+        Args:
+            fixtures: Fixtures DataFrame with gameweek, team_h, team_a columns
+            gameweek: Target gameweek to check
+
+        Returns:
+            List of team IDs with double fixtures
+        """
+        if fixtures.empty:
+            return []
+
+        # Get column names (handle both naming conventions)
+        gw_col = "gameweek" if "gameweek" in fixtures.columns else "event"
+        home_col = "team_h" if "team_h" in fixtures.columns else "home_team_id"
+        away_col = "team_a" if "team_a" in fixtures.columns else "away_team_id"
+
+        gw_fixtures = fixtures[fixtures[gw_col] == gameweek]
+
+        if gw_fixtures.empty:
+            return []
+
+        # Count appearances per team
+        team_counts: Dict[int, int] = {}
+        for _, fixture in gw_fixtures.iterrows():
+            home_team = fixture.get(home_col)
+            away_team = fixture.get(away_col)
+
+            if home_team:
+                team_counts[home_team] = team_counts.get(home_team, 0) + 1
+            if away_team:
+                team_counts[away_team] = team_counts.get(away_team, 0) + 1
+
+        # Return teams with 2+ fixtures
+        return [team_id for team_id, count in team_counts.items() if count >= 2]
+
+    def detect_blank_gameweek_teams(
+        self, fixtures: pd.DataFrame, gameweek: int, all_team_ids: List[int]
+    ) -> List[int]:
+        """Detect teams with no fixtures in a gameweek (BGW teams).
+
+        Args:
+            fixtures: Fixtures DataFrame
+            gameweek: Target gameweek to check
+            all_team_ids: List of all team IDs in the league
+
+        Returns:
+            List of team IDs with no fixtures
+        """
+        if fixtures.empty:
+            return list(all_team_ids)
+
+        # Get column names
+        gw_col = "gameweek" if "gameweek" in fixtures.columns else "event"
+        home_col = "team_h" if "team_h" in fixtures.columns else "home_team_id"
+        away_col = "team_a" if "team_a" in fixtures.columns else "away_team_id"
+
+        gw_fixtures = fixtures[fixtures[gw_col] == gameweek]
+
+        # Get all teams playing
+        playing_teams = set()
+        for _, fixture in gw_fixtures.iterrows():
+            home_team = fixture.get(home_col)
+            away_team = fixture.get(away_col)
+            if home_team:
+                playing_teams.add(home_team)
+            if away_team:
+                playing_teams.add(away_team)
+
+        # Return teams not playing
+        return [team_id for team_id in all_team_ids if team_id not in playing_teams]
+
+    def scan_dgw_calendar(
+        self, fixtures: pd.DataFrame, start_gw: int, end_gw: int
+    ) -> Dict[int, List[int]]:
+        """Scan multiple gameweeks for DGW opportunities.
+
+        Args:
+            fixtures: Fixtures DataFrame
+            start_gw: Start gameweek for scan
+            end_gw: End gameweek for scan (inclusive)
+
+        Returns:
+            Dict mapping gameweek -> list of DGW team IDs
+        """
+        dgw_calendar: Dict[int, List[int]] = {}
+
+        for gw in range(start_gw, end_gw + 1):
+            dgw_teams = self.detect_double_gameweek_teams(fixtures, gw)
+            if dgw_teams:
+                dgw_calendar[gw] = dgw_teams
+
+        return dgw_calendar
+
+    # =========================================================================
+    # Chip Scoring Methods
+    # =========================================================================
+
+    def score_free_hit_for_gameweek(
+        self,
+        fixtures: pd.DataFrame,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        gameweek: int,
+    ) -> float:
+        """Score the value of using Free Hit in a specific gameweek.
+
+        Args:
+            fixtures: Fixtures DataFrame
+            current_squad: Current squad DataFrame
+            all_players: All available players DataFrame
+            gameweek: Target gameweek
+
+        Returns:
+            Score indicating Free Hit value (higher = better to use)
+        """
+        score = 0.0
+
+        # DGW bonus - major factor for Free Hit value
+        dgw_teams = self.detect_double_gameweek_teams(fixtures, gameweek)
+        dgw_bonus = (
+            self.chip_calendar.dgw_bonus_multiplier if self.chip_calendar else 1.5
+        )
+
+        if dgw_teams:
+            # How many DGW players could we get vs current squad coverage
+            current_dgw_coverage = (
+                current_squad[current_squad["team"].isin(dgw_teams)].shape[0]
+                if not current_squad.empty
+                else 0
+            )
+
+            # Potential DGW players available
+            potential_dgw_players = (
+                all_players[all_players["team"].isin(dgw_teams)].shape[0]
+                if not all_players.empty
+                else 0
+            )
+
+            # Score based on coverage gap (more gap = higher FH value)
+            coverage_gap = min(11, potential_dgw_players) - current_dgw_coverage
+            score += coverage_gap * dgw_bonus * 2  # Each DGW slot worth ~3 points
+
+        # Squad improvement potential
+        if (
+            not current_squad.empty
+            and not all_players.empty
+            and "xP" in current_squad.columns
+        ):
+            current_xp = current_squad.nlargest(11, "xP")["xP"].sum()
+            best_possible = all_players.nlargest(11, "xP")["xP"].sum()
+            improvement = best_possible - current_xp
+            score += improvement * 0.5  # Weight improvement potential
+
+        return score
+
+    def score_bench_boost_for_gameweek(
+        self,
+        fixtures: pd.DataFrame,
+        current_squad: pd.DataFrame,
+        gameweek: int,
+    ) -> float:
+        """Score the value of using Bench Boost in a specific gameweek.
+
+        Args:
+            fixtures: Fixtures DataFrame
+            current_squad: Current squad DataFrame
+            gameweek: Target gameweek
+
+        Returns:
+            Score indicating Bench Boost value (higher = better)
+        """
+        if current_squad.empty or "xP" not in current_squad.columns:
+            return 0.0
+
+        # Get bench players (lowest 4 xP)
+        if len(current_squad) >= 15:
+            bench_players = current_squad.nsmallest(4, "xP")
+        else:
+            return 0.0
+
+        bench_xp = bench_players["xP"].sum()
+
+        # DGW bonus for bench players
+        dgw_teams = self.detect_double_gameweek_teams(fixtures, gameweek)
+        dgw_bench_count = (
+            bench_players[bench_players["team"].isin(dgw_teams)].shape[0]
+            if dgw_teams
+            else 0
+        )
+
+        dgw_bonus = (
+            self.chip_calendar.dgw_bonus_multiplier if self.chip_calendar else 1.5
+        )
+        dgw_multiplier = 1.0 + (dgw_bench_count * 0.25 * (dgw_bonus - 1.0))
+
+        return bench_xp * dgw_multiplier
+
+    def score_triple_captain_for_gameweek(
+        self,
+        fixtures: pd.DataFrame,
+        current_squad: pd.DataFrame,
+        gameweek: int,
+    ) -> float:
+        """Score the value of using Triple Captain in a specific gameweek.
+
+        Args:
+            fixtures: Fixtures DataFrame
+            current_squad: Current squad DataFrame
+            gameweek: Target gameweek
+
+        Returns:
+            Score indicating Triple Captain value (higher = better)
+        """
+        if current_squad.empty or "xP" not in current_squad.columns:
+            return 0.0
+
+        # Get top captain candidate
+        top_candidate = current_squad.nlargest(1, "xP")
+        if top_candidate.empty:
+            return 0.0
+
+        captain_xp = top_candidate["xP"].iloc[0]
+        captain_team = top_candidate["team"].iloc[0]
+
+        # DGW bonus - massive for TC
+        dgw_teams = self.detect_double_gameweek_teams(fixtures, gameweek)
+        dgw_bonus = (
+            self.chip_calendar.dgw_bonus_multiplier if self.chip_calendar else 1.5
+        )
+
+        if captain_team in dgw_teams:
+            captain_xp *= dgw_bonus
+
+        # Factor in fixture difficulty if available
+        gw_col = "gameweek" if "gameweek" in fixtures.columns else "event"
+        home_col = "team_h" if "team_h" in fixtures.columns else "home_team_id"
+        away_col = "team_a" if "team_a" in fixtures.columns else "away_team_id"
+
+        gw_fixtures = fixtures[fixtures[gw_col] == gameweek]
+        captain_fixtures = gw_fixtures[
+            (gw_fixtures[home_col] == captain_team)
+            | (gw_fixtures[away_col] == captain_team)
+        ]
+
+        if not captain_fixtures.empty:
+            # Lower difficulty = easier fixture = higher TC value
+            diff_col = (
+                "team_h_difficulty"
+                if "team_h_difficulty" in captain_fixtures.columns
+                else None
+            )
+            if diff_col:
+                avg_difficulty = captain_fixtures[diff_col].mean()
+                # Invert: difficulty 2 = 1.5x, difficulty 5 = 0.5x
+                fixture_multiplier = 1.5 - (avg_difficulty - 2) * 0.25
+                captain_xp *= max(0.5, min(1.5, fixture_multiplier))
+
+        return captain_xp
+
+    def score_wildcard_for_gameweek(
+        self,
+        fixtures: pd.DataFrame,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        gameweek: int,
+    ) -> float:
+        """Score the value of using Wildcard in a specific gameweek.
+
+        Args:
+            fixtures: Fixtures DataFrame
+            current_squad: Current squad DataFrame
+            all_players: All available players DataFrame
+            gameweek: Target gameweek
+
+        Returns:
+            Score indicating Wildcard value (higher = better)
+        """
+        score = 0.0
+
+        # Transfer opportunities
+        transfer_count = self._count_transfer_opportunities(current_squad, all_players)
+        score += transfer_count * 2  # Each good transfer opportunity
+
+        # Fixture swing analysis - look at next 5 GWs from target
+        fixture_outlook = self._analyze_fixture_run(
+            current_squad, fixtures, gameweek, horizon=5
+        )
+        # Lower outlook = worse fixtures = higher WC value
+        score += (1.0 - fixture_outlook) * 10
+
+        return score
+
+    def find_optimal_chip_gameweek(
+        self,
+        chip_name: str,
+        fixtures: pd.DataFrame,
+        current_squad: pd.DataFrame,
+        all_players: pd.DataFrame,
+        current_gw: int,
+        deadline_gw: int,
+    ) -> Tuple[Optional[int], float]:
+        """Find the optimal gameweek to use a specific chip.
+
+        Args:
+            chip_name: Name of the chip (free_hit, bench_boost, triple_captain, wildcard)
+            fixtures: Fixtures DataFrame
+            current_squad: Current squad DataFrame
+            all_players: All available players DataFrame
+            current_gw: Current gameweek
+            deadline_gw: Deadline gameweek for chip usage
+
+        Returns:
+            Tuple of (optimal_gameweek, score) or (None, 0) if no valid GW
+        """
+        if current_gw > deadline_gw:
+            return None, 0.0
+
+        best_gw = None
+        best_score = 0.0
+
+        for gw in range(current_gw, deadline_gw + 1):
+            if chip_name == "free_hit":
+                score = self.score_free_hit_for_gameweek(
+                    fixtures, current_squad, all_players, gw
+                )
+            elif chip_name == "bench_boost":
+                score = self.score_bench_boost_for_gameweek(fixtures, current_squad, gw)
+            elif chip_name == "triple_captain":
+                score = self.score_triple_captain_for_gameweek(
+                    fixtures, current_squad, gw
+                )
+            elif chip_name == "wildcard":
+                score = self.score_wildcard_for_gameweek(
+                    fixtures, current_squad, all_players, gw
+                )
+            else:
+                continue
+
+            if score > best_score:
+                best_score = score
+                best_gw = gw
+
+        return best_gw, best_score
+
     def assess_all_chips(
         self,
         gameweek_data: Dict[str, Any],

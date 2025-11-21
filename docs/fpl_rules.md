@@ -62,6 +62,7 @@
 - No transfer cost limit - can make unlimited paid transfers
 
 ### Chips and Special Powers (2025/26)
+- **One chip per gameweek**: Only ONE chip can be played in each gameweek
 - **Two sets of chips**: Managers have TWO sets of chips (8 chips total - 4 per half of season)
 - **First set deadline**: First set of chips must be used before Gameweek 19 deadline (30 December 18:30 GMT) and cannot be carried over
 - **Chip types**:
@@ -69,6 +70,7 @@
   - **Bench Boost**: All substitute players' points count for one gameweek
   - **Triple Captain**: Captain scores triple points instead of double
   - **Free Hit**: Make unlimited transfers for one gameweek, team reverts next week
+- **Free Hit restrictions**: Cannot be used in GW1, and cannot be used in both GW19 and GW20 (team must revert between)
 - **Note**: No Assistant Manager chip in 2025/26 season
 
 ## Captain and Vice-Captain

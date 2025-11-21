@@ -368,7 +368,7 @@ class OptimizationConfig(BaseModel):
 
     # Transfer optimization method
     transfer_optimization_method: str = Field(
-        default="linear_programming",
+        default="simulated_annealing",
         description="Transfer optimization method: 'linear_programming' (optimal, fast) or 'simulated_annealing' (exploratory)",
     )
 
@@ -502,6 +502,46 @@ class VisualizationConfig(BaseModel):
     )
 
 
+class ChipCalendarConfig(BaseModel):
+    """Chip Calendar and Deadline Configuration for 2025-26 Season"""
+
+    # Chip set deadlines
+    first_set_deadline_gw: int = Field(
+        default=19,
+        description="First set of chips must be used by this gameweek (GW19 = 30 Dec 2025)",
+        ge=1,
+        le=38,
+    )
+    second_set_deadline_gw: int = Field(
+        default=38,
+        description="Second set of chips deadline (end of season)",
+        ge=20,
+        le=38,
+    )
+
+    # Warning thresholds
+    expiry_warning_threshold: int = Field(
+        default=3,
+        description="Warn when this many GWs or fewer remain to use chips",
+        ge=1,
+        le=10,
+    )
+
+    # Chip scoring weights for optimal gameweek calculation
+    dgw_bonus_multiplier: float = Field(
+        default=1.5,
+        description="Bonus multiplier for DGW when scoring Free Hit/Triple Captain",
+        ge=1.0,
+        le=3.0,
+    )
+    fixture_difficulty_weight: float = Field(
+        default=0.3,
+        description="Weight of fixture difficulty in chip scoring",
+        ge=0.0,
+        le=1.0,
+    )
+
+
 class FPLConfig(BaseModel):
     """Master FPL Configuration Container"""
 
@@ -528,6 +568,9 @@ class FPLConfig(BaseModel):
     )
     visualization: VisualizationConfig = Field(
         default_factory=VisualizationConfig, description="Visualization Configuration"
+    )
+    chip_calendar: ChipCalendarConfig = Field(
+        default_factory=ChipCalendarConfig, description="Chip Calendar Configuration"
     )
 
     @model_validator(mode="after")
