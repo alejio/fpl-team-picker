@@ -34,6 +34,9 @@ class ChipRecommendation(BaseModel):
 class ChipAssessmentService:
     """Service for assessing optimal chip usage timing with structured recommendations."""
 
+    # 2025-26 promoted team IDs (Leeds, Burnley, Sunderland)
+    PROMOTED_TEAM_IDS = {10, 4, 17}  # Update annually
+
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """Initialize the service with configuration.
 
@@ -46,6 +49,8 @@ class ChipAssessmentService:
             "triple_captain_min_xp": 8.0,
             "free_hit_min_improvement": 15.0,
             "double_gameweek_bonus": 10.0,
+            "promoted_team_bonus": 1.15,  # 15% bonus vs promoted teams
+            "home_fixture_bonus": 1.10,  # 10% bonus for home fixtures
         }
 
         # Load chip calendar config
@@ -128,6 +133,35 @@ class ChipAssessmentService:
         """
         first_deadline = self.get_chip_deadline(current_gw, "first")
         return "first" if current_gw <= first_deadline else "second"
+
+    def get_deadline_urgency_factor(
+        self, current_gw: int, chip_set: str = "first"
+    ) -> float:
+        """Calculate urgency factor based on proximity to chip deadline.
+
+        Use-it-or-lose-it factor that increases as deadline approaches.
+
+        Args:
+            current_gw: Current gameweek number
+            chip_set: 'first' or 'second' chip set
+
+        Returns:
+            Urgency multiplier (1.0 = no urgency, 2.0 = maximum urgency)
+        """
+        remaining = self.get_remaining_gameweeks_for_chips(current_gw, chip_set)
+
+        if remaining <= 0:
+            return 2.0  # Maximum urgency - last chance
+        elif remaining == 1:
+            return 1.8
+        elif remaining == 2:
+            return 1.5
+        elif remaining == 3:
+            return 1.3
+        elif remaining <= 5:
+            return 1.1
+        else:
+            return 1.0  # No urgency
 
     # =========================================================================
     # DGW/BGW Detection Methods
@@ -243,6 +277,11 @@ class ChipAssessmentService:
     ) -> float:
         """Score the value of using Free Hit in a specific gameweek.
 
+        Factors considered:
+        - DGW opportunity (load up on players with double fixtures)
+        - BGW crisis (squad players have no fixtures)
+        - Squad improvement potential
+
         Args:
             fixtures: Fixtures DataFrame
             current_squad: Current squad DataFrame
@@ -253,6 +292,36 @@ class ChipAssessmentService:
             Score indicating Free Hit value (higher = better to use)
         """
         score = 0.0
+
+        # Get column names
+        gw_col = "gameweek" if "gameweek" in fixtures.columns else "event"
+        home_col = "team_h" if "team_h" in fixtures.columns else "home_team_id"
+        away_col = "team_a" if "team_a" in fixtures.columns else "away_team_id"
+
+        # Find teams playing in this gameweek
+        gw_fixtures = (
+            fixtures[fixtures[gw_col] == gameweek]
+            if not fixtures.empty
+            else pd.DataFrame()
+        )
+        playing_teams = set()
+        if not gw_fixtures.empty:
+            playing_teams = set(gw_fixtures[home_col].tolist()) | set(
+                gw_fixtures[away_col].tolist()
+            )
+
+        # BGW penalty - count squad players with no fixture (critical for FH decision)
+        if not current_squad.empty and "team" in current_squad.columns:
+            squad_without_fixture = current_squad[
+                ~current_squad["team"].isin(playing_teams)
+            ]
+            bgw_players = len(squad_without_fixture)
+
+            # Significant bonus when many squad players have blanks
+            if bgw_players >= 5:
+                score += bgw_players * 5  # Each blanking player = 5 points toward FH
+            elif bgw_players >= 3:
+                score += bgw_players * 3
 
         # DGW bonus - major factor for Free Hit value
         dgw_teams = self.detect_double_gameweek_teams(fixtures, gameweek)
@@ -284,6 +353,7 @@ class ChipAssessmentService:
             not current_squad.empty
             and not all_players.empty
             and "xP" in current_squad.columns
+            and "xP" in all_players.columns
         ):
             current_xp = current_squad.nlargest(11, "xP")["xP"].sum()
             best_possible = all_players.nlargest(11, "xP")["xP"].sum()
@@ -342,6 +412,13 @@ class ChipAssessmentService:
     ) -> float:
         """Score the value of using Triple Captain in a specific gameweek.
 
+        Factors considered:
+        - Base xP of captain candidate
+        - DGW bonus (captain plays twice)
+        - Home fixture bonus (10% uplift)
+        - Promoted team opponent bonus (15% uplift)
+        - Fixture difficulty
+
         Args:
             fixtures: Fixtures DataFrame
             current_squad: Current squad DataFrame
@@ -370,7 +447,7 @@ class ChipAssessmentService:
         if captain_team in dgw_teams:
             captain_xp *= dgw_bonus
 
-        # Factor in fixture difficulty if available
+        # Factor in fixture details
         gw_col = "gameweek" if "gameweek" in fixtures.columns else "event"
         home_col = "team_h" if "team_h" in fixtures.columns else "home_team_id"
         away_col = "team_a" if "team_a" in fixtures.columns else "away_team_id"
@@ -382,7 +459,19 @@ class ChipAssessmentService:
         ]
 
         if not captain_fixtures.empty:
-            # Lower difficulty = easier fixture = higher TC value
+            for _, fixture in captain_fixtures.iterrows():
+                is_home = fixture[home_col] == captain_team
+                opponent = fixture[away_col] if is_home else fixture[home_col]
+
+                # Home fixture bonus - premium TC targets play better at home
+                if is_home:
+                    captain_xp *= self.config.get("home_fixture_bonus", 1.10)
+
+                # Promoted team opponent bonus - easier fixtures
+                if opponent in self.PROMOTED_TEAM_IDS:
+                    captain_xp *= self.config.get("promoted_team_bonus", 1.15)
+
+            # Fixture difficulty multiplier
             diff_col = (
                 "team_h_difficulty"
                 if "team_h_difficulty" in captain_fixtures.columns
@@ -454,10 +543,16 @@ class ChipAssessmentService:
         if current_gw > deadline_gw:
             return None, 0.0
 
+        # Apply lookahead horizon from config
+        lookahead = (
+            self.chip_calendar.chip_lookahead_horizon if self.chip_calendar else 5
+        )
+        scan_end_gw = min(deadline_gw, current_gw + lookahead)
+
         best_gw = None
         best_score = 0.0
 
-        for gw in range(current_gw, deadline_gw + 1):
+        for gw in range(current_gw, scan_end_gw + 1):
             if chip_name == "free_hit":
                 score = self.score_free_hit_for_gameweek(
                     fixtures, current_squad, all_players, gw

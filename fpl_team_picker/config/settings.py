@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/xgboost_gw1-11_20251114_233915_pipeline.joblib",
+        default="models/custom/xgboost_gw1-11_20251121_160643_pipeline.joblib",
         description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
@@ -539,6 +539,12 @@ class ChipCalendarConfig(BaseModel):
         description="Weight of fixture difficulty in chip scoring",
         ge=0.0,
         le=1.0,
+    )
+    chip_lookahead_horizon: int = Field(
+        default=5,
+        description="Number of gameweeks to scan ahead for optimal chip usage",
+        ge=1,
+        le=10,
     )
 
 

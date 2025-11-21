@@ -1039,7 +1039,16 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
                 "chips_available",
                 ["wildcard", "bench_boost", "triple_captain", "free_hit"],
             )
-            used_chips = _team_data.get("chips_used", [])
+            # Get used chips from client
+            from client import FPLDataClient as _ChipClient
+
+            _chip_client = _ChipClient()
+            _chip_usage_df = _chip_client.get_my_chip_usage()
+            used_chips = (
+                _chip_usage_df["chip_used"].dropna().tolist()
+                if not _chip_usage_df.empty
+                else []
+            )
 
             if available_chips:
                 # Use domain service for chip assessment
@@ -1109,7 +1118,7 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
     """)
                     )
 
-                    # Find optimal gameweeks for each chip
+                    # Find optimal gameweeks for each chip (lookahead applied in service)
                     fixtures = gameweek_data.get("fixtures")
                     if fixtures is not None and not fixtures.empty:
                         for chip_name in available_chips:

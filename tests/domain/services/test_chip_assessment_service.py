@@ -377,7 +377,7 @@ class TestFreeHitScoring:
             current_squad=sample_squad_unit,
             all_players=sample_players_unit,
             current_gw=11,
-            deadline_gw=19,
+            deadline_gw=12,  # Limit to fixture range to test DGW detection
         )
 
         assert optimal_gw == 12  # Should recommend the DGW
@@ -496,3 +496,189 @@ class TestFindOptimalChipGameweek:
 
         assert optimal_gw is None
         assert score == 0
+
+
+# =============================================================================
+# Test Promoted Team Bonus for TC
+# =============================================================================
+
+
+class TestPromotedTeamBonus:
+    """Tests for promoted team bonus in Triple Captain scoring."""
+
+    @pytest.fixture
+    def promoted_team_fixtures(self):
+        """Fixtures where captain faces promoted teams."""
+        # 2025-26 promoted teams: Leeds (10), Burnley (4), Sunderland (17)
+        return pd.DataFrame([
+            # GW11: Team 1 vs non-promoted (team 5)
+            {"gameweek": 11, "team_h": 1, "team_a": 5, "team_h_difficulty": 3, "team_a_difficulty": 3},
+            # GW12: Team 1 (home) vs Leeds (promoted)
+            {"gameweek": 12, "team_h": 1, "team_a": 10, "team_h_difficulty": 2, "team_a_difficulty": 4},
+            # GW13: Team 1 (away) vs Burnley (promoted)
+            {"gameweek": 13, "team_h": 4, "team_a": 1, "team_h_difficulty": 4, "team_a_difficulty": 2},
+        ])
+
+    def test_tc_scores_higher_vs_promoted_team(self, unit_chip_service, sample_squad_unit, promoted_team_fixtures):
+        """TC should score higher when captain faces promoted team."""
+        score_vs_normal = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=promoted_team_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=11,
+        )
+
+        score_vs_promoted = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=promoted_team_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=12,
+        )
+
+        assert score_vs_promoted > score_vs_normal
+
+    def test_tc_home_vs_promoted_best_scenario(self, unit_chip_service, sample_squad_unit, promoted_team_fixtures):
+        """Home fixture vs promoted team should be ideal TC scenario."""
+        score_home_vs_promoted = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=promoted_team_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=12,  # Home vs Leeds
+        )
+
+        score_away_vs_promoted = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=promoted_team_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=13,  # Away vs Burnley
+        )
+
+        # Home should score at least as high as away vs promoted
+        assert score_home_vs_promoted >= score_away_vs_promoted
+
+
+# =============================================================================
+# Test BGW-Aware Free Hit Scoring
+# =============================================================================
+
+
+class TestBGWFreeHitScoring:
+    """Tests for Blank Gameweek awareness in Free Hit scoring."""
+
+    @pytest.fixture
+    def bgw_fixtures(self):
+        """Fixtures with a blank gameweek for several teams."""
+        return pd.DataFrame([
+            # GW11: All teams play
+            {"gameweek": 11, "team_h": 1, "team_a": 2},
+            {"gameweek": 11, "team_h": 3, "team_a": 4},
+            {"gameweek": 11, "team_h": 5, "team_a": 6},
+            {"gameweek": 11, "team_h": 7, "team_a": 8},
+            {"gameweek": 11, "team_h": 9, "team_a": 10},
+            # GW12: Only 4 teams play (big BGW)
+            {"gameweek": 12, "team_h": 1, "team_a": 2},
+            {"gameweek": 12, "team_h": 3, "team_a": 4},
+        ])
+
+    @pytest.fixture
+    def bgw_affected_squad(self):
+        """Squad with many players from teams with no fixtures in BGW."""
+        return pd.DataFrame([
+            {"player_id": 1, "web_name": "GK1", "position": "GKP", "team": 5, "price": 5.0, "xP": 4.0, "status": "a"},
+            {"player_id": 2, "web_name": "GK2", "position": "GKP", "team": 6, "price": 4.0, "xP": 3.5, "status": "a"},
+            {"player_id": 3, "web_name": "DEF1", "position": "DEF", "team": 5, "price": 6.0, "xP": 5.0, "status": "a"},
+            {"player_id": 4, "web_name": "DEF2", "position": "DEF", "team": 6, "price": 5.5, "xP": 4.5, "status": "a"},
+            {"player_id": 5, "web_name": "DEF3", "position": "DEF", "team": 7, "price": 5.0, "xP": 4.0, "status": "a"},
+            {"player_id": 6, "web_name": "DEF4", "position": "DEF", "team": 8, "price": 4.5, "xP": 3.5, "status": "a"},
+            {"player_id": 7, "web_name": "DEF5", "position": "DEF", "team": 9, "price": 4.0, "xP": 3.0, "status": "a"},
+            {"player_id": 8, "web_name": "MID1", "position": "MID", "team": 5, "price": 10.0, "xP": 7.0, "status": "a"},
+            {"player_id": 9, "web_name": "MID2", "position": "MID", "team": 6, "price": 8.0, "xP": 6.0, "status": "a"},
+            {"player_id": 10, "web_name": "MID3", "position": "MID", "team": 7, "price": 7.0, "xP": 5.5, "status": "a"},
+            {"player_id": 11, "web_name": "MID4", "position": "MID", "team": 8, "price": 6.0, "xP": 4.5, "status": "a"},
+            {"player_id": 12, "web_name": "MID5", "position": "MID", "team": 9, "price": 5.0, "xP": 4.0, "status": "a"},
+            {"player_id": 13, "web_name": "FWD1", "position": "FWD", "team": 5, "price": 12.0, "xP": 8.0, "status": "a"},
+            {"player_id": 14, "web_name": "FWD2", "position": "FWD", "team": 7, "price": 8.0, "xP": 6.0, "status": "a"},
+            {"player_id": 15, "web_name": "FWD3", "position": "FWD", "team": 9, "price": 6.0, "xP": 4.5, "status": "a"},
+        ])
+
+    def test_fh_scores_high_when_squad_has_bgw_players(
+        self, unit_chip_service, bgw_fixtures, bgw_affected_squad, sample_players_unit
+    ):
+        """Free Hit should score higher when many squad players have no fixture."""
+        score_normal_gw = unit_chip_service.score_free_hit_for_gameweek(
+            fixtures=bgw_fixtures,
+            current_squad=bgw_affected_squad,
+            all_players=sample_players_unit,
+            gameweek=11,
+        )
+
+        score_bgw = unit_chip_service.score_free_hit_for_gameweek(
+            fixtures=bgw_fixtures,
+            current_squad=bgw_affected_squad,
+            all_players=sample_players_unit,
+            gameweek=12,
+        )
+
+        assert score_bgw > score_normal_gw
+
+
+# =============================================================================
+# Test Deadline Urgency Factor
+# =============================================================================
+
+
+class TestDeadlineUrgency:
+    """Tests for deadline urgency in chip recommendations."""
+
+    def test_urgency_increases_near_deadline(self, unit_chip_service):
+        """Chip recommendation should factor in deadline urgency."""
+        # GW17 = 2 GWs remaining before GW19 deadline
+        urgency_gw17 = unit_chip_service.get_deadline_urgency_factor(
+            current_gw=17, chip_set="first"
+        )
+
+        # GW10 = 9 GWs remaining
+        urgency_gw10 = unit_chip_service.get_deadline_urgency_factor(
+            current_gw=10, chip_set="first"
+        )
+
+        assert urgency_gw17 > urgency_gw10
+
+    def test_max_urgency_at_deadline(self, unit_chip_service):
+        """Maximum urgency at final gameweek before deadline."""
+        urgency = unit_chip_service.get_deadline_urgency_factor(
+            current_gw=19, chip_set="first"
+        )
+
+        assert urgency >= 1.5  # Should be significant boost
+
+
+# =============================================================================
+# Test Home Fixture Bonus
+# =============================================================================
+
+
+class TestHomeFixtureBonus:
+    """Tests for home fixture advantage in TC scoring."""
+
+    @pytest.fixture
+    def home_away_fixtures(self):
+        """Fixtures with same opponent but different venues (equal difficulty)."""
+        return pd.DataFrame([
+            # GW11: Team 1 plays away vs Team 20 (same difficulty as GW12)
+            {"gameweek": 11, "team_h": 20, "team_a": 1, "team_h_difficulty": 3, "team_a_difficulty": 3},
+            # GW12: Team 1 plays at home vs Team 20 (same difficulty as GW11)
+            {"gameweek": 12, "team_h": 1, "team_a": 20, "team_h_difficulty": 3, "team_a_difficulty": 3},
+        ])
+
+    def test_tc_prefers_home_fixture(self, unit_chip_service, sample_squad_unit, home_away_fixtures):
+        """TC should score higher for home fixtures vs same opponent."""
+        score_away = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=home_away_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=11,
+        )
+
+        score_home = unit_chip_service.score_triple_captain_for_gameweek(
+            fixtures=home_away_fixtures,
+            current_squad=sample_squad_unit,
+            gameweek=12,
+        )
+
+        assert score_home > score_away
