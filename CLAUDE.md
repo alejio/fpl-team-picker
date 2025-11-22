@@ -85,7 +85,29 @@ Install: `uv sync`
 - 4 feature selection strategies: none, correlation, permutation, rfe-smart
 - `--keep-penalty-features` flag to force-keep critical domain features
 - Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
-- Quick start: `uv run python scripts/custom_pipeline_optimizer.py --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber`
+
+**Hyperparameter Improvements (2025-11-22)**:
+- **Issue**: XGBoost severely underfit with learning_rate=0.0116 + n_estimators=180
+  - Caused xP compression (3.96-5.37 range) → LP optimizer couldn't differentiate premium/budget players
+  - Root cause: Search space allowed extreme combinations (LR × trees = insufficient capacity)
+- **Fixes**:
+  - XGBoost/LightGBM: n_estimators increased to 200-1500 (was 100-500)
+  - All gradient boosting: learning_rate minimum raised from 0.01 to 0.03
+  - Regularization: reg_lambda minimum lowered from 0.5 to 0.0
+  - Learning rate now uses log-uniform distribution (samples more in 0.03-0.1 range)
+- **Key Insight**: Effective model capacity ≈ learning_rate × n_estimators × tree_depth
+  - Low LR (0.03-0.05) needs many trees (800-1500)
+  - Medium LR (0.05-0.15) needs moderate trees (300-800)
+  - High LR (0.15-0.3) needs fewer trees (200-400)
+
+**Quick Start**:
+```bash
+# Retrain XGBoost with improved hyperparameters
+uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor xgboost --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber --n-trials 50
+
+# Or use RandomForest (more robust to hyperparameters)
+uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber --n-trials 30
+```
 
 **TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
 - MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)

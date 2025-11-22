@@ -8,10 +8,24 @@ Fully configurable alternative to TPOT with:
 - Hyperparameter optimization via RandomizedSearchCV
 - Identical evaluation to TPOT (temporal CV, same metrics)
 - Dual modes: evaluate (fast testing on holdout) or train (full training for deployment)
+- Improved hyperparameter ranges to prevent underfitting
 
 Key Difference from TPOT:
 - TPOT uses RFE which dropped penalty features (perm importance rank 4-8, MDI rank 92-96)
-- This pipeline KEEPS all 122 features or uses smarter feature selection
+- This pipeline KEEPS all 117 features or uses smarter feature selection
+
+Hyperparameter Improvements (2025-11-22):
+- XGBoost/LightGBM: Increased n_estimators to 200-1500 (was 100-500)
+- Gradient Boosting: learning_rate minimum raised from 0.01 to 0.03
+- Regularization: reg_lambda minimum lowered from 0.5 to 0.0
+- Prevents underfitting from learning_rate=0.01 + n_estimators=180 combination
+- Uses log-uniform distribution for learning_rate (samples more in 0.03-0.1 range)
+
+Learning Rate × N_Estimators Tradeoff:
+- Low LR (0.03-0.05) needs many trees (800-1500) for full capacity
+- Medium LR (0.05-0.15) needs moderate trees (300-800)
+- High LR (0.15-0.3) needs fewer trees (200-400)
+- Effective capacity ≈ learning_rate × n_estimators × tree_depth
 
 Usage:
     # Evaluate mode: Test configuration on holdout set (GW9-10) before full training
@@ -20,35 +34,35 @@ Usage:
 
     # Train mode: Full training on all data for deployment
     python scripts/custom_pipeline_optimizer.py train --end-gw 10 \\
-        --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --n-trials 20
+        --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --n-trials 50
 
     # Quick examples
     python scripts/custom_pipeline_optimizer.py evaluate --regressor xgboost
     python scripts/custom_pipeline_optimizer.py train --regressor lightgbm --feature-selection correlation
 """
 
-import sys
 import json
-import joblib
-from pathlib import Path
+import sys
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Literal
+from pathlib import Path
+from typing import Literal
 
+import joblib
 import numpy as np
 import pandas as pd
 import typer
 from loguru import logger
-from sklearn.ensemble import (
-    RandomForestRegressor,
-    GradientBoostingRegressor,
-    AdaBoostRegressor,
-)
-from sklearn.linear_model import Ridge, Lasso, ElasticNet
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler
-from sklearn.pipeline import Pipeline
+from scipy.stats import randint, uniform
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import (
+    AdaBoostRegressor,
+    GradientBoostingRegressor,
+    RandomForestRegressor,
+)
+from sklearn.linear_model import ElasticNet, Lasso, Ridge
 from sklearn.model_selection import RandomizedSearchCV
-from scipy.stats import uniform, randint
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
 # Add project root
 project_root = Path(__file__).parent.parent
@@ -57,18 +71,18 @@ sys.path.insert(0, str(project_root))
 # Import reusable training utilities
 sys.path.insert(0, str(Path(__file__).parent))
 from ml_training_utils import (  # noqa: E402
-    load_training_data,
-    engineer_features,
-    create_temporal_cv_splits,
-    evaluate_fpl_comprehensive,
     TemporalCVSplitter,
-    spearman_correlation_scorer,
-    fpl_weighted_huber_scorer_sklearn,
-    fpl_topk_scorer_sklearn,
-    fpl_captain_scorer_sklearn,
+    create_fpl_comprehensive_scorer_sklearn,
     create_fpl_position_aware_scorer_sklearn,
     create_fpl_starting_xi_scorer_sklearn,
-    create_fpl_comprehensive_scorer_sklearn,
+    create_temporal_cv_splits,
+    engineer_features,
+    evaluate_fpl_comprehensive,
+    fpl_captain_scorer_sklearn,
+    fpl_topk_scorer_sklearn,
+    fpl_weighted_huber_scorer_sklearn,
+    load_training_data,
+    spearman_correlation_scorer,
 )
 
 # Import custom transformers from domain layer
@@ -95,13 +109,13 @@ def build_config(
     keep_penalty_features: bool,
     preprocessing: str,
     n_trials: int,
-    cv_folds: Optional[int],
+    cv_folds: int | None,
     scorer: str,
     output_dir: str,
     random_seed: int,
     n_jobs: int,
     verbose: int,
-) -> Dict:
+) -> dict:
     """Build configuration dictionary from parameters."""
     return {
         "start_gw": start_gw,
@@ -120,7 +134,7 @@ def build_config(
     }
 
 
-def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> Tuple:
+def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> tuple:
     """
     Get regressor instance and hyperparameter search space.
 
@@ -134,20 +148,45 @@ def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> Tuple
     if regressor_name == "xgboost":
         try:
             import xgboost as xgb
+            from scipy.stats import loguniform
 
+            # XGBoost with improved defaults to prevent underfitting
             regressor = xgb.XGBRegressor(
-                random_state=random_seed, n_jobs=1, tree_method="hist"
+                random_state=random_seed,
+                n_jobs=1,
+                tree_method="hist",
+                # Better defaults (will be overridden by search)
+                n_estimators=500,  # Higher default
+                learning_rate=0.05,  # Safer default than 0.1
+                max_depth=6,
+                min_child_weight=3,
             )
+            # Improved parameter distributions to prevent underfitting
+            # Key insight: learning_rate × n_estimators controls model capacity
+            # - Low LR (0.03-0.05) needs many trees (800-1500)
+            # - Medium LR (0.05-0.15) needs moderate trees (300-800)
+            # - High LR (0.15-0.3) needs fewer trees (200-400)
             param_dist = {
-                "regressor__n_estimators": randint(100, 500),
+                # Increased range: 200-1500 (was 100-500)
+                # This prevents underfitting when learning_rate is low
+                "regressor__n_estimators": randint(200, 1500),
+                # Tree structure: keep existing range
                 "regressor__max_depth": randint(3, 10),
-                "regressor__learning_rate": uniform(0.01, 0.3),
-                "regressor__subsample": uniform(0.6, 0.4),
-                "regressor__colsample_bytree": uniform(0.6, 0.4),
+                # Learning rate: raised minimum from 0.01 to 0.03
+                # 0.01 with low n_estimators causes severe underfitting
+                # Using log-uniform to sample more values in 0.03-0.1 range
+                "regressor__learning_rate": loguniform(0.03, 0.3),
+                # Sampling parameters: keep existing
+                "regressor__subsample": uniform(0.6, 0.4),  # 0.6-1.0
+                "regressor__colsample_bytree": uniform(0.6, 0.4),  # 0.6-1.0
+                # Regularization: keep existing
                 "regressor__min_child_weight": randint(1, 10),
                 "regressor__gamma": uniform(0, 0.5),
+                # L1 regularization: keep existing (0-1.0)
                 "regressor__reg_alpha": uniform(0, 1.0),
-                "regressor__reg_lambda": uniform(0.5, 2.0),
+                # L2 regularization: lower minimum from 0.5 to 0.0
+                # High L2 + low LR = extreme underfitting
+                "regressor__reg_lambda": uniform(0.0, 2.0),
             }
         except ImportError:
             raise ImportError("XGBoost not installed. Run: uv add xgboost")
@@ -155,20 +194,37 @@ def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> Tuple
     elif regressor_name == "lightgbm":
         try:
             import lightgbm as lgb
+            from scipy.stats import loguniform
 
+            # LightGBM with improved defaults to prevent underfitting
             regressor = lgb.LGBMRegressor(
-                random_state=random_seed, n_jobs=1, verbose=-1
+                random_state=random_seed,
+                n_jobs=1,
+                verbose=-1,
+                # Better defaults (will be overridden by search)
+                n_estimators=500,
+                learning_rate=0.05,
+                max_depth=6,
+                num_leaves=31,
             )
+            # Improved parameter distributions (same reasoning as XGBoost)
             param_dist = {
-                "regressor__n_estimators": randint(100, 500),
+                # Increased range: 200-1500 (was 100-500)
+                "regressor__n_estimators": randint(200, 1500),
+                # Tree structure: keep existing range
                 "regressor__max_depth": randint(3, 10),
-                "regressor__learning_rate": uniform(0.01, 0.3),
+                # Learning rate: raised minimum from 0.01 to 0.03, using log-uniform
+                "regressor__learning_rate": loguniform(0.03, 0.3),
+                # LightGBM-specific: num_leaves
                 "regressor__num_leaves": randint(20, 100),
-                "regressor__subsample": uniform(0.6, 0.4),
-                "regressor__colsample_bytree": uniform(0.6, 0.4),
+                # Sampling parameters: keep existing
+                "regressor__subsample": uniform(0.6, 0.4),  # 0.6-1.0
+                "regressor__colsample_bytree": uniform(0.6, 0.4),  # 0.6-1.0
                 "regressor__min_child_samples": randint(10, 50),
+                # L1 regularization: keep existing (0-1.0)
                 "regressor__reg_alpha": uniform(0, 1.0),
-                "regressor__reg_lambda": uniform(0.5, 2.0),
+                # L2 regularization: lower minimum from 0.5 to 0.0
+                "regressor__reg_lambda": uniform(0.0, 2.0),
             }
         except ImportError:
             raise ImportError("LightGBM not installed. Run: uv add lightgbm")
@@ -184,12 +240,27 @@ def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> Tuple
         }
 
     elif regressor_name == "gradient-boost":
-        regressor = GradientBoostingRegressor(random_state=random_seed)
+        from scipy.stats import loguniform
+
+        # Sklearn GradientBoosting with improved defaults
+        regressor = GradientBoostingRegressor(
+            random_state=random_seed,
+            # Better defaults
+            n_estimators=300,
+            learning_rate=0.05,
+            max_depth=5,
+        )
+        # Improved parameter distributions
         param_dist = {
-            "regressor__n_estimators": randint(100, 400),
+            # Increased range: 200-1000 (was 100-400)
+            # Sklearn GradientBoosting is slower, so cap at 1000
+            "regressor__n_estimators": randint(200, 1000),
+            # Tree structure: keep existing range
             "regressor__max_depth": randint(3, 8),
-            "regressor__learning_rate": uniform(0.01, 0.2),
-            "regressor__subsample": uniform(0.6, 0.4),
+            # Learning rate: raised minimum from 0.01 to 0.03, using log-uniform
+            "regressor__learning_rate": loguniform(0.03, 0.2),
+            # Sampling: keep existing
+            "regressor__subsample": uniform(0.6, 0.4),  # 0.6-1.0
             "regressor__min_samples_split": randint(2, 20),
             "regressor__min_samples_leaf": randint(1, 10),
         }
@@ -233,11 +304,11 @@ def get_regressor_and_param_grid(regressor_name: str, random_seed: int) -> Tuple
 def select_features(
     X: pd.DataFrame,
     y: np.ndarray,
-    feature_names: List[str],
+    feature_names: list[str],
     strategy: str,
     keep_penalty_features: bool,
     verbose: bool = True,
-) -> List[str]:
+) -> list[str]:
     """
     Select features based on strategy.
 
@@ -334,8 +405,8 @@ def select_features(
 
     elif strategy == "rfe-smart":
         # RFE but force keep penalty features
-        from sklearn.feature_selection import RFE
         from sklearn.ensemble import ExtraTreesRegressor
+        from sklearn.feature_selection import RFE
 
         if verbose:
             logger.info("   🔍 Running smart RFE (keeps penalty features)...")
@@ -386,7 +457,7 @@ def select_features(
     return selected
 
 
-def get_feature_groups() -> Dict[str, List[str]]:
+def get_feature_groups() -> dict[str, list[str]]:
     """
     Define feature groups for grouped preprocessing.
 
@@ -529,7 +600,7 @@ def get_feature_groups() -> Dict[str, List[str]]:
     }
 
 
-def create_preprocessor(strategy: str, feature_names: List[str]):
+def create_preprocessor(strategy: str, feature_names: list[str]):
     """
     Create a preprocessor based on the specified strategy.
 
@@ -618,12 +689,12 @@ def create_preprocessor(strategy: str, feature_names: List[str]):
 def optimize_pipeline(
     X: pd.DataFrame,
     y: np.ndarray,
-    cv_splits: List,
-    feature_names: List[str],
-    config: Dict,
-    cv_data: Optional[pd.DataFrame] = None,
-    best_params: Optional[Dict] = None,
-) -> Tuple[Pipeline, Dict]:
+    cv_splits: list,
+    feature_names: list[str],
+    config: dict,
+    cv_data: pd.DataFrame | None = None,
+    best_params: dict | None = None,
+) -> tuple[Pipeline, dict]:
     """
     Optimize hyperparameters using RandomizedSearchCV or use provided best params.
 
@@ -806,7 +877,7 @@ def run_evaluate_mode(
         "--n-trials",
         help="Number of hyperparameter trials (reduced in evaluate mode)",
     ),
-    cv_folds: Optional[int] = typer.Option(
+    cv_folds: int | None = typer.Option(
         None, "--cv-folds", help="Number of CV folds (default: None = all available)"
     ),
     scorer: Literal[
@@ -1164,7 +1235,7 @@ def run_train_mode(
         "--n-trials",
         help="Number of hyperparameter trials (ignored if --use-best-params-from is provided)",
     ),
-    cv_folds: Optional[int] = typer.Option(
+    cv_folds: int | None = typer.Option(
         None,
         "--cv-folds",
         help="Number of CV folds for hyperparameter search (default: None = all available, ignored if --use-best-params-from is provided)",
@@ -1187,7 +1258,7 @@ def run_train_mode(
     output_dir: str = typer.Option(
         "models/custom", "--output-dir", help="Output directory"
     ),
-    use_best_params_from: Optional[str] = typer.Option(
+    use_best_params_from: str | None = typer.Option(
         None,
         "--use-best-params-from",
         help="Path to JSON file with best hyperparameters from evaluate mode (skips search)",
@@ -1221,7 +1292,7 @@ def run_train_mode(
             )
             raise typer.Exit(code=1)
 
-        with open(params_path, "r") as f:
+        with open(params_path) as f:
             saved_config_data = json.load(f)
 
         saved_config = saved_config_data.get("config", {})
