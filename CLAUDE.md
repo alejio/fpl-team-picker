@@ -158,18 +158,42 @@ uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor
 
 **Example**: Player with [90, 90, 85, 90, 75] minutes → EWMA = 84.3 (weighted toward recent 75)
 
-## Captain Selection (Uncertainty-Aware)
+## Captain Selection (Intelligent, Situation-Aware)
 
-**OptimizationService.get_captain_recommendation()** implements:
-1. **Uncertainty Penalty**: Prefers players with lower prediction variance (reliable picks)
-   - Formula: `risk_adjusted_score = (xP * 2) / (1 + uncertainty_penalty)`
-   - High uncertainty (>40% of xP) = reduced captain score
-2. **Template Protection**: High ownership (>50%) players get 5-10% bonus
-   - Protects against rank swings if template captain hauls
-3. **Risk Assessment**: Includes uncertainty in risk factors display
-4. **Full Transparency**: Returns uncertainty metrics in candidate analysis
+**Two methods available:**
 
-**Key Feature**: Would have prevented GW10 disaster (-24 points from Kudus captain)
+### Basic: `get_captain_recommendation()`
+- Upside-seeking (90th percentile: xP + 1.28 × uncertainty)
+- Template protection (20-40% boost for >50% owned in good fixtures)
+- Matchup quality bonus from betting odds
+
+### Advanced: `get_intelligent_captain_recommendation()` (NEW)
+Situation-aware captain selection with configurable strategy modes:
+
+**Strategy Modes** (`CaptainSelectionConfig.strategy_mode`):
+- `auto`: Recommends based on rank, season phase, chip status
+- `template_lock`: Always captain highest-owned (>50%) - protects rank
+- `protect_rank`: Minimize downside, prefer safe picks
+- `balanced`: xP-weighted with template protection (default)
+- `chase_rank`: Differential focus for climbers
+- `maximum_upside`: Pure ceiling-seeking
+
+**Features:**
+1. **Situation Analysis**: Rank category, season phase, momentum, chip influence
+2. **Haul Probability Matrix**: Blank/Return/Haul probabilities from xP ± uncertainty
+3. **Rank Impact Estimation**: Expected rank change for each captain choice
+4. **Template Comparison**: Shows risk/reward vs popular pick
+5. **Strategy-Adjusted Scoring**: Applies mode-specific bonuses/penalties
+
+**Auto-Detection Logic:**
+- Rank < 100k → `protect_rank` or `template_lock` (late season)
+- Rank 100k-500k → `balanced`
+- Rank 500k-2M → `chase_rank` (if not improving) or `balanced`
+- Rank > 2M → `maximum_upside`
+- Triple Captain active → `maximum_upside`
+- Free Hit active → `chase_rank`
+
+**Marimo UI**: Strategy dropdown, rank impact toggle, haul probability matrix
 
 ## Historical xP Recomputation
 

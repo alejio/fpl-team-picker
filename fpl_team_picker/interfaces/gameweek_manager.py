@@ -1869,42 +1869,268 @@ def _(
 def _(mo):
     mo.md(r"""
     ## 9️⃣ Captain Selection
+
+    **Intelligent captain recommendations with situation-aware analysis.**
+
+    ---
     """)
     return
 
 
 @app.cell
-def _(mo, optimal_starting_11):
-    # Captain Selection using domain service - clean architecture
+def _(mo):
+    # Captain Strategy Configuration UI
+    # marimo dropdown: value must match a key when using dict options
+    captain_strategy_dropdown = mo.ui.dropdown(
+        options={
+            "🎯 Auto (Situation-Aware)": "auto",
+            "🔒 Template Lock (Highest Owned)": "template_lock",
+            "🛡️ Protect Rank (Minimize Downside)": "protect_rank",
+            "⚖️ Balanced (xP-Weighted)": "balanced",
+            "🏃 Chase Rank (Differential Focus)": "chase_rank",
+            "🚀 Maximum Upside (Ceiling-Seeking)": "maximum_upside",
+        },
+        value="🎯 Auto (Situation-Aware)",
+        label="Captain Strategy:",
+    )
+
+    show_rank_impact_toggle = mo.ui.checkbox(
+        value=True,
+        label="Show rank impact analysis",
+    )
+
+    show_haul_probs_toggle = mo.ui.checkbox(
+        value=True,
+        label="Show haul probability matrix",
+    )
+
+    captain_config_ui = mo.vstack(
+        [
+            mo.md("### ⚙️ Captain Strategy Configuration"),
+            mo.hstack([captain_strategy_dropdown]),
+            mo.hstack([show_rank_impact_toggle, show_haul_probs_toggle]),
+            mo.md(
+                """
+    **Strategy Modes:**
+    - **Auto**: Recommends strategy based on your rank, season phase, and momentum
+    - **Template Lock**: Always captain highest-owned player (>50%) - protects rank
+    - **Protect Rank**: Prefer safe picks with low blank probability
+    - **Balanced**: xP-weighted with template protection (current approach)
+    - **Chase Rank**: Target differentials with haul potential to climb
+    - **Maximum Upside**: Pure ceiling-seeking for maximum rank gains
+    """
+            ),
+            mo.md("---"),
+        ]
+    )
+
+    captain_config_ui
+    return captain_strategy_dropdown, show_haul_probs_toggle, show_rank_impact_toggle
+
+
+@app.cell
+def _(
+    captain_strategy_dropdown,
+    gameweek_data,
+    gameweek_input,
+    mo,
+    optimal_starting_11,
+    show_haul_probs_toggle,
+    show_rank_impact_toggle,
+):
+    # Intelligent Captain Selection using enhanced domain service
     if isinstance(optimal_starting_11, list) and len(optimal_starting_11) > 0:
         from fpl_team_picker.domain.services import (
             OptimizationService as _OptimizationServiceCaptain,
-        )
-        from fpl_team_picker.visualization.charts import (
-            create_captain_selection_display as _create_captain_display,
         )
         import pandas as _pd
 
         _captain_service = _OptimizationServiceCaptain()
         squad_df = _pd.DataFrame(optimal_starting_11)
 
-        # Get captain recommendation data (domain logic)
-        captain_data = _captain_service.get_captain_recommendation(squad_df, top_n=5)
+        # Build manager context for situation-aware recommendations
+        # Debug: print the dropdown value to verify it's changing
+        _strategy_value = captain_strategy_dropdown.value
+        print(f"🎯 Captain Strategy Selected: {_strategy_value}")
 
-        # Create UI display (visualization layer)
-        captain_display = _create_captain_display(captain_data, mo)
+        manager_context = {
+            "gameweek": gameweek_input.value if gameweek_input.value else 15,
+            "strategy_override": _strategy_value,
+        }
+
+        # Try to get manager rank from gameweek_data
+        if gameweek_data:
+            _team_data_captain = gameweek_data.get("manager_team", {})
+            if _team_data_captain:
+                manager_context["overall_rank"] = _team_data_captain.get(
+                    "overall_rank", 2_000_000
+                )
+                # Check for active chip
+                _active_chip = _team_data_captain.get("active_chip")
+                if _active_chip:
+                    manager_context["chip_active"] = _active_chip
+
+        # Get intelligent captain recommendation
+        try:
+            captain_data = _captain_service.get_intelligent_captain_recommendation(
+                squad_df, manager_context=manager_context, top_n=5
+            )
+
+            # Build display components
+            display_components = []
+
+            # Situation Analysis Section
+            situation = captain_data.get("situation_analysis", {})
+            strategy_info = captain_data.get("strategy", {})
+
+            situation_content = f"""
+### 📊 Your Situation Analysis
+
+| Factor | Status |
+|--------|--------|
+| **Overall Rank** | {situation.get("overall_rank", "N/A"):,} ({situation.get("rank_category", "N/A").title()}) |
+| **Season Phase** | {situation.get("season_phase", "N/A").title()} - {situation.get("phase_description", "")} |
+| **Momentum** | {situation.get("momentum", "N/A").title()} - {situation.get("momentum_description", "")} |
+| **Chip Status** | {situation.get("chip_description", "No chip active")} |
+
+**Strategy:** {strategy_info.get("description", "N/A")}
+
+*{situation.get("reasoning", "")}*
+"""
+            display_components.append(mo.md(situation_content))
+
+            # Captain Recommendation
+            captain = captain_data.get("captain", {})
+            vice = captain_data.get("vice_captain", {})
+
+            captain_content = f"""
+### 👑 Captain Recommendation
+
+| | Captain | Vice Captain |
+|--|---------|--------------|
+| **Player** | **{captain.get("web_name", "N/A")}** | {vice.get("web_name", "N/A")} |
+| **Position** | {captain.get("position", "")} | {vice.get("position", "")} |
+| **xP** | {captain.get("xP", 0):.2f} | {vice.get("xP", 0):.2f} |
+| **Captain Points** | {captain.get("captain_points", 0):.1f} | {vice.get("captain_points", 0):.1f} |
+| **Fixture** | {captain.get("fixture_outlook", "🟡")} | {vice.get("fixture_outlook", "🟡")} |
+| **Ownership** | {captain.get("ownership_pct", 0):.1f}% | {vice.get("ownership_pct", 0):.1f}% |
+"""
+            display_components.append(mo.md(captain_content))
+
+            # Template Comparison (if different from recommendation)
+            template_comparison = captain_data.get("template_comparison")
+            if template_comparison:
+                comparison_content = f"""
+### ⚠️ Template Comparison
+
+Your recommended captain (**{template_comparison.get("recommended_choice", "N/A")}**, {template_comparison.get("recommended_ownership", 0):.1f}% owned)
+differs from the template choice (**{template_comparison.get("template_choice", "N/A")}**, {template_comparison.get("template_ownership", 0):.1f}% owned).
+
+| Metric | Value |
+|--------|-------|
+| **xP Difference** | {template_comparison.get("xp_difference", 0):+.2f} |
+| **If Recommended Hauls** | {template_comparison.get("rank_upside_if_hauls", 0):+,} rank |
+| **If Recommended Blanks** | {template_comparison.get("rank_downside_if_blanks", 0):+,} rank |
+
+*Consider your risk tolerance when making the final decision.*
+"""
+                display_components.append(mo.md(comparison_content))
+
+            # Haul Probability Matrix
+            if show_haul_probs_toggle.value:
+                prob_rows = []
+                for c in captain_data.get("top_candidates", [])[:5]:
+                    probs = c.get("haul_probabilities", {})
+                    prob_rows.append(
+                        {
+                            "Player": c.get("web_name", ""),
+                            "Blank (0-3)": f"{probs.get('blank_prob', 0):.0f}%",
+                            "Return (4-8)": f"{probs.get('return_prob', 0):.0f}%",
+                            "Haul (9+)": f"{probs.get('haul_prob', 0):.0f}%",
+                            "xP ± σ": f"{c.get('xP', 0):.1f} ± {c.get('xP_uncertainty', 0):.1f}",
+                        }
+                    )
+
+                if prob_rows:
+                    display_components.append(mo.md("### 🎲 Haul Probability Matrix"))
+                    display_components.append(
+                        mo.ui.table(_pd.DataFrame(prob_rows), page_size=5)
+                    )
+
+            # Rank Impact Analysis
+            if show_rank_impact_toggle.value:
+                impact_rows = []
+                for c in captain_data.get("top_candidates", [])[:5]:
+                    impact = c.get("rank_impact", {})
+                    impact_rows.append(
+                        {
+                            "Player": c.get("web_name", ""),
+                            "Ownership": f"{c.get('ownership_pct', 0):.1f}%",
+                            "Category": impact.get("ownership_category", "").title(),
+                            "If Blank": f"{impact.get('blank_rank_change', 0):+,}",
+                            "If Return": f"{impact.get('return_rank_change', 0):+,}",
+                            "If Haul": f"{impact.get('haul_rank_change', 0):+,}",
+                            "Expected": f"{impact.get('expected_rank_change', 0):+,}",
+                        }
+                    )
+
+                if impact_rows:
+                    display_components.append(mo.md("### 📈 Expected Rank Impact"))
+                    display_components.append(
+                        mo.md(
+                            "*Positive = rank worsens, Negative = rank improves (green arrow)*"
+                        )
+                    )
+                    display_components.append(
+                        mo.ui.table(_pd.DataFrame(impact_rows), page_size=5)
+                    )
+
+            # Top Candidates Table
+            candidates_rows = []
+            for c in captain_data.get("top_candidates", []):
+                candidates_rows.append(
+                    {
+                        "Rank": c.get("strategy_rank", c.get("rank", 0)),
+                        "Player": c.get("web_name", ""),
+                        "Pos": c.get("position", ""),
+                        "xP": round(c.get("xP", 0), 2),
+                        "Captain Pts": round(c.get("captain_points", 0), 1),
+                        "Strategy Score": round(c.get("strategy_score", 0), 1),
+                        "Fixture": c.get("fixture_outlook", ""),
+                        "Risk": c.get("risk_level", ""),
+                    }
+                )
+
+            if candidates_rows:
+                display_components.append(mo.md("### 🏆 Top Captain Candidates"))
+                display_components.append(
+                    mo.ui.table(_pd.DataFrame(candidates_rows), page_size=5)
+                )
+
+            captain_display = mo.vstack(display_components)
+
+        except Exception as e:
+            import traceback as _traceback_captain
+
+            _error_details_captain = _traceback_captain.format_exc()
+            captain_display = mo.md(
+                f"❌ **Captain selection error:** {str(e)}\n\n```\n{_error_details_captain}\n```"
+            )
     else:
         captain_display = mo.md("""
-    **Please run transfer optimization first to enable captain selection.**
+### 👑 Captain Selection
 
-    Once you have an optimal starting 11, captain recommendations will appear here based on:
-    - Double points potential (XP × 2)
-    - Fixture difficulty and opponent strength
-    - Recent form and momentum indicators
-    - Minutes certainty and injury risk
+**Please run transfer optimization first to enable intelligent captain selection.**
 
-    ---
-    """)
+Once you have an optimal starting 11, captain recommendations will appear here with:
+- 📊 **Situation Analysis**: Your rank, momentum, and season phase
+- 🎯 **Strategy Recommendation**: Auto-detected or manual override
+- 🎲 **Haul Probabilities**: Blank/Return/Haul chances for each candidate
+- 📈 **Rank Impact**: Expected rank change for each captain choice
+- ⚠️ **Template Comparison**: Risk/reward vs the popular pick
+
+---
+""")
 
     captain_display
     return

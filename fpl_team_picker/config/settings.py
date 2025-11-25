@@ -526,6 +526,103 @@ class VisualizationConfig(BaseModel):
     )
 
 
+class CaptainSelectionConfig(BaseModel):
+    """Intelligent Captain Selection Configuration"""
+
+    # Strategy mode
+    strategy_mode: str = Field(
+        default="auto",
+        description="Captain strategy mode: 'auto' (situation-aware), 'template_lock' (always highest owned), "
+        "'protect_rank' (minimize downside), 'balanced' (xP-weighted), 'chase_rank' (differential focus), "
+        "'maximum_upside' (pure ceiling-seeking)",
+    )
+
+    @field_validator("strategy_mode")
+    @classmethod
+    def validate_strategy_mode(cls, v):
+        valid_modes = [
+            "auto",
+            "template_lock",
+            "protect_rank",
+            "balanced",
+            "chase_rank",
+            "maximum_upside",
+        ]
+        if v not in valid_modes:
+            raise ValueError(f"strategy_mode must be one of {valid_modes}")
+        return v
+
+    # Rank thresholds for auto-detection
+    elite_rank_threshold: int = Field(
+        default=100_000,
+        description="Rank threshold for 'protect_rank' recommendation",
+        ge=1,
+    )
+    comfortable_rank_threshold: int = Field(
+        default=500_000,
+        description="Rank threshold for 'balanced' recommendation",
+        ge=1,
+    )
+    chasing_rank_threshold: int = Field(
+        default=2_000_000,
+        description="Rank threshold for 'chase_rank' recommendation",
+        ge=1,
+    )
+
+    # Template ownership thresholds
+    template_ownership_threshold: float = Field(
+        default=50.0,
+        description="Ownership % above which a player is considered 'template'",
+        ge=20.0,
+        le=80.0,
+    )
+    high_ownership_threshold: float = Field(
+        default=30.0,
+        description="Ownership % for 'high ownership' classification",
+        ge=10.0,
+        le=60.0,
+    )
+
+    # Haul probability thresholds (from xP uncertainty)
+    blank_threshold: int = Field(
+        default=3,
+        description="Points at or below this are considered a 'blank'",
+        ge=0,
+        le=5,
+    )
+    return_threshold: int = Field(
+        default=8,
+        description="Points at or below this are considered a 'return' (above blank)",
+        ge=4,
+        le=12,
+    )
+    # Above return_threshold is a 'haul'
+
+    # Rank impact estimation
+    show_rank_impact: bool = Field(
+        default=True,
+        description="Show expected rank impact for each captain choice",
+    )
+    show_haul_probabilities: bool = Field(
+        default=True,
+        description="Show blank/return/haul probability matrix",
+    )
+
+    # Risk adjustment
+    differential_bonus_factor: float = Field(
+        default=1.5,
+        description="Multiplier for differential captain xP gain in chase_rank mode",
+        ge=1.0,
+        le=3.0,
+    )
+    template_safety_factor: float = Field(
+        default=1.3,
+        description="Multiplier for template captain in protect_rank mode",
+        ge=1.0,
+        le=2.0,
+    )
+
+
 class ChipCalendarConfig(BaseModel):
     """Chip Calendar and Deadline Configuration for 2025-26 Season"""
 
@@ -601,6 +698,10 @@ class FPLConfig(BaseModel):
     )
     chip_calendar: ChipCalendarConfig = Field(
         default_factory=ChipCalendarConfig, description="Chip Calendar Configuration"
+    )
+    captain_selection: CaptainSelectionConfig = Field(
+        default_factory=CaptainSelectionConfig,
+        description="Intelligent Captain Selection Configuration",
     )
 
     @model_validator(mode="after")
