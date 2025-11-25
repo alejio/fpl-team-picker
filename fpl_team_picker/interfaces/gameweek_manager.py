@@ -1247,6 +1247,16 @@ def _(mo):
         options=["5gw", "3gw", "1gw"], value="5gw", label="Optimization Horizon:"
     )
 
+    # Optimization method toggle: LP (optimal, fast) vs SA (exploratory)
+    optimization_method_toggle = mo.ui.radio(
+        options={
+            "Linear Programming (Optimal)": "linear_programming",
+            "Simulated Annealing (Exploratory)": "simulated_annealing",
+        },
+        value="Linear Programming (Optimal)",
+        label="Optimization Method:",
+    )
+
     mo.vstack(
         [
             mo.md("### ⚖️ Optimization Configuration"),
@@ -1271,10 +1281,24 @@ def _(mo):
                 "**3GW (Medium-term)**: Optimizes for 3-gameweek fixture outlook and form trends"
             ),
             mo.md("**1GW (Immediate)**: Focuses only on current gameweek performance"),
+            mo.md(""),
+            mo.md("**Optimization Method:**"),
+            optimization_method_toggle,
+            mo.md(
+                "**Linear Programming**: Guarantees optimal solution, fast (~1-2s), deterministic"
+            ),
+            mo.md(
+                "**Simulated Annealing**: Exploratory search, good for non-linear objectives (~10-45s)"
+            ),
             mo.md("---"),
         ]
     )
-    return free_hit_checkbox, free_transfer_selector, optimization_horizon_toggle
+    return (
+        free_hit_checkbox,
+        free_transfer_selector,
+        optimization_horizon_toggle,
+        optimization_method_toggle,
+    )
 
 
 @app.cell
@@ -1283,6 +1307,7 @@ def _(
     free_transfer_selector,
     mo,
     optimization_horizon_toggle,
+    optimization_method_toggle,
     players_with_xp,
 ):
     # Transfer Constraints UI - using PlayerAnalyticsService
@@ -1382,19 +1407,34 @@ def _(
         free_transfers_count = int(free_transfer_selector.value)
         is_free_hit = free_hit_checkbox.value
 
+        # Get optimization method label
+        method = (
+            optimization_method_toggle.value
+            if optimization_method_toggle.value
+            else "linear_programming"
+        )
+        method_label = "LP" if method == "linear_programming" else "SA"
+        method_desc = (
+            "Linear Programming (optimal)"
+            if method == "linear_programming"
+            else "Simulated Annealing (exploratory)"
+        )
+
         if is_free_hit:
-            button_label = "🎯 Run Free Hit Optimization (1GW)"
+            button_label = f"🎯 Run Free Hit Optimization (1GW, {method_label})"
             button_kind = "danger"  # Red for free hit
-            description = "*Free Hit chip: Rebuild squad for this gameweek only using 1GW strategy. £100m budget, squad reverts after deadline.*"
+            description = f"*Free Hit chip: Rebuild squad for this gameweek only using 1GW strategy. £100m budget, squad reverts after deadline. Using {method_desc}.*"
         elif free_transfers_count >= 15:
-            button_label = f"🃏 Run Wildcard Optimization ({horizon.upper()})"
+            button_label = (
+                f"🃏 Run Wildcard Optimization ({horizon.upper()}, {method_label})"
+            )
             button_kind = "warn"  # Yellow for wildcard
-            description = f"*Wildcard chip: Rebuild entire squad from scratch using {horizon.upper()} strategy. £100m budget reset, no transfer penalties.*"
+            description = f"*Wildcard chip: Rebuild entire squad from scratch using {horizon.upper()} strategy. £100m budget reset, no transfer penalties. Using {method_desc}.*"
         else:
-            button_label = f"🚀 Run {horizon.upper()} Optimization ({free_transfers_count} free transfer{'s' if free_transfers_count > 1 else ''})"
+            button_label = f"🚀 Run {horizon.upper()} Optimization ({free_transfers_count} FT, {method_label})"
             button_kind = "success"  # Green for normal
             max_transfers = min(free_transfers_count + 3, 15)
-            description = f"*The optimizer analyzes 0-{max_transfers} transfer scenarios using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties.*"
+            description = f"*The optimizer analyzes 0-{max_transfers} transfer scenarios using {horizon.upper()} strategy and recommends the approach with highest net expected points after penalties. Using {method_desc}.*"
 
         optimize_button = mo.ui.run_button(label=button_label, kind=button_kind)
 
@@ -1444,6 +1484,7 @@ def _(
     must_exclude_dropdown,
     must_include_dropdown,
     optimization_horizon_toggle,
+    optimization_method_toggle,
     optimize_button,
     players_with_xp,
 ):
@@ -1648,11 +1689,16 @@ def _(
                 )
 
                 # Use domain service for optimization
-                # Update config based on UI toggle
+                # Update config based on UI toggles
                 _config.optimization.optimization_horizon = (
                     optimization_horizon_toggle.value
                     if optimization_horizon_toggle.value
                     else "5gw"
+                )
+                _config.optimization.transfer_optimization_method = (
+                    optimization_method_toggle.value
+                    if optimization_method_toggle.value
+                    else "linear_programming"
                 )
                 _optimization_service = OptimizationService()
 
