@@ -2108,16 +2108,50 @@ class OptimizationService:
                 f"Team_Limit_{team}",
             )
 
-        # CONSTRAINT 5: Transfer limit (keep at least 15 - max_transfers from current squad)
+        # CONSTRAINT 5: Transfer limit and penalty
+        # We need to track transfers and penalize those beyond free_transfers
+        current_ids = set(current_squad_with_xp["player_id"].tolist())
+
         if not is_wildcard:
             max_transfers = config.optimization.max_transfers
-            current_ids = set(current_squad_with_xp["player_id"].tolist())
+
+            # Limit max transfers
             prob += (
                 pulp.lpSum(
                     [player_vars[pid] for pid in current_ids if pid in player_vars]
                 )
                 >= 15 - max_transfers,
                 "Transfer_Limit",
+            )
+
+            # Add transfer penalty to objective function
+            # penalty_transfers = max(0, num_transfers - free_transfers)
+            #                   = max(0, (15 - num_kept) - free_transfers)
+            # We use a continuous variable to model this
+            penalty_transfers = pulp.LpVariable(
+                "penalty_transfers", lowBound=0, cat="Continuous"
+            )
+
+            # num_kept = sum of current squad players selected
+            num_kept = pulp.lpSum(
+                [player_vars[pid] for pid in current_ids if pid in player_vars]
+            )
+            # num_transfers = 15 - num_kept
+            # penalty_transfers >= num_transfers - free_transfers
+            # penalty_transfers >= (15 - num_kept) - free_transfers
+            # penalty_transfers >= 15 - free_transfers - num_kept
+            prob += (
+                penalty_transfers >= 15 - free_transfers - num_kept,
+                "Penalty_Transfer_Lower_Bound",
+            )
+
+            # Subtract transfer penalty from objective (modify objective in-place)
+            # penalty = penalty_transfers * transfer_cost (default 4 points)
+            transfer_cost = config.optimization.transfer_cost
+            prob.objective += -transfer_cost * penalty_transfers
+
+            logger.info(
+                f"🔄 Transfer penalty: -{transfer_cost} pts per transfer beyond {free_transfers} free"
             )
 
         # CONSTRAINT 6: Must include players
