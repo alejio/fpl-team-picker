@@ -1087,7 +1087,11 @@ class DataOrchestrationService:
 
     def _fetch_manager_team_internal(self, previous_gameweek: int) -> Optional[Dict]:
         """
-        Fetch manager's team from previous gameweek
+        Fetch manager's team from previous gameweek.
+
+        Handles Free Hit chip correctly: After a Free Hit, the squad reverts to
+        the pre-Free Hit squad. So if Free Hit was used in previous_gameweek,
+        we load from previous_gameweek - 1 instead.
 
         Args:
             previous_gameweek: The gameweek to fetch team data from
@@ -1108,15 +1112,39 @@ class DataOrchestrationService:
                 logger.error("❌ No manager data found in database")
                 return None
 
-            # Get picks from previous gameweek with enhanced methods
+            # Check if Free Hit was used in the previous gameweek
+            # If so, squad reverts to pre-Free Hit squad (previous_gameweek - 1)
+            squad_gameweek = previous_gameweek
+            try:
+                chip_usage_df = client.get_my_chip_usage()
+                if not chip_usage_df.empty and "gameweek" in chip_usage_df.columns:
+                    # Check if free_hit was used in the previous gameweek
+                    free_hit_gws = chip_usage_df[
+                        chip_usage_df["chip_used"]
+                        .str.lower()
+                        .isin(["freehit", "free_hit"])
+                    ]["gameweek"].tolist()
+
+                    if previous_gameweek in free_hit_gws:
+                        # Free Hit was used - squad reverts to pre-Free Hit squad
+                        squad_gameweek = previous_gameweek - 1
+                        logger.info(
+                            f"🔄 Free Hit detected in GW{previous_gameweek} - "
+                            f"loading reverted squad from GW{squad_gameweek}"
+                        )
+            except Exception as e:
+                logger.warning(f"⚠️ Could not check Free Hit status: {str(e)[:50]}")
+                # Continue with original previous_gameweek
+
+            # Get picks from the appropriate gameweek
             try:
                 # Try to get historical picks for specific gameweek
                 historical_picks = client.get_my_picks_history(
-                    start_gw=previous_gameweek, end_gw=previous_gameweek
+                    start_gw=squad_gameweek, end_gw=squad_gameweek
                 )
                 if not historical_picks.empty:
                     current_picks = historical_picks
-                    logger.debug(f"✅ Found historical picks for GW{previous_gameweek}")
+                    logger.debug(f"✅ Found historical picks for GW{squad_gameweek}")
                 else:
                     # Fallback to current picks
                     current_picks = client.get_my_current_picks()
@@ -1168,7 +1196,7 @@ class DataOrchestrationService:
             }
 
             logger.info(
-                f"✅ Loaded team from GW{previous_gameweek}: {team_info['entry_name']}"
+                f"✅ Loaded team from GW{squad_gameweek}: {team_info['entry_name']}"
             )
             return team_info
 
