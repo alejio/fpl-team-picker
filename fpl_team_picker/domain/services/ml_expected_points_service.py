@@ -1147,10 +1147,13 @@ class MLExpectedPointsService:
 
     def _extract_uncertainty(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Extract prediction uncertainty from ensemble models (Random Forest, XGBoost, GradientBoosting).
+        Extract prediction uncertainty from ensemble models (Random Forest, XGBoost, LightGBM, GradientBoosting, AdaBoost).
 
         For Random Forest: Uses tree-level predictions to calculate standard deviation.
         For XGBoost: Uses booster tree predictions to calculate standard deviation.
+        For LightGBM: Uses booster tree predictions to calculate standard deviation.
+        For GradientBoosting: Uses staged predictions to calculate standard deviation.
+        For AdaBoost: Uses estimator predictions to calculate standard deviation.
         For other models: Returns zeros (no uncertainty available).
 
         Args:
@@ -1167,13 +1170,22 @@ class MLExpectedPointsService:
         if model is None:
             return np.zeros(len(X))
 
-        # Check if this is a RandomForest or XGBoost model
-        from sklearn.ensemble import RandomForestRegressor
+        # Import ensemble model types
+        from sklearn.ensemble import (
+            RandomForestRegressor,
+            GradientBoostingRegressor,
+            AdaBoostRegressor,
+        )
 
         try:
             from xgboost import XGBRegressor
         except ImportError:
             XGBRegressor = None
+
+        try:
+            from lightgbm import LGBMRegressor
+        except ImportError:
+            LGBMRegressor = None
 
         # Handle nested pipelines (e.g., RFE -> RandomForest/XGBoost)
         actual_model = model
@@ -1399,9 +1411,312 @@ class MLExpectedPointsService:
                     f"Check model training and pipeline structure. Error: {e}"
                 ) from e
 
-        # No uncertainty available for non-ensemble models
+        # Extract tree predictions for LightGBM
+        if LGBMRegressor and isinstance(actual_model, LGBMRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
+                    # Model is a pipeline, transform through all steps except final
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        _service_logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
+
+                # Ensure X_transformed is a numpy array or DataFrame
+                if not isinstance(X_transformed, (pd.DataFrame, np.ndarray)):
+                    X_transformed = pd.DataFrame(X_transformed)
+
+                # Get the booster object
+                booster = actual_model.booster_
+
+                # Get number of trees
+                n_trees = booster.num_trees()
+
+                if n_trees == 0:
+                    _service_logger.warning(
+                        "LightGBM model has no trees - returning zero uncertainty"
+                    )
+                    return np.zeros(len(X))
+
+                # Get predictions from individual trees
+                # LightGBM supports prediction with different iteration ranges
+                tree_predictions = []
+                for i in range(n_trees):
+                    pred = actual_model.predict(
+                        X_transformed, start_iteration=i, num_iteration=1
+                    )
+                    tree_predictions.append(pred)
+
+                # Convert to array: shape (n_trees, n_samples)
+                tree_predictions = np.array(tree_predictions)
+
+                # Calculate standard deviation across trees
+                uncertainty = np.std(tree_predictions, axis=0)
+
+                # LightGBM trees are typically weaker learners (lower learning rate)
+                # Scale uncertainty to account for this
+                learning_rate = getattr(actual_model, "learning_rate", 0.1)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                self._log_debug(
+                    f"✅ Extracted uncertainty from {n_trees} LightGBM trees ({len(uncertainty)} samples). "
+                    f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}, "
+                    f"Learning rate: {learning_rate}"
+                )
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract LightGBM uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has booster_: {hasattr(actual_model, 'booster_')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for LightGBM model. "
+                    f"This should not happen with properly trained LightGBM models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
+
+        # Extract tree predictions for GradientBoosting
+        if isinstance(actual_model, GradientBoostingRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
+                    # Model is a pipeline, transform through all steps except final
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        _service_logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
+
+                # Get number of estimators
+                n_estimators = len(actual_model.estimators_)
+
+                if n_estimators == 0:
+                    _service_logger.warning(
+                        "GradientBoosting model has no estimators - returning zero uncertainty"
+                    )
+                    return np.zeros(len(X))
+
+                # Use staged_predict to get cumulative predictions at each stage
+                # This gives us predictions after adding each tree
+                staged_preds = list(actual_model.staged_predict(X_transformed))
+
+                # Convert to array: shape (n_stages, n_samples)
+                staged_preds = np.array(staged_preds)
+
+                # Calculate individual tree contributions (differences between stages)
+                tree_contributions = np.zeros_like(staged_preds)
+                tree_contributions[0] = staged_preds[0]
+                for i in range(1, len(staged_preds)):
+                    tree_contributions[i] = staged_preds[i] - staged_preds[i - 1]
+
+                # Transpose to shape (n_samples, n_stages)
+                tree_contributions = tree_contributions.T
+
+                # Calculate standard deviation across tree contributions
+                uncertainty = np.std(tree_contributions, axis=1)
+
+                # GradientBoosting uses learning rate, scale accordingly
+                learning_rate = getattr(actual_model, "learning_rate", 0.1)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                self._log_debug(
+                    f"✅ Extracted uncertainty from {n_estimators} GradientBoosting trees ({len(uncertainty)} samples). "
+                    f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}, "
+                    f"Learning rate: {learning_rate}"
+                )
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract GradientBoosting uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for GradientBoosting model. "
+                    f"This should not happen with properly trained GradientBoosting models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
+
+        # Extract predictions for AdaBoost
+        if isinstance(actual_model, AdaBoostRegressor):
+            try:
+                # Transform features through the pipeline (excluding the model step)
+                feature_engineer = self.pipeline.named_steps.get("feature_engineer")
+                if feature_engineer is not None:
+                    X_transformed = feature_engineer.transform(X)
+                else:
+                    X_transformed = X
+
+                # Handle additional pipeline steps before the model
+                if hasattr(model, "named_steps") or (
+                    hasattr(model, "steps") and hasattr(model, "fit")
+                ):
+                    # Model is a pipeline, transform through all steps except final
+                    steps = (
+                        model.steps
+                        if hasattr(model, "steps")
+                        else list(model.named_steps.items())
+                    )
+                    for step_name, step_transformer in steps[:-1]:
+                        try:
+                            X_transformed = step_transformer.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through step '{step_name}' "
+                                f"({type(step_transformer).__name__}). "
+                                f"Expected features from previous step, got {X_transformed.shape[1]} features. "
+                                f"This may indicate a pipeline structure mismatch. Error: {e}"
+                            ) from e
+                elif hasattr(model, "estimator_"):
+                    # RFE or similar meta-estimator (standalone, not in a Pipeline)
+                    if hasattr(model, "transform"):
+                        try:
+                            X_transformed = model.transform(X_transformed)
+                        except ValueError as e:
+                            raise ValueError(
+                                f"Dimension mismatch when transforming through {type(model).__name__}. "
+                                f"Expected features matching fitted feature space, got {X_transformed.shape[1]} features. "
+                                f"Error: {e}"
+                            ) from e
+                    else:
+                        _service_logger.warning(
+                            f"Meta-estimator {type(model).__name__} has estimator_ but no transform method. "
+                            "Skipping transformation step."
+                        )
+
+                # Get number of estimators
+                n_estimators = len(actual_model.estimators_)
+
+                if n_estimators == 0:
+                    _service_logger.warning(
+                        "AdaBoost model has no estimators - returning zero uncertainty"
+                    )
+                    return np.zeros(len(X))
+
+                # Use staged_predict to get cumulative predictions at each stage
+                staged_preds = list(actual_model.staged_predict(X_transformed))
+
+                # Convert to array: shape (n_stages, n_samples)
+                staged_preds = np.array(staged_preds)
+
+                # Calculate individual estimator contributions (differences between stages)
+                estimator_contributions = np.zeros_like(staged_preds)
+                estimator_contributions[0] = staged_preds[0]
+                for i in range(1, len(staged_preds)):
+                    estimator_contributions[i] = staged_preds[i] - staged_preds[i - 1]
+
+                # Transpose to shape (n_samples, n_stages)
+                estimator_contributions = estimator_contributions.T
+
+                # Calculate standard deviation across estimator contributions
+                uncertainty = np.std(estimator_contributions, axis=1)
+
+                # AdaBoost implicitly scales contributions, no additional scaling needed
+                # (learning rate is applied through estimator weights)
+
+                self._log_debug(
+                    f"✅ Extracted uncertainty from {n_estimators} AdaBoost estimators ({len(uncertainty)} samples). "
+                    f"Mean uncertainty: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+                )
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract AdaBoost uncertainty. "
+                    f"Model type: {type(actual_model).__name__}, "
+                    f"Has estimators_: {hasattr(actual_model, 'estimators_')}, "
+                    f"Error: {e}"
+                )
+                raise ValueError(
+                    f"Uncertainty extraction failed for AdaBoost model. "
+                    f"This should not happen with properly trained AdaBoost models. "
+                    f"Check model training and pipeline structure. Error: {e}"
+                ) from e
+
+        # No uncertainty available for non-ensemble models (Ridge, Lasso, ElasticNet)
         self._log_debug(
-            f"Model type {type(actual_model).__name__} does not support uncertainty extraction"
+            f"Model type {type(actual_model).__name__} does not support uncertainty extraction - returning zeros"
         )
         return np.zeros(len(X))
 

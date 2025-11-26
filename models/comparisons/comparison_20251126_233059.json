@@ -1,0 +1,91 @@
+{
+  "timestamp": "20251126_233059",
+  "mode": "evaluate",
+  "parameters": {
+    "start_gw": 1,
+    "end_gw": 12,
+    "holdout_gws": 1,
+    "feature_selection": "rfe-smart",
+    "keep_penalty_features": true,
+    "preprocessing": "grouped",
+    "scorer": "fpl_comprehensive",
+    "n_trials": 20
+  },
+  "results": [
+    {
+      "rank": 1,
+      "model_name": "gradient-boost",
+      "metrics": {
+        "mae": 0.316,
+        "rmse": 0.615,
+        "spearman": 0.859,
+        "captain_accuracy": 0.42857142857142855,
+        "top15_overlap": 0.7614285714285715
+      },
+      "composite_score": 97.5,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 2,
+      "model_name": "xgboost",
+      "metrics": {
+        "mae": 0.417,
+        "rmse": 0.764,
+        "spearman": 0.841,
+        "captain_accuracy": 0.2857142857142857,
+        "top15_overlap": 0.7042857142857143
+      },
+      "composite_score": 81.11302562087964,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 3,
+      "model_name": "lightgbm",
+      "metrics": {
+        "mae": 0.511,
+        "rmse": 0.989,
+        "spearman": 0.829,
+        "captain_accuracy": 0.42857142857142855,
+        "top15_overlap": 0.6471428571428571
+      },
+      "composite_score": 71.05213212400162,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 4,
+      "model_name": "random-forest",
+      "metrics": {
+        "mae": 0.675,
+        "rmse": 1.39,
+        "spearman": 0.823,
+        "captain_accuracy": 0.0,
+        "top15_overlap": 0.49714285714285716
+      },
+      "composite_score": 46.90349855027068,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 5,
+      "model_name": "adaboost",
+      "metrics": {
+        "mae": 1.117,
+        "rmse": 1.89,
+        "spearman": 0.776,
+        "captain_accuracy": 0.5714285714285714,
+        "top15_overlap": 0.2742857142857143
+      },
+      "composite_score": 10.0,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    }
+  ]
+}

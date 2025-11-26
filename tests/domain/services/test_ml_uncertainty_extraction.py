@@ -278,6 +278,230 @@ class TestUncertaintyExtraction:
 
         assert n_trees > 0, "Model should have trees"
 
+    def test_gradient_boosting_uncertainty_extraction(self):
+        """Test that GradientBoosting models can extract tree-level uncertainty"""
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        # Create a simple GradientBoosting model
+        gb_model = GradientBoostingRegressor(
+            n_estimators=50, learning_rate=0.1, random_state=42
+        )
+
+        # Create dummy training data with some noise
+        np.random.seed(42)
+        X_train = pd.DataFrame(
+            {
+                "feature_1": np.random.randn(200),
+                "feature_2": np.random.randn(200),
+                "feature_3": np.random.randn(200),
+            }
+        )
+        # Create target with some non-linear relationship
+        y_train = (
+            X_train["feature_1"] ** 2
+            + X_train["feature_2"]
+            + np.random.randn(200) * 0.5
+        )
+
+        # Train the model
+        gb_model.fit(X_train, y_train)
+
+        # Create a pipeline with the model
+        pipeline = Pipeline([("model", gb_model)])
+
+        # Create service and set pipeline
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = pipeline
+
+        # Create test data
+        X_test = pd.DataFrame(
+            {
+                "feature_1": np.linspace(-3, 3, 20),
+                "feature_2": np.linspace(-2, 2, 20),
+                "feature_3": np.random.randn(20),
+            }
+        )
+
+        # Extract uncertainty
+        uncertainty = service._extract_uncertainty(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test), (
+            "Uncertainty array length should match input"
+        )
+        assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+        print(
+            f"\nGradientBoosting Uncertainty stats: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}"
+        )
+        assert uncertainty.max() >= 0, "Should have valid uncertainty values"
+
+    def test_adaboost_uncertainty_extraction(self):
+        """Test that AdaBoost models can extract estimator-level uncertainty"""
+        from sklearn.ensemble import AdaBoostRegressor
+
+        # Create a simple AdaBoost model
+        ada_model = AdaBoostRegressor(
+            n_estimators=50, learning_rate=1.0, random_state=42
+        )
+
+        # Create dummy training data with some noise
+        np.random.seed(42)
+        X_train = pd.DataFrame(
+            {
+                "feature_1": np.random.randn(200),
+                "feature_2": np.random.randn(200),
+                "feature_3": np.random.randn(200),
+            }
+        )
+        # Create target with some non-linear relationship
+        y_train = (
+            X_train["feature_1"] ** 2
+            + X_train["feature_2"]
+            + np.random.randn(200) * 0.5
+        )
+
+        # Train the model
+        ada_model.fit(X_train, y_train)
+
+        # Create a pipeline with the model
+        pipeline = Pipeline([("model", ada_model)])
+
+        # Create service and set pipeline
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = pipeline
+
+        # Create test data
+        X_test = pd.DataFrame(
+            {
+                "feature_1": np.linspace(-3, 3, 20),
+                "feature_2": np.linspace(-2, 2, 20),
+                "feature_3": np.random.randn(20),
+            }
+        )
+
+        # Extract uncertainty
+        uncertainty = service._extract_uncertainty(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test), (
+            "Uncertainty array length should match input"
+        )
+        assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+        print(
+            f"\nAdaBoost Uncertainty stats: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}"
+        )
+        assert uncertainty.max() >= 0, "Should have valid uncertainty values"
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("lightgbm", reason="LightGBM not installed"),
+        reason="LightGBM not installed",
+    )
+    def test_lightgbm_uncertainty_extraction(self):
+        """Test that LightGBM models can extract tree-level uncertainty"""
+        from lightgbm import LGBMRegressor
+
+        # Create a simple LightGBM model
+        lgbm_model = LGBMRegressor(
+            n_estimators=50, learning_rate=0.1, random_state=42, verbose=-1
+        )
+
+        # Create dummy training data with some noise
+        np.random.seed(42)
+        X_train = pd.DataFrame(
+            {
+                "feature_1": np.random.randn(200),
+                "feature_2": np.random.randn(200),
+                "feature_3": np.random.randn(200),
+            }
+        )
+        # Create target with some non-linear relationship
+        y_train = (
+            X_train["feature_1"] ** 2
+            + X_train["feature_2"]
+            + np.random.randn(200) * 0.5
+        )
+
+        # Train the model
+        lgbm_model.fit(X_train, y_train)
+
+        # Create a pipeline with the model
+        pipeline = Pipeline([("model", lgbm_model)])
+
+        # Create service and set pipeline
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = pipeline
+
+        # Create test data
+        X_test = pd.DataFrame(
+            {
+                "feature_1": np.linspace(-3, 3, 20),
+                "feature_2": np.linspace(-2, 2, 20),
+                "feature_3": np.random.randn(20),
+            }
+        )
+
+        # Extract uncertainty
+        uncertainty = service._extract_uncertainty(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test), (
+            "Uncertainty array length should match input"
+        )
+        assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+        print(
+            f"\nLightGBM Uncertainty stats: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}"
+        )
+        assert uncertainty.max() >= 0, "Should have valid uncertainty values"
+
+    def test_gradient_boosting_with_nested_pipeline(self):
+        """Test GradientBoosting uncertainty extraction with nested pipeline"""
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        # Create a pipeline with preprocessing
+        gb_model = GradientBoostingRegressor(
+            n_estimators=50, learning_rate=0.1, random_state=42
+        )
+
+        nested_pipeline = Pipeline([("scaler", StandardScaler()), ("gb", gb_model)])
+
+        # Create dummy training data
+        X_train = pd.DataFrame(
+            {
+                "feature_1": np.random.randn(100),
+                "feature_2": np.random.randn(100),
+                "feature_3": np.random.randn(100),
+            }
+        )
+        y_train = np.random.randn(100)
+
+        # Train the pipeline
+        nested_pipeline.fit(X_train, y_train)
+
+        # Wrap in another pipeline to simulate full structure
+        full_pipeline = Pipeline([("model", nested_pipeline)])
+
+        # Create service and set pipeline
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = full_pipeline
+
+        # Create test data
+        X_test = pd.DataFrame(
+            {
+                "feature_1": np.random.randn(20),
+                "feature_2": np.random.randn(20),
+                "feature_3": np.random.randn(20),
+            }
+        )
+
+        # Extract uncertainty
+        uncertainty = service._extract_uncertainty(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test), (
+            "Uncertainty array length should match input"
+        )
+        assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

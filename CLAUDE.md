@@ -102,12 +102,23 @@ Install: `uv sync`
 
 **Quick Start**:
 ```bash
-# Retrain XGBoost with improved hyperparameters
-uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor xgboost --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber --n-trials 50
+# Single model training
+uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor xgboost --feature-selection rfe-smart --keep-penalty-features --scorer fpl_comprehensive --n-trials 50
 
-# Or use RandomForest (more robust to hyperparameters)
-uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor random-forest --feature-selection rfe-smart --keep-penalty-features --scorer fpl_weighted_huber --n-trials 30
+# Compare ALL 5 ensemble models (RandomForest, XGBoost, LightGBM, GradientBoosting, AdaBoost)
+uv run python scripts/compare_all_models.py --end-gw 12 --holdout-gws 2 --feature-selection rfe-smart --keep-penalty-features --n-trials 20
+
+# Quick comparison (fewer trials, faster results)
+uv run python scripts/compare_all_models.py --end-gw 12 --quick
 ```
+
+**Multi-Model Comparison Tool** (`scripts/compare_all_models.py`):
+- **Compare all 5 uncertainty-supporting models in one command**
+- Trains & evaluates RandomForest, XGBoost, LightGBM, GradientBoosting, AdaBoost
+- Automatic ranking by composite score (MAE 40%, Spearman 30%, RMSE 20%, Captain Accuracy 10%)
+- Parallel execution support (`--parallel` flag for simultaneous training)
+- Saves comparison report to `models/comparisons/comparison_{timestamp}.json`
+- Identifies best model automatically with comprehensive metrics
 
 **TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
 - MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)
@@ -128,6 +139,10 @@ uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor
 - **Uncertainty Quantification**: Tree-level variance for ensemble models (returns `xP_uncertainty` column)
   - **Random Forest**: Standard deviation across individual tree predictions
   - **XGBoost**: Standard deviation of incremental tree contributions, scaled by learning rate
+  - **LightGBM**: Standard deviation across individual tree predictions, scaled by learning rate
+  - **GradientBoosting**: Standard deviation of tree contributions from staged predictions, scaled by learning rate
+  - **AdaBoost**: Standard deviation of estimator contributions from staged predictions
+  - **Ridge/Lasso/ElasticNet**: Returns zero uncertainty (non-ensemble models)
 - Extracts per-player prediction uncertainty from ensemble disagreement
 - Requires .joblib artifact from custom_pipeline_optimizer.py
 - Config: `config.xp_model.ml_model_path = "models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib"`
