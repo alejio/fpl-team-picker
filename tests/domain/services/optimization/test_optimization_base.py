@@ -1,7 +1,9 @@
-"""Tests for OptimizationService availability adjustment functionality.
+"""Tests for optimization base functionality.
 
-Tests that the optimizer correctly accounts for player injuries and availability
-when making team selection decisions.
+Tests for:
+- get_adjusted_xp() method for availability adjustment
+- Formation enumeration utilities
+- Constraint validation
 """
 
 import pytest
