@@ -625,9 +625,9 @@ class SquadGenerationMixin(TransferOptimizationMixin):
         starting_11_ids = {p["player_id"] for p in starting_11}
         bench_players = [p for p in squad if p["player_id"] not in starting_11_ids]
 
-        # Get team counts from starting 11 (bench replacements must respect 3-per-team)
+        # Initialize team counts from ALL 15 original players (squad is already valid)
         team_counts = {}
-        for p in starting_11:
+        for p in squad:
             team = p.get("team", p.get("team_id"))
             team_counts[team] = team_counts.get(team, 0) + 1
 
@@ -643,8 +643,12 @@ class SquadGenerationMixin(TransferOptimizationMixin):
             if bench_player["player_id"] in must_include_ids:
                 new_squad.append(bench_player.copy())
                 squad_ids.add(bench_player["player_id"])
-                team_counts[old_team] = team_counts.get(old_team, 0) + 1
+                # Team count unchanged - player stays
                 continue
+
+            # When replacing, we're removing from old_team first
+            # Temporarily decrement to allow finding valid replacements
+            team_counts[old_team] = team_counts.get(old_team, 1) - 1
 
             # Find cheapest valid replacement
             candidates = valid_players[
@@ -653,24 +657,32 @@ class SquadGenerationMixin(TransferOptimizationMixin):
                 & (~valid_players["player_id"].isin(must_exclude_ids))
             ].copy()
 
-            # Apply 3-per-team constraint
+            # Apply 3-per-team constraint (old_team already decremented)
             def team_ok(team):
                 return team_counts.get(team, 0) < 3
 
             candidates = candidates[candidates["team"].apply(team_ok)]
 
             if len(candidates) == 0:
-                # No replacement found, keep original
+                # No replacement found, keep original (restore old_team count)
                 new_squad.append(bench_player.copy())
                 squad_ids.add(bench_player["player_id"])
                 team_counts[old_team] = team_counts.get(old_team, 0) + 1
             else:
-                # Pick cheapest
+                # Pick cheapest, but only if it's actually cheaper than current
                 cheapest = candidates.nsmallest(1, "price").iloc[0]
-                new_squad.append(cheapest.to_dict())
-                squad_ids.add(cheapest["player_id"])
-                new_team = cheapest["team"]
-                team_counts[new_team] = team_counts.get(new_team, 0) + 1
+                if cheapest["price"] < bench_player["price"]:
+                    # Replace with cheaper option
+                    new_squad.append(cheapest.to_dict())
+                    squad_ids.add(cheapest["player_id"])
+                    new_team = cheapest["team"]
+                    team_counts[new_team] = team_counts.get(new_team, 0) + 1
+                    # old_team stays decremented (player removed)
+                else:
+                    # Keep original - no cheaper alternative available (restore old_team count)
+                    new_squad.append(bench_player.copy())
+                    squad_ids.add(bench_player["player_id"])
+                    team_counts[old_team] = team_counts.get(old_team, 0) + 1
 
         return new_squad
 
