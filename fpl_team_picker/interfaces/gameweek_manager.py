@@ -368,38 +368,7 @@ def _(gameweek_data, gameweek_input, mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 2️⃣ Team Strength Analysis
-    """)
-    return
-
-
-@app.cell
-def _(gameweek_input, mo):
-    # TODO: I think this section is out of place. It should be moved to the
-    # fixture difficulty section
-    # Team strength analysis using visualization service
-    from fpl_team_picker.visualization.charts import create_team_strength_visualization
-
-    # Initialize once
-    team_strength_analysis = None
-
-    if gameweek_input.value:
-        team_strength_analysis = create_team_strength_visualization(
-            gameweek_input.value, mo
-        )
-    else:
-        team_strength_analysis = mo.md(
-            "Select target gameweek to see team strength analysis"
-        )
-
-    team_strength_analysis
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 3️⃣ Expected Points Engine
+    ## 2️⃣ Expected Points Engine
     """)
     return
 
@@ -854,7 +823,7 @@ def _(gameweek_data, mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 4️⃣ Form Analytics Dashboard
+    ## 3️⃣ Form Analytics Dashboard
     """)
     return
 
@@ -905,7 +874,7 @@ def _(gameweek_data, mo, players_with_xp):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 5️⃣ Player Performance Trends
+    ## 4️⃣ Player Performance Trends
     """)
     return
 
@@ -953,6 +922,37 @@ def _(gameweek_data, mo, players_with_xp):
         )
 
     trends_display
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## 5️⃣ Team Strength Analysis
+    """)
+    return
+
+
+@app.cell
+def _(gameweek_input, mo):
+    # TODO: I think this section is out of place. It should be moved to the
+    # fixture difficulty section
+    # Team strength analysis using visualization service
+    from fpl_team_picker.visualization.charts import create_team_strength_visualization
+
+    # Initialize once
+    team_strength_analysis = None
+
+    if gameweek_input.value:
+        team_strength_analysis = create_team_strength_visualization(
+            gameweek_input.value, mo
+        )
+    else:
+        team_strength_analysis = mo.md(
+            "Select target gameweek to see team strength analysis"
+        )
+
+    team_strength_analysis
     return
 
 
@@ -1971,7 +1971,11 @@ def _(mo):
     )
 
     captain_config_ui
-    return captain_strategy_dropdown, show_haul_probs_toggle, show_rank_impact_toggle
+    return (
+        captain_strategy_dropdown,
+        show_haul_probs_toggle,
+        show_rank_impact_toggle,
+    )
 
 
 @app.cell
@@ -2030,19 +2034,19 @@ def _(
             strategy_info = captain_data.get("strategy", {})
 
             situation_content = f"""
-### 📊 Your Situation Analysis
+    ### 📊 Your Situation Analysis
 
-| Factor | Status |
-|--------|--------|
-| **Overall Rank** | {situation.get("overall_rank", "N/A"):,} ({situation.get("rank_category", "N/A").title()}) |
-| **Season Phase** | {situation.get("season_phase", "N/A").title()} - {situation.get("phase_description", "")} |
-| **Momentum** | {situation.get("momentum", "N/A").title()} - {situation.get("momentum_description", "")} |
-| **Chip Status** | {situation.get("chip_description", "No chip active")} |
+    | Factor | Status |
+    |--------|--------|
+    | **Overall Rank** | {situation.get("overall_rank", "N/A"):,} ({situation.get("rank_category", "N/A").title()}) |
+    | **Season Phase** | {situation.get("season_phase", "N/A").title()} - {situation.get("phase_description", "")} |
+    | **Momentum** | {situation.get("momentum", "N/A").title()} - {situation.get("momentum_description", "")} |
+    | **Chip Status** | {situation.get("chip_description", "No chip active")} |
 
-**Strategy:** {strategy_info.get("description", "N/A")}
+    **Strategy:** {strategy_info.get("description", "N/A")}
 
-*{situation.get("reasoning", "")}*
-"""
+    *{situation.get("reasoning", "")}*
+    """
             display_components.append(mo.md(situation_content))
 
             # Captain Recommendation
@@ -2050,36 +2054,36 @@ def _(
             vice = captain_data.get("vice_captain", {})
 
             captain_content = f"""
-### 👑 Captain Recommendation
+    ### 👑 Captain Recommendation
 
-| | Captain | Vice Captain |
-|--|---------|--------------|
-| **Player** | **{captain.get("web_name", "N/A")}** | {vice.get("web_name", "N/A")} |
-| **Position** | {captain.get("position", "")} | {vice.get("position", "")} |
-| **xP** | {captain.get("xP", 0):.2f} | {vice.get("xP", 0):.2f} |
-| **Captain Points** | {captain.get("captain_points", 0):.1f} | {vice.get("captain_points", 0):.1f} |
-| **Fixture** | {captain.get("fixture_outlook", "🟡")} | {vice.get("fixture_outlook", "🟡")} |
-| **Ownership** | {captain.get("ownership_pct", 0):.1f}% | {vice.get("ownership_pct", 0):.1f}% |
-"""
+    | | Captain | Vice Captain |
+    |--|---------|--------------|
+    | **Player** | **{captain.get("web_name", "N/A")}** | {vice.get("web_name", "N/A")} |
+    | **Position** | {captain.get("position", "")} | {vice.get("position", "")} |
+    | **xP** | {captain.get("xP", 0):.2f} | {vice.get("xP", 0):.2f} |
+    | **Captain Points** | {captain.get("captain_points", 0):.1f} | {vice.get("captain_points", 0):.1f} |
+    | **Fixture** | {captain.get("fixture_outlook", "🟡")} | {vice.get("fixture_outlook", "🟡")} |
+    | **Ownership** | {captain.get("ownership_pct", 0):.1f}% | {vice.get("ownership_pct", 0):.1f}% |
+    """
             display_components.append(mo.md(captain_content))
 
             # Template Comparison (if different from recommendation)
             template_comparison = captain_data.get("template_comparison")
             if template_comparison:
                 comparison_content = f"""
-### ⚠️ Template Comparison
+    ### ⚠️ Template Comparison
 
-Your recommended captain (**{template_comparison.get("recommended_choice", "N/A")}**, {template_comparison.get("recommended_ownership", 0):.1f}% owned)
-differs from the template choice (**{template_comparison.get("template_choice", "N/A")}**, {template_comparison.get("template_ownership", 0):.1f}% owned).
+    Your recommended captain (**{template_comparison.get("recommended_choice", "N/A")}**, {template_comparison.get("recommended_ownership", 0):.1f}% owned)
+    differs from the template choice (**{template_comparison.get("template_choice", "N/A")}**, {template_comparison.get("template_ownership", 0):.1f}% owned).
 
-| Metric | Value |
-|--------|-------|
-| **xP Difference** | {template_comparison.get("xp_difference", 0):+.2f} |
-| **If Recommended Hauls** | {template_comparison.get("rank_upside_if_hauls", 0):+,} rank |
-| **If Recommended Blanks** | {template_comparison.get("rank_downside_if_blanks", 0):+,} rank |
+    | Metric | Value |
+    |--------|-------|
+    | **xP Difference** | {template_comparison.get("xp_difference", 0):+.2f} |
+    | **If Recommended Hauls** | {template_comparison.get("rank_upside_if_hauls", 0):+,} rank |
+    | **If Recommended Blanks** | {template_comparison.get("rank_downside_if_blanks", 0):+,} rank |
 
-*Consider your risk tolerance when making the final decision.*
-"""
+    *Consider your risk tolerance when making the final decision.*
+    """
                 display_components.append(mo.md(comparison_content))
 
             # Haul Probability Matrix
@@ -2164,19 +2168,19 @@ differs from the template choice (**{template_comparison.get("template_choice", 
             )
     else:
         captain_display = mo.md("""
-### 👑 Captain Selection
+    ### 👑 Captain Selection
 
-**Please run transfer optimization first to enable intelligent captain selection.**
+    **Please run transfer optimization first to enable intelligent captain selection.**
 
-Once you have an optimal starting 11, captain recommendations will appear here with:
-- 📊 **Situation Analysis**: Your rank, momentum, and season phase
-- 🎯 **Strategy Recommendation**: Auto-detected or manual override
-- 🎲 **Haul Probabilities**: Blank/Return/Haul chances for each candidate
-- 📈 **Rank Impact**: Expected rank change for each captain choice
-- ⚠️ **Template Comparison**: Risk/reward vs the popular pick
+    Once you have an optimal starting 11, captain recommendations will appear here with:
+    - 📊 **Situation Analysis**: Your rank, momentum, and season phase
+    - 🎯 **Strategy Recommendation**: Auto-detected or manual override
+    - 🎲 **Haul Probabilities**: Blank/Return/Haul chances for each candidate
+    - 📈 **Rank Impact**: Expected rank change for each captain choice
+    - ⚠️ **Template Comparison**: Risk/reward vs the popular pick
 
----
-""")
+    ---
+    """)
 
     captain_display
     return
