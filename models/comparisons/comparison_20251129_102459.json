@@ -1,0 +1,91 @@
+{
+  "timestamp": "20251129_102459",
+  "mode": "evaluate",
+  "parameters": {
+    "start_gw": 1,
+    "end_gw": 12,
+    "holdout_gws": 2,
+    "feature_selection": "rfe-smart",
+    "keep_penalty_features": true,
+    "preprocessing": "grouped",
+    "scorer": "fpl_comprehensive",
+    "n_trials": 30
+  },
+  "results": [
+    {
+      "rank": 1,
+      "model_name": "lightgbm",
+      "metrics": {
+        "mae": 0.037,
+        "rmse": 0.076,
+        "spearman": 0.882,
+        "captain_accuracy": 0.7142857142857143,
+        "top15_overlap": 0.7042857142857143
+      },
+      "composite_score": 100.0,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 2,
+      "model_name": "gradient-boost",
+      "metrics": {
+        "mae": 0.271,
+        "rmse": 0.519,
+        "spearman": 0.866,
+        "captain_accuracy": 0.42857142857142855,
+        "top15_overlap": 0.6385714285714286
+      },
+      "composite_score": 76.60194512627814,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 3,
+      "model_name": "xgboost",
+      "metrics": {
+        "mae": 0.356,
+        "rmse": 0.636,
+        "spearman": 0.85,
+        "captain_accuracy": 0.42857142857142855,
+        "top15_overlap": 0.6
+      },
+      "composite_score": 67.29720523802831,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 4,
+      "model_name": "random-forest",
+      "metrics": {
+        "mae": 0.649,
+        "rmse": 1.355,
+        "spearman": 0.827,
+        "captain_accuracy": 0.14285714285714285,
+        "top15_overlap": 0.43
+      },
+      "composite_score": 36.49273512168435,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    },
+    {
+      "rank": 5,
+      "model_name": "adaboost",
+      "metrics": {
+        "mae": 1.14,
+        "rmse": 1.843,
+        "spearman": 0.784,
+        "captain_accuracy": 0.5714285714285714,
+        "top15_overlap": 0.35285714285714287
+      },
+      "composite_score": 7.5,
+      "pipeline_path": null,
+      "success": true,
+      "error": null
+    }
+  ]
+}

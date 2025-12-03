@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/gradient-boost_gw1-12_20251126_234932_pipeline.joblib",
+        default="models/custom/lightgbm_gw1-12_20251129_103326_pipeline.joblib",
         description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
