@@ -1,0 +1,561 @@
+\documentclass[11pt,a4paper]{article}
+
+% Only core packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{enumitem}
+
+\geometry{margin=2.5cm}
+
+% Title
+\title{%
+    \textbf{Critical Analysis of the FPL Team Picker Algorithm} \\[0.5em]
+    \large A Technical Review of the Expected Points Model, \\
+    Transfer Optimizer, Starting XI Selection, and Captain Strategy
+}
+
+\author{Algorithm Analysis Report \\ FPL Team Picker 2025--26}
+\date{December 2025}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This report provides a critical technical analysis of the Fantasy Premier League (FPL) Team Picker algorithm, consisting of four main components: (1) the Machine Learning Expected Points (xP) model with 122-feature engineering, (2) the Linear Programming / Simulated Annealing transfer optimizer, (3) the Starting XI selector with formation enumeration, and (4) the situation-aware captain selection system. We examine the mathematical foundations, implementation choices, and identify both strengths and weaknesses with recommendations for improvement.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%==============================================================================
+\section{System Architecture Overview}
+%==============================================================================
+
+The FPL Team Picker implements a layered optimization architecture with four distinct layers:
+
+\begin{enumerate}
+    \item \textbf{Prediction Layer}: ML Expected Points Service (122 features)
+    \item \textbf{Tactical Layer}: Transfer \& Squad Optimization (LP/SA)
+    \item \textbf{Selection Layer}: Starting XI \& Captain Selection
+    \item \textbf{Risk Layer}: Uncertainty Quantification \& Template Protection
+\end{enumerate}
+
+The core decision pipeline is:
+\[
+\text{Raw Data} \xrightarrow{\text{Feature Engineering}} \text{xP Predictions} \xrightarrow{\text{LP/SA}} \text{Optimal Squad} \xrightarrow{\text{Selection}} \text{Starting XI + Captain}
+\]
+
+%==============================================================================
+\section{Expected Points Model Training}
+%==============================================================================
+
+\subsection{Mathematical Formulation}
+
+The ML Expected Points model predicts the total points $y_i$ for player $i$ in gameweek $t+1$ using:
+
+\begin{equation}
+\hat{y}_{i,t+1} = f_\theta(\mathbf{x}_{i,t})
+\end{equation}
+
+where $f_\theta$ is a trained ensemble model (RandomForest, XGBoost, LightGBM, or GradientBoosting) and $\mathbf{x}_{i,t} \in \mathbb{R}^{122}$ is the feature vector constructed from historical data up to gameweek $t$.
+
+\subsection{Feature Engineering Architecture (122 Features)}
+
+The \texttt{FPLFeatureEngineer} transformer generates features across 12 categories:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{llr}
+\toprule
+\textbf{Category} & \textbf{Description} & \textbf{Count} \\
+\midrule
+Static Features & Price, position encoding, games played & 4 \\
+Cumulative Season Stats & Goals, assists, clean sheets, etc. & 11 \\
+Cumulative Per-90 Rates & Goals/90, points/90, xG/90 & 7 \\
+Rolling 5GW Form & Recent performance windows & 13 \\
+Rolling 5GW Per-90 & Efficiency over recent form & 3 \\
+Defensive Metrics & Goals conceded, saves, xGC & 4 \\
+Consistency \& Volatility & Std dev of points/minutes, form trend & 3 \\
+Team Features & Team-level rolling stats & 13 \\
+Fixture Features & Home/away, opponent strength & 6 \\
+Enhanced Ownership & Transfer momentum, bandwagon score & 5 \\
+Enhanced Value & Points per pound, price volatility & 4 \\
+Penalty/Set-Piece & Penalty, corner, FK taker flags & 4 \\
+Betting Odds & Win probability, expected goals & 15 \\
+Injury/Rotation Risk & Injury risk, rotation likelihood & 5 \\
+Venue-Specific Strength & Home/away attack/defense ratings & 6 \\
+Player Rankings & Form rank, ICT rank, tackles & 7 \\
+Data Quality Indicators & Flags for available data & 5 \\
+Elite Interactions & Elite player $\times$ fixture difficulty & 4 \\
+\midrule
+\textbf{Total} & & \textbf{122} \\
+\bottomrule
+\end{tabular}
+\caption{Feature categories in the ML pipeline}
+\end{table}
+
+\subsection{Temporal Leak Prevention}
+
+A critical design principle is \textbf{leak-free features}. All temporal features use strict lookback:
+
+\begin{equation}
+\text{rolling\_5gw\_points}_{i,t} = \frac{1}{5} \sum_{k=1}^{5} y_{i,t-k}
+\end{equation}
+
+The implementation uses \texttt{shift(1)} operations to ensure no future data leakage.
+
+\textbf{Exception}: Betting odds features are \textit{forward-looking} by nature (available before match kickoff) and require no temporal shift.
+
+\subsection{Uncertainty Quantification}
+
+The system extracts prediction uncertainty from ensemble disagreement:
+
+\begin{equation}
+\sigma_i = \text{std}\left(\{f_k(\mathbf{x}_i)\}_{k=1}^{K}\right)
+\end{equation}
+
+where $f_k$ represents individual trees in the ensemble. For boosting algorithms (XGBoost, LightGBM), tree contributions are scaled by learning rate:
+
+\begin{equation}
+\sigma_i^{\text{XGB}} = \frac{\text{std}(\text{tree contributions})}{\eta}
+\end{equation}
+
+where $\eta$ is the learning rate.
+
+\subsection{Strengths of the XP Model}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Comprehensive feature set}: 122 features capture diverse signal sources (form, team strength, betting markets, ownership dynamics)
+    \item \textbf{Leak-free design}: Strict temporal ordering prevents training-test contamination
+    \item \textbf{Uncertainty quantification}: Tree-level variance enables risk-aware decisions
+    \item \textbf{Domain-aware imputation}: Position-specific defaults instead of generic fillna(0)
+    \item \textbf{Per-gameweek team strength}: Avoids using future information for fixture difficulty
+    \item \textbf{Multi-horizon prediction}: Cascading 3GW/5GW predictions use synthetic data
+\end{itemize}
+
+\subsection{Weaknesses of the XP Model}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Feature redundancy}: Several highly correlated features exist (e.g., \texttt{net\_transfers\_gw} and \texttt{ownership\_velocity}). Feature selection via RFE helps but adds complexity.
+
+    \item \textbf{Limited temporal dynamics}: Rolling 5GW window is fixed; adaptive windows based on recent performance volatility could improve signal extraction.
+
+    \item \textbf{Position-agnostic model}: A single model predicts all positions, yet scoring mechanisms differ significantly (GKP: saves, DEF: clean sheets, FWD: goals). Position-specific models could improve accuracy.
+
+    \item \textbf{No explicit fixture sequence modeling}: Features capture opponent strength but not fixture \textit{patterns} (e.g., tough-easy-tough sequences that affect rotation).
+
+    \item \textbf{Betting odds availability}: Forward-looking betting features assume pre-match odds exist; for future gameweeks, these must be estimated or set to neutral defaults.
+
+    \item \textbf{Cold-start problem}: New players lack historical features. Current solution: fallback to position-based defaults, but this loses player-specific signal.
+\end{itemize}
+
+%==============================================================================
+\section{Transfer Optimization}
+%==============================================================================
+
+\subsection{Problem Formulation}
+
+The transfer optimization is formulated as an Integer Linear Program (ILP):
+
+\begin{align}
+\max_{\mathbf{x}} \quad & \sum_{i=1}^{N} \text{xP}_i \cdot x_i - c \cdot \max(0, T - F) \\
+\text{s.t.} \quad & \sum_{i=1}^{N} p_i \cdot x_i \leq B \quad \text{(budget)} \\
+& \sum_{i \in \mathcal{P}_j} x_i = n_j \quad \forall j \in \{\text{GKP, DEF, MID, FWD}\} \quad \text{(positions)} \\
+& \sum_{i \in \mathcal{T}_k} x_i \leq 3 \quad \forall k \in \text{Teams} \quad \text{(team limit)} \\
+& \sum_{i \in \mathcal{S}} x_i \geq 15 - M \quad \text{(transfer limit)} \\
+& x_i \in \{0, 1\} \quad \forall i
+\end{align}
+
+where:
+\begin{itemize}
+    \item $x_i = 1$ if player $i$ is in the squad
+    \item $\text{xP}_i$ is expected points for player $i$
+    \item $p_i$ is player price, $B$ is total budget
+    \item $c = 4$ is the transfer cost, $F$ is free transfers, $T$ is total transfers
+    \item $\mathcal{S}$ is the current squad, $M$ is max transfers allowed
+\end{itemize}
+
+\subsection{LP vs SA Comparison}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcc}
+\toprule
+\textbf{Aspect} & \textbf{Linear Programming} & \textbf{Simulated Annealing} \\
+\midrule
+Optimality & Guaranteed optimal & Approximate (95-99\%) \\
+Speed (transfers) & 1-2 seconds & 10-15 seconds \\
+Speed (wildcard) & 1-2 seconds & 30-60 seconds \\
+Determinism & Yes & No (seed required) \\
+Constraint handling & Native & Penalty functions \\
+Non-linear objectives & No & Yes \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of optimization methods}
+\end{table}
+
+\subsection{Starting XI Optimization}
+
+For 1-gameweek optimization, the LP additionally optimizes the starting lineup:
+
+\begin{align}
+\max \quad & \sum_{i=1}^{N} \text{xP}_i \cdot s_i - \beta \sum_{i=1}^{N} p_i (x_i - s_i) \\
+\text{s.t.} \quad & s_i \leq x_i \quad \forall i \quad \text{(can only start if in squad)} \\
+& \sum_{i=1}^{N} s_i = 11 \quad \text{(exactly 11 starters)} \\
+& \text{Formation constraints: } 1 \text{ GKP}, 3\text{--}5 \text{ DEF}, 2\text{--}5 \text{ MID}, 1\text{--}3 \text{ FWD}
+\end{align}
+
+The term $-\beta \sum p_i(x_i - s_i)$ penalizes expensive bench players, encouraging budget allocation to starters.
+
+\subsection{Strengths of Transfer Optimization}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Guaranteed optimality}: LP provides provably optimal solutions for the defined objective
+
+    \item \textbf{10-50x speedup}: CBC solver finds solutions in 1-2 seconds vs. 30+ seconds for SA
+
+    \item \textbf{Joint squad-and-XI optimization}: For 1GW, simultaneously optimizes who to buy and who to start
+
+    \item \textbf{Proper budget handling}: Uses selling price for current players, market price for new
+
+    \item \textbf{Safety check}: If LP solution is worse than keeping current squad, reverts to ``no transfer''
+
+    \item \textbf{Forced transfer handling}: Correctly handles unavailable players (injured/suspended)
+
+    \item \textbf{Free Hit support}: Recognizes Free Hit chip and optimizes for 1GW only
+\end{itemize}
+
+\subsection{Weaknesses of Transfer Optimization}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Myopic objective}: LP maximizes xP for current horizon but doesn't consider:
+    \begin{itemize}
+        \item Future fixture swings (selling Salah before DGW)
+        \item Price rises/falls and team value growth
+        \item Upcoming BGW/DGW chip strategies
+    \end{itemize}
+
+    \item \textbf{Linear objectives only}: Cannot directly optimize non-linear objectives like Sharpe ratio or variance minimization.
+
+    \item \textbf{No exploration}: LP always returns the same optimal point. For wildcards, users might want multiple near-optimal alternatives.
+
+    \item \textbf{Price volatility ignored}: A player about to rise \pounds 0.2m might be more valuable than xP alone suggests.
+
+    \item \textbf{Rolling transfer banking not modeled}: Cannot model ``bank this week to have 2 FT next week''.
+\end{itemize}
+
+%==============================================================================
+\section{Starting XI Selection}
+%==============================================================================
+
+\subsection{Formation Enumeration}
+
+The system enumerates all valid FPL formations and selects the one maximizing starting XI xP:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ccccc}
+\toprule
+Formation & GKP & DEF & MID & FWD \\
+\midrule
+3-4-3 & 1 & 3 & 4 & 3 \\
+3-5-2 & 1 & 3 & 5 & 2 \\
+4-3-3 & 1 & 4 & 3 & 3 \\
+4-4-2 & 1 & 4 & 4 & 2 \\
+4-5-1 & 1 & 4 & 5 & 1 \\
+5-3-2 & 1 & 5 & 3 & 2 \\
+5-4-1 & 1 & 5 & 4 & 1 \\
+\bottomrule
+\end{tabular}
+\caption{Valid FPL formations}
+\end{table}
+
+\textbf{Algorithm}:
+\begin{enumerate}
+    \item Sort players by xP within each position
+    \item For each valid formation $(d, m, w)$:
+    \begin{enumerate}
+        \item Select top 1 GKP, top $d$ DEF, top $m$ MID, top $w$ FWD
+        \item Calculate total xP for this formation
+    \end{enumerate}
+    \item Return formation with maximum xP
+\end{enumerate}
+
+\subsection{Availability Filtering}
+
+Players with status $\in \{i, s, u\}$ (injured, suspended, unavailable) are excluded from starting XI consideration \textit{before} formation enumeration.
+
+\subsection{Strengths of Starting XI Selection}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Exhaustive search}: All 7 valid formations evaluated, guaranteeing optimal selection
+
+    \item \textbf{xP-adaptive}: Naturally adapts formation based on where xP is concentrated
+
+    \item \textbf{Availability-aware}: Automatically excludes unavailable players
+
+    \item \textbf{Multi-horizon support}: Can optimize for 1GW, 3GW, or 5GW xP
+\end{itemize}
+
+\subsection{Weaknesses of Starting XI Selection}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{No auto-sub modeling}: FPL auto-substitutes bench players if starters don't play. Optimal bench order should consider auto-sub probabilities:
+    \[
+    \mathbb{E}[\text{Points}] = \sum_{i \in \text{XI}} \text{xP}_i \cdot P(\text{plays}_i) + \sum_{j \in \text{bench}} \text{xP}_j \cdot P(\text{autosub}_j)
+    \]
+
+    \item \textbf{Binary availability}: Players are either available or excluded. Doesn't model partial availability (e.g., 75\% chance of playing).
+
+    \item \textbf{Formation fixation}: Once selected, formation is fixed. No consideration of differential formations.
+
+    \item \textbf{No doubtful player strategy}: A doubtful premium might be better benched for a certain budget player to avoid 1-point cameos.
+\end{itemize}
+
+%==============================================================================
+\section{Captain Selection}
+%==============================================================================
+
+\subsection{Upside-Seeking Captain Score}
+
+The captain selection uses a \textbf{ceiling-seeking} approach rather than expected value:
+
+\begin{equation}
+\text{Captain Score}_i = 2 \cdot \text{xP}_i^{(90)} \cdot (1 + \alpha_{\text{own}} + \alpha_{\text{match}})
+\end{equation}
+
+where the 90th percentile upside is:
+\begin{equation}
+\text{xP}_i^{(90)} = \text{xP}_i + 1.28 \cdot \sigma_i
+\end{equation}
+
+\subsection{Template Protection}
+
+For high-ownership players ($>50\%$ ownership), a template protection bonus applies:
+
+\begin{equation}
+\alpha_{\text{own}} = \min\left(\frac{\text{ownership} - 50}{20}, 1\right) \cdot \text{fixture\_quality} \cdot 0.40
+\end{equation}
+
+This ensures that highly-owned players in favorable fixtures receive up to 40\% scoring boost, preventing rank-damaging differential picks against template.
+
+\subsection{Situation-Aware Strategy}
+
+The intelligent captain recommendation adapts strategy based on manager context:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Rank Category} & \textbf{Season Phase} & \textbf{Recommended Strategy} \\
+\midrule
+Elite ($<100k$) & Late & Template Lock \\
+Elite ($<100k$) & Early/Mid & Protect Rank \\
+Comfortable ($<500k$) & Any & Balanced \\
+Chasing ($<2M$) & Declining momentum & Chase Rank \\
+Trailing ($>2M$) & Any & Maximum Upside \\
+Any & Triple Captain active & Maximum Upside \\
+Any & Free Hit active & Chase Rank \\
+\bottomrule
+\end{tabular}
+\caption{Captain strategy auto-detection logic}
+\end{table}
+
+\subsection{Haul Probability Matrix}
+
+The system calculates outcome probabilities assuming normal distribution:
+
+\begin{align}
+P(\text{blank}) &= \Phi\left(\frac{\tau_{\text{blank}} - \text{xP}}{\sigma}\right) \\
+P(\text{return}) &= \Phi\left(\frac{\tau_{\text{return}} - \text{xP}}{\sigma}\right) - P(\text{blank}) \\
+P(\text{haul}) &= 1 - \Phi\left(\frac{\tau_{\text{return}} - \text{xP}}{\sigma}\right)
+\end{align}
+
+where $\tau_{\text{blank}} = 2$ and $\tau_{\text{return}} = 8$ are configurable thresholds.
+
+\subsection{Strengths of Captain Selection}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Ceiling-seeking philosophy}: Using 90th percentile prioritizes haul potential---correct for doubling points
+
+    \item \textbf{Template protection}: Avoids rank-destroying differential picks when template captain is clearly optimal
+
+    \item \textbf{Situation awareness}: Auto-detects appropriate strategy based on rank and season phase
+
+    \item \textbf{Betting odds integration}: Uses team win probability and expected goals for matchup quality
+
+    \item \textbf{Haul probability transparency}: Shows blank/return/haul probabilities to inform decision
+
+    \item \textbf{Rank impact estimation}: Models differential potential based on ownership
+\end{itemize}
+
+\subsection{Weaknesses of Captain Selection}
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Gaussian assumption}: Real FPL point distributions are heavily skewed (many 2s, occasional 15+). Normal distribution underestimates blank probability.
+
+    \item \textbf{No historical captain accuracy tracking}: System doesn't learn from past captain decisions. A feedback loop could improve calibration.
+
+    \item \textbf{Vice-captain underutilized}: Simply second-highest scorer. Should consider correlation with captain and ownership differential.
+
+    \item \textbf{Simplistic rank impact model}: Uses rough heuristics. Could be improved with historical rank movement data.
+
+    \item \textbf{No mini-league awareness}: Captain strategy should differ in head-to-head mini-leagues (target opponent's captain).
+
+    \item \textbf{Double gameweek captain}: No special handling for players with two fixtures---should boost their ceiling.
+\end{itemize}
+
+%==============================================================================
+\section{End-to-End System Analysis}
+%==============================================================================
+
+\subsection{Data Pipeline}
+
+The data flow through the system:
+
+\begin{enumerate}
+    \item \textbf{Data Loading}: 12 data sources including historical performance, fixtures, betting features
+
+    \item \textbf{Feature Engineering}: Raw data $\rightarrow$ 122 leak-free features
+
+    \item \textbf{Model Training}: Walk-forward CV with temporal splits
+
+    \item \textbf{Inference}: Load trained model, generate xP predictions with uncertainty
+
+    \item \textbf{Optimization}: LP/SA for transfer decisions
+
+    \item \textbf{Selection}: Starting XI and bench order
+
+    \item \textbf{Captain}: Situation-aware captain pick
+\end{enumerate}
+
+\subsection{Cross-Validation Strategy}
+
+Walk-forward validation ensures temporal integrity. For training on GW 1--$n$, test on GW $n+1$. The first trainable GW is 6 due to 5GW rolling feature requirements.
+
+\subsection{Model Comparison Framework}
+
+The system supports systematic model comparison:
+
+\begin{equation}
+\text{Composite Score} = 0.4 \cdot \text{MAE} + 0.3 \cdot \text{Spearman} + 0.2 \cdot \text{RMSE} + 0.1 \cdot \text{Captain Accuracy}
+\end{equation}
+
+%==============================================================================
+\section{Identified Gaps and Recommendations}
+%==============================================================================
+
+\subsection{Strategic Gaps}
+
+\begin{enumerate}
+    \item \textbf{BGW/DGW Planning}: System lacks proactive handling of blank and double gameweeks. \textit{Recommendation}: Integrate FPL calendar with lookahead optimization.
+
+    \item \textbf{Chip Strategy}: No systematic chip timing optimization. \textit{Recommendation}: Add chip assessment with simulation.
+
+    \item \textbf{Team Value Management}: Price change prediction not integrated. \textit{Recommendation}: Add expected value growth as secondary objective.
+
+    \item \textbf{Transfer Banking}: LP cannot model ``save transfer'' strategy. \textit{Recommendation}: Multi-stage stochastic programming or heuristic rules.
+\end{enumerate}
+
+\subsection{Model Improvements}
+
+\begin{enumerate}
+    \item \textbf{Position-Specific Models}: Train separate models for each position to capture scoring differences.
+
+    \item \textbf{Non-Gaussian Uncertainty}: Replace normal assumption with empirical distribution for more accurate haul/blank probabilities.
+
+    \item \textbf{Adaptive Rolling Windows}: Use player-specific window sizes based on form stability.
+
+    \item \textbf{Auto-Sub Modeling}: Incorporate playing time uncertainty into starting XI decisions.
+\end{enumerate}
+
+\subsection{Optimization Improvements}
+
+\begin{enumerate}
+    \item \textbf{Multi-Week LP}: Extend LP to 3-5 gameweek horizon with transfer continuity constraints.
+
+    \item \textbf{Robust Optimization}: Optimize for worst-case or CVaR under prediction uncertainty.
+
+    \item \textbf{Exploration Mode}: SA generates diverse near-optimal squads for wildcard exploration.
+\end{enumerate}
+
+%==============================================================================
+\section{Conclusion}
+%==============================================================================
+
+The FPL Team Picker implements a sophisticated multi-stage optimization system with notable strengths:
+
+\begin{itemize}
+    \item \textbf{Comprehensive ML pipeline}: 122 leak-free features with uncertainty quantification
+    \item \textbf{Provably optimal transfers}: LP guarantees optimal solution for defined objective
+    \item \textbf{Situation-aware captaincy}: Adapts strategy to rank, season phase, and chip status
+    \item \textbf{Clean architecture}: Well-separated domain services with clear responsibilities
+\end{itemize}
+
+Key areas for improvement:
+
+\begin{itemize}
+    \item \textbf{Strategic planning}: BGW/DGW awareness, chip optimization, team value growth
+    \item \textbf{Distributional modeling}: Non-Gaussian uncertainty for more accurate captain analysis
+    \item \textbf{Multi-week horizon}: Extend LP to consider future fixture swings
+    \item \textbf{Position-specific models}: Capture scoring mechanism differences across positions
+\end{itemize}
+
+The system provides a strong foundation for competitive FPL management, with the LP optimizer representing a significant improvement over pure heuristic approaches. The main limitation is the myopic nature of single-gameweek optimization---extending to multi-week planning would provide substantial strategic benefit.
+
+\appendix
+
+\section{Mathematical Notation Summary}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+\textbf{Symbol} & \textbf{Description} \\
+\midrule
+$y_i$ & Actual points for player $i$ \\
+$\hat{y}_i$ & Predicted expected points (xP) \\
+$\sigma_i$ & Prediction uncertainty (std dev) \\
+$x_i$ & Binary decision variable (1 if in squad) \\
+$s_i$ & Binary starter variable (1 if in starting XI) \\
+$p_i$ & Player price \\
+$B$ & Total budget \\
+$F$ & Free transfers \\
+$c$ & Transfer cost (4 points) \\
+$\mathcal{P}_j$ & Set of players in position $j$ \\
+$\mathcal{T}_k$ & Set of players from team $k$ \\
+$\mathcal{S}$ & Current squad player set \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Configuration Parameters}
+
+Key configurable parameters in the system:
+
+\begin{verbatim}
+# Feature Engineering
+rolling_window: 5  # GW lookback for form features
+
+# LP Optimization
+transfer_cost: 4  # Points penalty per transfer
+max_transfers: 5  # Maximum transfers allowed
+
+# Captain Selection
+elite_rank_threshold: 100000
+comfortable_rank_threshold: 500000
+chasing_rank_threshold: 2000000
+blank_threshold: 2  # Points below this = blank
+return_threshold: 8  # Points above this = haul
+template_ownership_threshold: 50  # % for template
+\end{verbatim}
+
+\end{document}
