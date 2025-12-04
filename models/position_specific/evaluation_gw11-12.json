@@ -1,0 +1,62 @@
+{
+  "overall": {
+    "unified": {
+      "mae": 1.1235200278561315,
+      "rmse": 2.1983468870987144,
+      "spearman": 0.6881515352727072
+    },
+    "position_specific": {
+      "mae": 1.1188176645288426,
+      "rmse": 2.1436974451274917,
+      "spearman": 0.7217487333906601
+    }
+  },
+  "per_position": {
+    "GKP": {
+      "n_samples": 173,
+      "unified_mae": 0.7271454506477865,
+      "specific_mae": 0.6795739642107866,
+      "improvement": 0.04757148643699982,
+      "improvement_pct": 6.542224309403322,
+      "hybrid_mae": 0.6795739642107866
+    },
+    "DEF": {
+      "n_samples": 498,
+      "unified_mae": 1.2743928305066106,
+      "specific_mae": 1.2931141742451602,
+      "improvement": -0.018721343738549612,
+      "improvement_pct": -1.469040259046914,
+      "hybrid_mae": 1.2743928305066106
+    },
+    "MID": {
+      "n_samples": 670,
+      "unified_mae": 1.1110211859392014,
+      "specific_mae": 1.1239758016245298,
+      "improvement": -0.012954615685328408,
+      "improvement_pct": -1.1660097799464757,
+      "hybrid_mae": 1.1110211859392014
+    },
+    "FWD": {
+      "n_samples": 166,
+      "unified_mae": 1.1344379207564226,
+      "specific_mae": 1.0328751733371972,
+      "improvement": 0.10156274741922533,
+      "improvement_pct": 8.952693273114948,
+      "hybrid_mae": 1.0328751733371972
+    }
+  },
+  "significance": {
+    "t_statistic": 0.24766605872517072,
+    "t_pvalue": 0.8044265562548873,
+    "t_significant": false,
+    "wilcoxon_statistic": 552637.0,
+    "wilcoxon_pvalue": 0.3588958186325977,
+    "wilcoxon_significant": false,
+    "cohens_d": 0.0063819589596239065,
+    "mean_improvement": 0.004702363327289068
+  },
+  "hybrid": {
+    "mae": 1.1068715320199056,
+    "rmse": 2.183616577854335
+  }
+}

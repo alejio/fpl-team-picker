@@ -1,0 +1,39 @@
+{
+  "position": "GKP",
+  "regressor": "gradient-boost",
+  "n_samples": 847,
+  "n_features": 109,
+  "position_specific_features": [
+    "saves_x_opp_xg",
+    "clean_sheet_potential"
+  ],
+  "excluded_features": [
+    "cumulative_assists",
+    "xg_per_90",
+    "rolling_5gw_xgi",
+    "cumulative_xg",
+    "cumulative_xa",
+    "xa_per_90",
+    "rolling_5gw_creativity",
+    "cumulative_goals",
+    "rolling_5gw_xa",
+    "rolling_5gw_threat",
+    "rolling_5gw_xg",
+    "rolling_5gw_assists",
+    "assists_per_90",
+    "rolling_5gw_goals",
+    "goals_per_90"
+  ],
+  "cv_mae": 0.670592740165863,
+  "best_params": {
+    "regressor__learning_rate": 0.03886165206266038,
+    "regressor__max_depth": 4,
+    "regressor__min_samples_leaf": 6,
+    "regressor__min_samples_split": 10,
+    "regressor__n_estimators": 262,
+    "regressor__subsample": 0.7955883778507802
+  },
+  "n_cv_folds": 3,
+  "n_trials": 50,
+  "trained_at": "2025-12-03T23:24:02.098844"
+}

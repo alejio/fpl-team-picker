@@ -1,0 +1,30 @@
+{
+  "position": "FWD",
+  "regressor": "random-forest",
+  "n_samples": 796,
+  "n_features": 117,
+  "position_specific_features": [
+    "xg_efficiency",
+    "penalty_boost"
+  ],
+  "excluded_features": [
+    "team_rolling_5gw_clean_sheets",
+    "clean_sheet_rate",
+    "rolling_5gw_xgc",
+    "rolling_5gw_clean_sheets",
+    "rolling_5gw_saves",
+    "rolling_5gw_goals_conceded",
+    "cumulative_clean_sheets"
+  ],
+  "cv_mae": 1.2722084968676917,
+  "best_params": {
+    "regressor__max_depth": 6,
+    "regressor__max_features": 0.6795542149013334,
+    "regressor__min_samples_leaf": 16,
+    "regressor__min_samples_split": 18,
+    "regressor__n_estimators": 108
+  },
+  "n_cv_folds": 3,
+  "n_trials": 50,
+  "trained_at": "2025-12-03T23:30:31.742276"
+}

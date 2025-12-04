@@ -63,54 +63,43 @@ Install: `uv sync`
 
 ## ML Pipeline Training
 
-**Reusable Training Infrastructure** (`scripts/ml_training_utils.py`):
-- `load_training_data()` - Load all 12 data sources (historical, fixtures, teams, ownership, value, fixture difficulty, betting, raw players, derived_player_metrics, player_availability_snapshot, derived_team_form, players_enhanced)
-- `engineer_features()` - FPLFeatureEngineer with leak-free per-GW team strength (FIXED: data alignment bug)
-- `create_temporal_cv_splits()` - Walk-forward validation (GW6→7, GW6-7→8, etc.)
-- `evaluate_fpl_comprehensive()` - MAE/RMSE/Spearman/top-15 overlap/captain accuracy
-- Ensures "apples to apples" comparison across experiments
-
-**Custom ML Transformers** (`fpl_team_picker/domain/ml/`):
-- `FeatureSelector` - Self-contained transformer that selects features by name (makes pipelines service-agnostic)
-- Enables pipelines to accept all 99 features and internally select the subset they need
-- Fixes pickle issues - properly importable from domain layer
-
-**Custom Pipeline Optimizer** (`scripts/custom_pipeline_optimizer.py`):
-- **Production Model**: `models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib` ✅ IN USE
-- **Performance**: RandomForest with RFE-smart (60 features + penalties): MAE=0.632, Spearman=0.818
-- **64% better than TPOT** (MAE 0.632 vs 1.752, same scorer/data/CV)
-- **43.6% better on GW10 test data** (MAE 1.002 vs 1.777)
-- **Correctly predicted Haaland > Kudus** (GW10: prevented -24 point captain disaster)
-- 8 regressors: XGBoost, LightGBM, RandomForest, GradientBoosting, AdaBoost, Ridge, Lasso, ElasticNet
-- 4 feature selection strategies: none, correlation, permutation, rfe-smart
-- `--keep-penalty-features` flag to force-keep critical domain features
-- Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
-
-**Hyperparameter Improvements (2025-11-22)**:
-- **Issue**: XGBoost severely underfit with learning_rate=0.0116 + n_estimators=180
-  - Caused xP compression (3.96-5.37 range) → LP optimizer couldn't differentiate premium/budget players
-  - Root cause: Search space allowed extreme combinations (LR × trees = insufficient capacity)
-- **Fixes**:
-  - XGBoost/LightGBM: n_estimators increased to 200-1500 (was 100-500)
-  - All gradient boosting: learning_rate minimum raised from 0.01 to 0.03
-  - Regularization: reg_lambda minimum lowered from 0.5 to 0.0
-  - Learning rate now uses log-uniform distribution (samples more in 0.03-0.1 range)
-- **Key Insight**: Effective model capacity ≈ learning_rate × n_estimators × tree_depth
-  - Low LR (0.03-0.05) needs many trees (800-1500)
-  - Medium LR (0.05-0.15) needs moderate trees (300-800)
-  - High LR (0.15-0.3) needs fewer trees (200-400)
-
-**Quick Start**:
+**Unified Training CLI** (`scripts/train_model.py`):
 ```bash
-# Single model training
-uv run python scripts/custom_pipeline_optimizer.py train --end-gw 11 --regressor xgboost --feature-selection rfe-smart --keep-penalty-features --scorer fpl_comprehensive --n-trials 50
+# Train unified model
+uv run python scripts/train_model.py unified --end-gw 12 --regressor lightgbm
 
-# Compare ALL 5 ensemble models (RandomForest, XGBoost, LightGBM, GradientBoosting, AdaBoost)
-uv run python scripts/compare_all_models.py --end-gw 12 --holdout-gws 2 --feature-selection rfe-smart --keep-penalty-features --n-trials 20
+# Train position-specific models
+uv run python scripts/train_model.py position --end-gw 12
 
-# Quick comparison (fewer trials, faster results)
-uv run python scripts/compare_all_models.py --end-gw 12 --quick
+# Full pipeline (evaluate → determine hybrid config → retrain on all data)
+uv run python scripts/train_model.py full-pipeline --end-gw 12 --holdout-gws 2
+
+# Evaluate existing model
+uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.joblib --end-gw 12
 ```
+
+**ML Training Module** (`fpl_team_picker/domain/services/ml_training/`):
+- `TrainingConfig`, `HybridPipelineConfig` - Pydantic config models with validation
+- `MLTrainer` - Core training orchestrator (unified, position-specific, all positions)
+- `ModelEvaluator` - Evaluation metrics, hybrid config determination
+- `build_pipeline()`, `get_param_space()` - Pipeline construction utilities
+
+**Hybrid Model** (`fpl_team_picker/domain/ml/`):
+- `HybridPositionModel` - Routes predictions to position-specific or unified models
+- `FeatureSelector` - Self-contained transformer for feature selection by name
+- Based on experiment results: GKP/FWD use position-specific, DEF/MID use unified
+
+**Training Utilities** (`scripts/ml_training_utils.py`):
+- `load_training_data()` - Load all 12 data sources
+- `engineer_features()` - FPLFeatureEngineer with leak-free per-GW team strength
+- `create_temporal_cv_splits()` - Walk-forward validation (GW6→7, etc.)
+- `evaluate_fpl_comprehensive()` - MAE/RMSE/Spearman/top-15 overlap/captain accuracy
+
+**Hyperparameter Configuration**:
+- XGBoost/LightGBM: n_estimators 200-1500, learning_rate 0.03-0.3 (log-uniform)
+- RandomForest/GradientBoosting: Standard sklearn param spaces
+- 4 feature selection strategies: none, correlation, permutation, rfe-smart
+- Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
 
 **Multi-Model Comparison Tool** (`scripts/compare_all_models.py`):
 - **Compare all 5 uncertainty-supporting models in one command**

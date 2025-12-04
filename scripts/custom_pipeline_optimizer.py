@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
 """
+⚠️  DEPRECATED: Use scripts/train_model.py instead.
+
+This script is deprecated in favor of the unified training CLI:
+    python scripts/train_model.py unified --end-gw 12 --regressor lightgbm
+    python scripts/train_model.py full-pipeline --end-gw 12
+
+---
+
 Custom Pipeline Optimizer for FPL Expected Points Prediction
 
 Fully configurable alternative to TPOT with:

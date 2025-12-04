@@ -1,0 +1,17 @@
+{
+  "unified_model": "models/custom/lightgbm_gw1-10_20251203_224750_pipeline.joblib",
+  "position_models": {
+    "GKP": "models/position_specific/gkp_gw1-10_best.joblib",
+    "FWD": "models/position_specific/fwd_gw1-10_best.joblib"
+  },
+  "use_specific_for": [
+    "GKP",
+    "FWD"
+  ],
+  "unified_positions": [
+    "DEF",
+    "MID"
+  ],
+  "created_at": "2025-12-03T23:44:11.915536",
+  "end_gw": 10
+}

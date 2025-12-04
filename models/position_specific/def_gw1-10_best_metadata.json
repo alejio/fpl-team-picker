@@ -1,0 +1,28 @@
+{
+  "position": "DEF",
+  "regressor": "xgboost",
+  "n_samples": 2416,
+  "n_features": 123,
+  "position_specific_features": [
+    "cs_x_fixture",
+    "set_piece_potential"
+  ],
+  "excluded_features": [
+    "rolling_5gw_saves"
+  ],
+  "cv_mae": 1.2049085795879364,
+  "best_params": {
+    "regressor__colsample_bytree": 0.6835674870461441,
+    "regressor__gamma": 0.3355717584120253,
+    "regressor__learning_rate": 0.06851221934273354,
+    "regressor__max_depth": 9,
+    "regressor__min_child_weight": 2,
+    "regressor__n_estimators": 984,
+    "regressor__reg_alpha": 0.8486697949246744,
+    "regressor__reg_lambda": 0.27324266288405763,
+    "regressor__subsample": 0.8835643987640474
+  },
+  "n_cv_folds": 4,
+  "n_trials": 50,
+  "trained_at": "2025-12-03T23:24:20.865644"
+}

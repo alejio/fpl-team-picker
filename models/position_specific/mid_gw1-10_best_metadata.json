@@ -1,0 +1,24 @@
+{
+  "position": "MID",
+  "regressor": "random-forest",
+  "n_samples": 3252,
+  "n_features": 123,
+  "position_specific_features": [
+    "goal_involvement",
+    "chance_creation"
+  ],
+  "excluded_features": [
+    "rolling_5gw_saves"
+  ],
+  "cv_mae": 1.0089989519555052,
+  "best_params": {
+    "regressor__max_depth": 6,
+    "regressor__max_features": 0.7985894129471094,
+    "regressor__min_samples_leaf": 5,
+    "regressor__min_samples_split": 18,
+    "regressor__n_estimators": 180
+  },
+  "n_cv_folds": 4,
+  "n_trials": 50,
+  "trained_at": "2025-12-03T23:28:04.065900"
+}
