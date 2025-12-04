@@ -458,9 +458,18 @@ def _(gameweek_data, mo):
                 debug=config.xp_model.debug,
             )
             if config.xp_model.debug:
-                print(
-                    f"✅ ML XP Service initialized with {len(ml_xp_service.pipeline.named_steps) if hasattr(ml_xp_service, 'pipeline') and ml_xp_service.pipeline else 'N/A'} pipeline steps"
-                )
+                pipeline_info = "N/A"
+                if (
+                    hasattr(ml_xp_service, "pipeline")
+                    and ml_xp_service.pipeline is not None
+                ):
+                    if hasattr(ml_xp_service.pipeline, "named_steps"):
+                        pipeline_info = (
+                            f"{len(ml_xp_service.pipeline.named_steps)} pipeline steps"
+                        )
+                    else:
+                        pipeline_info = type(ml_xp_service.pipeline).__name__
+                print(f"✅ ML XP Service initialized with {pipeline_info}")
 
             # Calculate xP using ML service (no fallback - fail explicitly)
             if config.xp_model.debug:

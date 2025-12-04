@@ -30,6 +30,7 @@ from .ml_pipeline_factory import (
     save_pipeline,
     load_pipeline,
 )
+from fpl_team_picker.domain.ml import HybridPositionModel
 
 
 warnings.filterwarnings("ignore")
@@ -118,13 +119,25 @@ class MLExpectedPointsService:
                 Path(self.model_path)
             )
 
+            # Check if this is a HybridPositionModel (handles its own feature routing)
+            is_hybrid_model = isinstance(loaded_pipeline, HybridPositionModel)
+
             # Check if pipeline already has feature_engineer step
             has_feature_engineer = (
                 hasattr(loaded_pipeline, "named_steps")
                 and "feature_engineer" in loaded_pipeline.named_steps
             )
 
-            if not has_feature_engineer:
+            if is_hybrid_model:
+                # HybridPositionModel handles its own routing and feature selection
+                # Do NOT wrap with feature engineer as it needs 'position' column
+                self._log_debug(
+                    "🔀 HybridPositionModel detected - using direct prediction (no feature wrapper)"
+                )
+                self.pipeline = loaded_pipeline
+                self.needs_feature_wrapper = False
+                self.is_hybrid_model = True
+            elif not has_feature_engineer:
                 # TPOT model or bare sklearn pipeline - needs feature engineering wrapper
                 self._log_debug(
                     "⚙️  Bare sklearn pipeline detected (likely TPOT) - will wrap with FPLFeatureEngineer"
@@ -136,10 +149,12 @@ class MLExpectedPointsService:
                 self.needs_feature_wrapper = (
                     True  # Flag to create wrapper during prediction
                 )
+                self.is_hybrid_model = False
             else:
                 # Standard pipeline already includes feature_engineer
                 self.pipeline = loaded_pipeline
                 self.needs_feature_wrapper = False
+                self.is_hybrid_model = False
 
             self._log_debug(f"✅ Loaded pre-trained model from {self.model_path}")
             if self.debug and self.pipeline_metadata:
@@ -405,6 +420,36 @@ class MLExpectedPointsService:
                 self.needs_feature_wrapper = False  # Don't wrap again
 
                 self._log_debug("   ✅ Feature engineering wrapper created and fitted")
+            elif getattr(self, "is_hybrid_model", False):
+                # HybridPositionModel needs feature engineering BUT must preserve 'position' column
+                # Create a feature engineer for the hybrid model
+                from .ml_feature_engineering import FPLFeatureEngineer
+                from .ml_pipeline_factory import get_team_strength_ratings
+
+                self._log_debug(
+                    "🔀 Setting up feature engineering for HybridPositionModel..."
+                )
+
+                team_strength = get_team_strength_ratings(
+                    target_gameweek=target_gameweek,
+                    teams_df=teams_data,
+                )
+
+                # Create and store the feature engineer for hybrid model
+                self._hybrid_feature_engineer = FPLFeatureEngineer(
+                    fixtures_df=fixtures_data,
+                    teams_df=teams_data,
+                    team_strength=team_strength,
+                    ownership_trends_df=ownership_trends_df,
+                    value_analysis_df=value_analysis_df,
+                    fixture_difficulty_df=fixture_difficulty_df,
+                    raw_players_df=raw_players_df,
+                    betting_features_df=betting_features_df,
+                )
+
+                # Fit on historical data
+                self._hybrid_feature_engineer.fit(live_data, live_data["total_points"])
+                self._log_debug("   ✅ HybridPositionModel feature engineer fitted")
             else:
                 # Standard pipeline with feature_engineer already included
                 # Update context if needed
@@ -494,7 +539,23 @@ class MLExpectedPointsService:
             ).reset_index(drop=True)
 
             # Make predictions for ALL gameweeks (pipeline calculates rolling features correctly)
-            all_predictions = self.pipeline.predict(prediction_data_all)
+            if getattr(self, "is_hybrid_model", False):
+                # HybridPositionModel: apply feature engineering while preserving 'position'
+                # Save position column before transformation
+                position_col = prediction_data_all["position"].copy()
+
+                # Transform with feature engineer
+                engineered_features = self._hybrid_feature_engineer.transform(
+                    prediction_data_all
+                )
+
+                # Add position column back (required for HybridPositionModel routing)
+                engineered_features["position"] = position_col.values
+
+                # Now predict with HybridPositionModel
+                all_predictions = self.pipeline.predict(engineered_features)
+            else:
+                all_predictions = self.pipeline.predict(prediction_data_all)
 
             # Extract uncertainty estimates for target gameweek
             target_mask = prediction_data_all["gameweek"] == target_gameweek
@@ -1165,7 +1226,15 @@ class MLExpectedPointsService:
         if self.pipeline is None:
             return np.zeros(len(X))
 
+        # HybridPositionModel doesn't support uncertainty extraction (yet)
+        # Return zeros for now - could aggregate from underlying models in future
+        if getattr(self, "is_hybrid_model", False):
+            return np.zeros(len(X))
+
         # Get the underlying model
+        if not hasattr(self.pipeline, "named_steps"):
+            return np.zeros(len(X))
+
         model = self.pipeline.named_steps.get("model")
         if model is None:
             return np.zeros(len(X))
@@ -1731,6 +1800,17 @@ class MLExpectedPointsService:
             raise ValueError(
                 "Model not trained. Call calculate_expected_points() first."
             )
+
+        # HybridPositionModel doesn't support simple feature importance extraction
+        # (would need to aggregate from multiple models)
+        if getattr(self, "is_hybrid_model", False):
+            raise ValueError(
+                "Feature importance not supported for HybridPositionModel. "
+                "Use get_model_for_position() to inspect individual models."
+            )
+
+        if not hasattr(self.pipeline, "named_steps"):
+            raise ValueError("Pipeline does not have named_steps")
 
         # Extract model from pipeline
         model = self.pipeline.named_steps.get("model")
