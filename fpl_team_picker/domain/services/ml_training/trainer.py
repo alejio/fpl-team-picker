@@ -73,6 +73,9 @@ POSITION_FEATURE_EXCLUSIONS = {
         "tackles",
         "recoveries",
         "defensive_contribution",
+        # NEW: Attacking composite features (Phase 5)
+        "player_matchup_style_score",  # Goalkeepers don't attack
+        "player_set_piece_volume_score",  # GKP don't take corners
     ],
     "DEF": [
         "rolling_5gw_saves",  # Only GKP make saves
@@ -410,17 +413,13 @@ class MLTrainer:
                 f"   Excluding {len(excluded_features)} logically impossible features for {position}"
             )
 
-        # Add position-specific features
+        # Position-specific features are now part of the base feature set (Phase 6)
+        # They're added by FPLFeatureEngineer for all positions, so we just use them
         pos_feature_names = list(base_feature_names)
-        pos_additions = self._get_position_feature_additions(position)
 
-        for feat_name, feat_func in pos_additions:
-            if feat_name not in features_pos.columns:
-                features_pos[feat_name] = feat_func(features_pos)
-                pos_feature_names.append(feat_name)
-
-        # Remove duplicates
-        pos_feature_names = list(dict.fromkeys(pos_feature_names))
+        # Note: Position-specific features (saves_x_opp_xg, clean_sheet_potential, etc.)
+        # are now included in the base 155 features from FPLFeatureEngineer.
+        # No need to add them dynamically here.
 
         X = features_pos[pos_feature_names].copy()
         y = target_pos
@@ -459,10 +458,8 @@ class MLTrainer:
                 else target_pos
             )
 
-            # Add position features to cv_data too
-            for feat_name, feat_func in pos_additions:
-                if feat_name not in X_cv.columns:
-                    X_cv[feat_name] = feat_func(X_cv)
+            # Position-specific features are already in X_cv from feature engineering
+            # No need to add them here
 
             pipeline = build_pipeline(
                 regressor,

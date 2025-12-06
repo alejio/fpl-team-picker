@@ -471,7 +471,7 @@ def get_feature_groups() -> dict[str, list[str]]:
     """
     Define feature groups for grouped preprocessing.
 
-    Categorizes all 122 FPL features into appropriate preprocessing groups based on their
+    Categorizes all 155 FPL features into appropriate preprocessing groups based on their
     distribution characteristics and semantic meaning.
 
     Returns:
@@ -868,7 +868,7 @@ def run_evaluate_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (default: none = keep all 122 features)",
+            help="Feature selection strategy (default: none = keep all 155 features)",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1020,6 +1020,7 @@ def run_evaluate_mode(
         train_player_availability_snapshot_df,
         train_derived_team_form_df,
         train_players_enhanced_df,
+        train_fixture_runs_df,
     ) = train_data
 
     # 2. Engineer features for training data
@@ -1037,6 +1038,7 @@ def run_evaluate_mode(
         train_player_availability_snapshot_df,
         train_derived_team_form_df,
         train_players_enhanced_df,
+        train_fixture_runs_df,
         verbose=True,
     )
 
@@ -1102,6 +1104,7 @@ def run_evaluate_mode(
         holdout_player_availability_snapshot_df,
         holdout_derived_team_form_df,
         holdout_players_enhanced_df,
+        holdout_fixture_runs_df,
     ) = holdout_data
 
     # Engineer features for full dataset
@@ -1118,6 +1121,7 @@ def run_evaluate_mode(
         holdout_player_availability_snapshot_df,
         holdout_derived_team_form_df,
         holdout_players_enhanced_df,
+        holdout_fixture_runs_df,
         verbose=False,
     )
 
@@ -1227,7 +1231,7 @@ def run_train_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 122 features",
+            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 155 features",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1395,6 +1399,7 @@ def run_train_mode(
         player_availability_snapshot_df,
         derived_team_form_df,
         players_enhanced_df,
+        fixture_runs_df,
     ) = data
 
     # 2. Engineer features (reusable utility)
@@ -1411,6 +1416,7 @@ def run_train_mode(
         player_availability_snapshot_df,
         derived_team_form_df,
         players_enhanced_df,
+        fixture_runs_df,
         verbose=True,
     )
 
@@ -1633,7 +1639,7 @@ def run_train_mode(
     logger.info("\n💾 Model saved:")
     logger.info(f"   Pipeline (for deployment): {pipeline_path.name}")
     logger.info(f"   Metadata (for analysis): {metadata_path.name}")
-    logger.info(f"   Features: {len(selected_features)}/122")
+    logger.info(f"   Features: {len(selected_features)}/155")
     logger.info(f"   Training samples: {len(y_final):,}")
 
     logger.info("\n" + "=" * 80)

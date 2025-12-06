@@ -250,17 +250,14 @@ class ModelEvaluator:
                 try:
                     feature_names = model.named_steps["feature_selector"].feature_names
 
-                    # Check for missing features and add them
+                    # Check for missing features
                     missing = set(feature_names) - set(X_pos.columns)
                     if missing:
-                        # Add position-specific features if needed
-                        from .trainer import MLTrainer
-
-                        trainer = MLTrainer.__new__(MLTrainer)
-                        additions = trainer._get_position_feature_additions(pos)
-                        for feat_name, feat_func in additions:
-                            if feat_name in missing and feat_name not in X_pos.columns:
-                                X_pos[feat_name] = feat_func(X_pos)
+                        # Position-specific features are now part of the base feature set
+                        # If they're missing, it's a data issue, not something we can fix here
+                        logger.warning(
+                            f"Missing {len(missing)} features for {pos}: {sorted(missing)[:5]}..."
+                        )
 
                     specific_preds = model.predict(X_pos[feature_names])
                 except Exception as e:

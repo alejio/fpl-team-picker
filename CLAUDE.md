@@ -33,7 +33,7 @@ Uses `fpl-dataset-builder` client: `from client import FPLDataClient`
 
 Install: `uv sync`
 
-## ML Feature Engineering (122 features)
+## ML Feature Engineering (155 features)
 
 **FPLFeatureEngineer** (sklearn transformer):
 - **Base (65)**: Cumulative stats, rolling 5GW form, per-90 rates, team context, fixture features

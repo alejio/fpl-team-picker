@@ -491,6 +491,13 @@ def _(gameweek_data, mo):
                 fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
                 raw_players_df=gameweek_data.get("raw_players"),
                 betting_features_df=gameweek_data.get("betting_features"),
+                derived_player_metrics_df=gameweek_data.get("derived_player_metrics"),
+                player_availability_snapshot_df=gameweek_data.get(
+                    "player_availability_snapshot"
+                ),
+                derived_team_form_df=gameweek_data.get("derived_team_form"),
+                players_enhanced_df=gameweek_data.get("players_enhanced"),
+                fixture_runs_df=gameweek_data.get("fixture_runs"),
             )
 
             # Calculate 3GW predictions using cascading predictions
@@ -509,6 +516,13 @@ def _(gameweek_data, mo):
                 fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
                 raw_players_df=gameweek_data.get("raw_players"),
                 betting_features_df=gameweek_data.get("betting_features"),
+                derived_player_metrics_df=gameweek_data.get("derived_player_metrics"),
+                player_availability_snapshot_df=gameweek_data.get(
+                    "player_availability_snapshot"
+                ),
+                derived_team_form_df=gameweek_data.get("derived_team_form"),
+                players_enhanced_df=gameweek_data.get("players_enhanced"),
+                fixture_runs_df=gameweek_data.get("fixture_runs"),
             )
 
             # Calculate 5GW predictions using cascading predictions
@@ -527,6 +541,13 @@ def _(gameweek_data, mo):
                 fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
                 raw_players_df=gameweek_data.get("raw_players"),
                 betting_features_df=gameweek_data.get("betting_features"),
+                derived_player_metrics_df=gameweek_data.get("derived_player_metrics"),
+                player_availability_snapshot_df=gameweek_data.get(
+                    "player_availability_snapshot"
+                ),
+                derived_team_form_df=gameweek_data.get("derived_team_form"),
+                players_enhanced_df=gameweek_data.get("players_enhanced"),
+                fixture_runs_df=gameweek_data.get("fixture_runs"),
             )
 
             # Merge 3GW predictions into main dataframe
@@ -648,7 +669,7 @@ def _(gameweek_data, mo):
             model_info = {
                 "type": model_type_label,
                 # TODO: these features are hardcoded. Should be a variable count
-                "features": "122 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures, betting odds, injury/rotation, venue-specific, rankings, elite interactions)",
+                "features": "155 features (FPLFeatureEngineer: 5GW rolling, team context, fixtures, betting odds, injury/rotation, venue-specific, rankings, elite interactions, fixture runs, minutes stability, bonus points, price momentum, composites, position-specific interactions)",
                 "status": "✅ ML predictions generated",
             }
         else:

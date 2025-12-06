@@ -292,6 +292,11 @@ class MLExpectedPointsService:
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
         betting_features_df: Optional[pd.DataFrame] = None,
+        derived_player_metrics_df: Optional[pd.DataFrame] = None,
+        player_availability_snapshot_df: Optional[pd.DataFrame] = None,
+        derived_team_form_df: Optional[pd.DataFrame] = None,
+        players_enhanced_df: Optional[pd.DataFrame] = None,
+        fixture_runs_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Main interface method compatible with existing XP calculations.
@@ -313,6 +318,11 @@ class MLExpectedPointsService:
             raw_players_df: Raw FPL players bootstrap data with penalty/set-piece order
                 (ONLY used for inference, NOT training - avoids data leakage)
             betting_features_df: Betting odds features data (Issue #38)
+            derived_player_metrics_df: Derived player metrics with injury/rotation risk (Phase 1)
+            player_availability_snapshot_df: Player availability snapshot for target gameweek (Phase 1)
+            derived_team_form_df: Venue-specific team strength data (Phase 2)
+            players_enhanced_df: Enhanced player data with rankings & context (Phase 3)
+            fixture_runs_df: Fixture run analysis for transfer timing (Phase 4)
 
         Returns:
             DataFrame with ML-based expected points in 'xP' column
@@ -397,6 +407,11 @@ class MLExpectedPointsService:
                     fixture_difficulty_df=fixture_difficulty_df,
                     raw_players_df=raw_players_df,  # Penalty/set-piece taker features (inference only)
                     betting_features_df=betting_features_df,  # Betting odds features (Issue #38)
+                    derived_player_metrics_df=derived_player_metrics_df,  # Phase 1: Injury/rotation risk
+                    player_availability_snapshot_df=player_availability_snapshot_df,  # Phase 1: Availability status
+                    derived_team_form_df=derived_team_form_df,  # Phase 2: Venue-specific strength
+                    players_enhanced_df=players_enhanced_df,  # Phase 3: Rankings & context
+                    fixture_runs_df=fixture_runs_df,  # Phase 4: Fixture runs
                 )
 
                 # Create wrapper pipeline
@@ -445,6 +460,11 @@ class MLExpectedPointsService:
                     fixture_difficulty_df=fixture_difficulty_df,
                     raw_players_df=raw_players_df,
                     betting_features_df=betting_features_df,
+                    derived_player_metrics_df=derived_player_metrics_df,
+                    player_availability_snapshot_df=player_availability_snapshot_df,
+                    derived_team_form_df=derived_team_form_df,
+                    players_enhanced_df=players_enhanced_df,
+                    fixture_runs_df=fixture_runs_df,
                 )
 
                 # Fit on historical data
@@ -839,6 +859,11 @@ class MLExpectedPointsService:
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
         betting_features_df: Optional[pd.DataFrame] = None,
+        derived_player_metrics_df: Optional[pd.DataFrame] = None,
+        player_availability_snapshot_df: Optional[pd.DataFrame] = None,
+        derived_team_form_df: Optional[pd.DataFrame] = None,
+        players_enhanced_df: Optional[pd.DataFrame] = None,
+        fixture_runs_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Calculate 5-gameweek expected points using cascading predictions.
@@ -917,6 +942,11 @@ class MLExpectedPointsService:
                 fixture_difficulty_df=fixture_difficulty_df,
                 raw_players_df=raw_players_df,
                 betting_features_df=betting_features_df,
+                derived_player_metrics_df=derived_player_metrics_df,
+                player_availability_snapshot_df=player_availability_snapshot_df,
+                derived_team_form_df=derived_team_form_df,
+                players_enhanced_df=players_enhanced_df,
+                fixture_runs_df=fixture_runs_df,
             )
 
             # Extract predictions and uncertainties
@@ -978,6 +1008,11 @@ class MLExpectedPointsService:
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
         raw_players_df: Optional[pd.DataFrame] = None,
         betting_features_df: Optional[pd.DataFrame] = None,
+        derived_player_metrics_df: Optional[pd.DataFrame] = None,
+        player_availability_snapshot_df: Optional[pd.DataFrame] = None,
+        derived_team_form_df: Optional[pd.DataFrame] = None,
+        players_enhanced_df: Optional[pd.DataFrame] = None,
+        fixture_runs_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
         """
         Calculate 3-gameweek expected points using cascading predictions.
@@ -1055,6 +1090,11 @@ class MLExpectedPointsService:
                 fixture_difficulty_df=fixture_difficulty_df,
                 raw_players_df=raw_players_df,
                 betting_features_df=betting_features_df,
+                derived_player_metrics_df=derived_player_metrics_df,
+                player_availability_snapshot_df=player_availability_snapshot_df,
+                derived_team_form_df=derived_team_form_df,
+                players_enhanced_df=players_enhanced_df,
+                fixture_runs_df=fixture_runs_df,
             )
 
             # Extract predictions and uncertainties

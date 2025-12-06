@@ -68,9 +68,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 122 features (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions):
+    Generates 155 features (64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific):
 
-    Base features (65):
+    Base features (64):
     - Cumulative season statistics (up to GW N-1)
     - Rolling 5GW form features
     - Per-90 efficiency metrics
@@ -78,10 +78,10 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - Fixture-specific features
     - Price band categorization (ordinal)
 
-    Enhanced features (15) - Issue #37:
-    - Ownership trends (7): selected_by_percent, ownership_tier, transfer_momentum,
-      net_transfers, bandwagon_score, ownership_velocity
-    - Value analysis (5): points_per_pound, value_vs_position, predicted_price_change,
+    Enhanced features (12) - Issue #37:
+    - Ownership trends (5): selected_by_percent, ownership_tier, transfer_momentum,
+      net_transfers, bandwagon_score
+    - Value analysis (4): points_per_pound, value_vs_position,
       price_volatility, price_risk
     - Enhanced fixture difficulty (3): congestion_difficulty, form_adjusted_difficulty,
       clean_sheet_probability_enhanced
@@ -124,6 +124,25 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     - recoveries: Ball recoveries count
     - form_momentum: Form trajectory (+1 improving, 0 stable, -1 declining)
 
+    New features (25) - Phase 5:
+    - Fixture runs (5): fixture_run_3gw_difficulty, fixture_run_5gw_difficulty,
+      green_fixtures_next_3, green_fixtures_next_5, fixture_swing_upcoming
+    - Ownership & opponent features (3): ownership_vs_price, opponent_goals_conceded_home_5gw,
+      opponent_goals_conceded_away_5gw
+    - Minutes stability (5): player_minutes_consistency, player_benching_frequency_5gw,
+      player_substitute_appearance_rate, player_minutes_trend, player_is_nailed_starter
+    - Bonus features (3): player_bonus_points_rate, player_three_bonus_rate, player_bps_per_point
+    - Price momentum (3): player_price_changes_5gw, player_price_rise_streak, player_price_locked
+    - Composite features (6): player_differential_score, player_template_player,
+      player_high_ownership_falling, player_matchup_style_score, player_attacking_team_score,
+      player_set_piece_volume_score
+
+    Position-specific interaction features (8) - Phase 6:
+    - GKP (2): saves_x_opp_xg, clean_sheet_potential
+    - DEF (2): cs_x_minutes, goal_threat_def
+    - MID (2): xgi_combined, creativity_x_threat
+    - FWD (2): xg_x_minutes, goal_involvement
+
     All features are leak-free (only use past data).
     """
 
@@ -141,6 +160,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         player_availability_snapshot_df: Optional[pd.DataFrame] = None,
         derived_team_form_df: Optional[pd.DataFrame] = None,
         players_enhanced_df: Optional[pd.DataFrame] = None,
+        fixture_runs_df: Optional[pd.DataFrame] = None,
     ):
         """
         Initialize feature engineer.
@@ -167,6 +187,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                 [team_id, gameweek, home_attack_strength, away_attack_strength, ...]
             players_enhanced_df: Enhanced players data from get_players_enhanced() (NEW - Phase 3)
                 [player_id, gameweek, form_rank, ict_index_rank, tackles, recoveries, ...]
+            fixture_runs_df: Fixture run analysis from get_derived_fixture_runs() (NEW - Phase 4)
+                [player_id, gameweek, fixture_run_3gw_difficulty, fixture_run_5gw_difficulty, ...]
         """
         self.fixtures_df = fixtures_df if fixtures_df is not None else pd.DataFrame()
         self.teams_df = teams_df if teams_df is not None else pd.DataFrame()
@@ -218,6 +240,11 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # NEW: Phase 3 - Player rankings & context
         self.players_enhanced_df = (
             players_enhanced_df if players_enhanced_df is not None else pd.DataFrame()
+        )
+
+        # NEW: Phase 4 - Fixture runs for transfer timing
+        self.fixture_runs_df = (
+            fixture_runs_df if fixture_runs_df is not None else pd.DataFrame()
         )
 
         # Store feature names for reference
@@ -278,8 +305,9 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                minutes, goals_scored, assists, total_points, etc.]
 
         Returns:
-            DataFrame with 84 engineered features per player-gameweek
-            (65 base + 15 enhanced + 4 penalty/set-piece taker features)
+            DataFrame with 155 engineered features per player-gameweek
+            (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation +
+             6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features)
         """
         if X.empty:
             return X
@@ -606,12 +634,30 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # ===== PHASE 4: ELITE PLAYER × FIXTURE INTERACTION =====
         df = self._add_elite_fixture_interactions(df)
 
+        # ===== PHASE 5: NEW FEATURE CATEGORIES =====
+        # Fixture runs (transfer timing), minutes stability, bonus, composites
+        df = self._add_fixture_run_features(df)
+        df = self._add_minutes_stability_features(df)
+        df = self._add_bonus_features(df)
+        df = self._add_price_momentum_features(df)
+        df = self._add_composite_features(df)
+        df = self._add_position_specific_features(df)
+
         # Fill missing values with smart imputation
         df = self._impute_with_domain_defaults(df)
 
         # Store feature names on first call
         if self.feature_names_ is None:
             self.feature_names_ = self._get_feature_columns()
+
+        # Validate all expected features exist (fail fast on data quality issues)
+        missing_features = set(self.feature_names_) - set(df.columns)
+        if missing_features:
+            raise ValueError(
+                f"Missing {len(missing_features)} expected features in dataframe: {sorted(missing_features)}. "
+                f"This indicates a bug in feature engineering - all features from _get_feature_columns() "
+                f"should be created. Check feature engineering methods for missing implementations."
+            )
 
         return df[self.feature_names_]
 
@@ -2059,8 +2105,396 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
 
         return df
 
+    def _add_fixture_run_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add fixture run features for transfer timing (Category 1)."""
+        if self.fixture_runs_df.empty:
+            # No fixture runs data - fill with neutral defaults
+            df["fixture_run_3gw_difficulty"] = 2.5
+            df["fixture_run_5gw_difficulty"] = 2.5
+            df["green_fixtures_next_3"] = 0
+            df["green_fixtures_next_5"] = 0
+            df["fixture_swing_upcoming"] = 0
+            df["ownership_vs_price"] = 0.5
+            df["opponent_goals_conceded_home_5gw"] = 7.0
+            df["opponent_goals_conceded_away_5gw"] = 7.0
+            return df
+
+        # Merge fixture run features
+        fixture_run_cols = [
+            "player_id",
+            "gameweek",
+            "fixture_run_3gw_difficulty",
+            "fixture_run_5gw_difficulty",
+            "green_fixtures_next_3",
+            "green_fixtures_next_5",
+            "fixture_swing_upcoming",
+        ]
+
+        available_cols = [
+            col for col in fixture_run_cols if col in self.fixture_runs_df.columns
+        ]
+        fixture_runs = self.fixture_runs_df[available_cols].copy()
+
+        # Shift by 1 gameweek to avoid data leakage (use GW7 fixtures to predict GW8)
+        fixture_runs_shifted = fixture_runs.copy()
+        fixture_runs_shifted["gameweek"] = fixture_runs_shifted["gameweek"] + 1
+
+        df = df.merge(fixture_runs_shifted, on=["player_id", "gameweek"], how="left")
+
+        # Fill missing values with neutral defaults
+        df["fixture_run_3gw_difficulty"] = df["fixture_run_3gw_difficulty"].fillna(2.5)
+        df["fixture_run_5gw_difficulty"] = df["fixture_run_5gw_difficulty"].fillna(2.5)
+        df["green_fixtures_next_3"] = df["green_fixtures_next_3"].fillna(0)
+        df["green_fixtures_next_5"] = df["green_fixtures_next_5"].fillna(0)
+        df["fixture_swing_upcoming"] = df["fixture_swing_upcoming"].fillna(0)
+
+        # Add ownership_vs_price from ownership_trends_df
+        if (
+            not self.ownership_trends_df.empty
+            and "ownership_vs_price" in self.ownership_trends_df.columns
+        ):
+            ownership_price_df = self.ownership_trends_df[
+                ["player_id", "gameweek", "ownership_vs_price"]
+            ].copy()
+            ownership_price_df["gameweek"] = ownership_price_df["gameweek"] + 1
+            df = df.merge(
+                ownership_price_df,
+                on=["player_id", "gameweek"],
+                how="left",
+                suffixes=("", "_dup"),
+            )
+            if "ownership_vs_price_dup" in df.columns:
+                df = df.drop(columns=["ownership_vs_price_dup"])
+            df["ownership_vs_price"] = df["ownership_vs_price"].fillna(0.5)
+        else:
+            df["ownership_vs_price"] = 0.5
+
+        # Add opponent home/away goals conceded from team_form_df
+        if not self.derived_team_form_df.empty and "opponent_team_id" in df.columns:
+            # Create opponent team form lookup
+            opponent_team_form = self.derived_team_form_df[
+                [
+                    "team_id",
+                    "gameweek",
+                    "team_goals_conceded_home_5gw",
+                    "team_goals_conceded_away_5gw",
+                ]
+            ].copy()
+            opponent_team_form = opponent_team_form.rename(
+                columns={
+                    "team_id": "opponent_team_id",
+                    "team_goals_conceded_home_5gw": "opponent_goals_conceded_home_5gw",
+                    "team_goals_conceded_away_5gw": "opponent_goals_conceded_away_5gw",
+                }
+            )
+
+            # Shift by 1 gameweek
+            opponent_team_form["gameweek"] = opponent_team_form["gameweek"] + 1
+
+            df = df.merge(
+                opponent_team_form, on=["opponent_team_id", "gameweek"], how="left"
+            )
+
+            df["opponent_goals_conceded_home_5gw"] = df[
+                "opponent_goals_conceded_home_5gw"
+            ].fillna(7.0)
+            df["opponent_goals_conceded_away_5gw"] = df[
+                "opponent_goals_conceded_away_5gw"
+            ].fillna(7.0)
+        else:
+            df["opponent_goals_conceded_home_5gw"] = 7.0
+            df["opponent_goals_conceded_away_5gw"] = 7.0
+
+        return df
+
+    def _add_minutes_stability_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate minutes stability and rotation risk features (Category 2)."""
+        # Group by player for rolling calculations
+        player_groups = df.sort_values("gameweek").groupby("player_id")
+
+        # 1. Minutes consistency (std dev)
+        df["player_minutes_consistency"] = (
+            player_groups["minutes"]
+            .transform(lambda x: x.rolling(5, min_periods=2).std())
+            .fillna(15.0)
+        )
+
+        # 2. Benching frequency (< 30 mins rate)
+        df["player_benching_frequency_5gw"] = (
+            player_groups["minutes"]
+            .transform(lambda x: (x < 30).rolling(5, min_periods=2).mean())
+            .fillna(0.2)
+        )
+
+        # 3. Substitute appearance rate (1-60 mins)
+        df["player_substitute_appearance_rate"] = (
+            player_groups["minutes"]
+            .transform(lambda x: x.between(1, 60).rolling(5, min_periods=2).mean())
+            .fillna(0.1)
+        )
+
+        # 4. Minutes trend (linear regression slope)
+        def calculate_trend(series):
+            if len(series) < 3:
+                return 0.0
+            x = np.arange(len(series))
+            slope = np.polyfit(x, series, 1)[0]
+            return slope
+
+        df["player_minutes_trend"] = (
+            player_groups["minutes"]
+            .transform(
+                lambda x: x.rolling(5, min_periods=3).apply(calculate_trend, raw=False)
+            )
+            .fillna(0.0)
+        )
+
+        # 5. Nailed starter (90+ mins in 4/5 games)
+        df["player_is_nailed_starter"] = (
+            player_groups["minutes"]
+            .transform(lambda x: (x >= 90).rolling(5, min_periods=4).sum() >= 4)
+            .fillna(False)
+            .astype(int)
+        )
+
+        return df
+
+    def _add_bonus_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate bonus points efficiency features (Category 3)."""
+        player_groups = df.sort_values("gameweek").groupby("player_id")
+
+        # 1. Bonus points rate (any bonus)
+        df["player_bonus_points_rate"] = (
+            player_groups["bonus"]
+            .transform(lambda x: (x > 0).rolling(5, min_periods=2).mean())
+            .fillna(0.15)
+        )
+
+        # 2. Three bonus rate
+        df["player_three_bonus_rate"] = (
+            player_groups["bonus"]
+            .transform(lambda x: (x == 3).rolling(5, min_periods=2).mean())
+            .fillna(0.05)
+        )
+
+        # 3. BPS per point (efficiency)
+        rolling_bps = player_groups["bps"].transform(
+            lambda x: x.rolling(5, min_periods=2).mean()
+        )
+        rolling_points = player_groups["total_points"].transform(
+            lambda x: x.rolling(5, min_periods=2).mean()
+        )
+
+        # Avoid division by zero
+        df["player_bps_per_point"] = np.where(
+            rolling_points > 0, rolling_bps / rolling_points, 0.0
+        )
+        df["player_bps_per_point"] = df["player_bps_per_point"].clip(0, 20).fillna(3.0)
+
+        return df
+
+    def _add_price_momentum_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate price momentum features (Category 4).
+
+        Features:
+        - player_price_changes_5gw: Count of price changes in last 5 GWs
+        - player_price_rise_streak: Consecutive price rises (current streak)
+        - player_price_locked: Boolean (1 if price changed in last GW, 0 otherwise)
+        """
+        # Ensure price is available (convert from value if needed)
+        if "price" not in df.columns:
+            if "value" in df.columns:
+                df["price"] = df["value"] / 10.0
+            else:
+                # Price data is required - this indicates an upstream data quality issue
+                raise ValueError(
+                    "Missing price data: Neither 'price' nor 'value' column found in dataframe. "
+                    "Price momentum features require historical price data. "
+                    "This indicates an upstream bug in data loading - fix dataset-builder or data orchestration service."
+                )
+
+        # Sort by player and gameweek for temporal operations
+        df = df.sort_values(["player_id", "gameweek"]).reset_index(drop=True)
+
+        # Create groupby object for player-level operations
+        player_groups = df.groupby("player_id")
+
+        # Calculate price changes (difference from previous GW)
+        # Shift by 1 to get previous GW's price change (avoid leakage)
+        df["_price_change"] = player_groups["price"].transform(
+            lambda x: x.diff().shift(1)
+        )
+
+        # Recreate groupby after adding _price_change column
+        player_groups = df.groupby("player_id")
+
+        # 1. Price changes count (last 5 GWs) - count non-zero changes
+        df["player_price_changes_5gw"] = (
+            player_groups["_price_change"]
+            .transform(lambda x: (x != 0).rolling(5, min_periods=1).sum())
+            .fillna(0)
+            .astype(int)
+        )
+
+        # 2. Price rise streak (consecutive positive changes, looking backwards)
+        def calculate_rise_streak(series):
+            """Calculate current streak of consecutive price rises from end of series."""
+            if len(series) < 1:
+                return 0
+
+            # Find where price increased (positive change)
+            rises = (series > 0).astype(int)
+
+            # Calculate streak backwards from current position
+            streak = 0
+            for i in range(len(rises) - 1, -1, -1):
+                if rises.iloc[i] == 1:
+                    streak += 1
+                else:
+                    break
+            return streak
+
+        df["player_price_rise_streak"] = (
+            player_groups["_price_change"]
+            .transform(
+                lambda x: x.rolling(10, min_periods=1).apply(
+                    calculate_rise_streak, raw=False
+                )
+            )
+            .fillna(0)
+            .astype(int)
+        )
+
+        # 3. Price locked (1 if price changed in previous GW, 0 otherwise)
+        # FPL rule: Price can only change once per gameweek, then locked
+        # Use shifted price change to avoid leakage
+        df["player_price_locked"] = (df["_price_change"] != 0).fillna(0).astype(int)
+
+        # Clean up temporary column
+        df = df.drop(columns=["_price_change"])
+
+        return df
+
+    def _add_composite_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Calculate composite strategic features (Category 5)."""
+
+        # 1. Differential score (low ownership × high xP)
+        # Note: We don't have xP_next_gw in the transform phase, so we'll use total_points as proxy
+        if "selected_by_percent" in df.columns:
+            df["player_differential_score"] = (
+                100 - df["selected_by_percent"]
+            ) * df.get("total_points", 0)
+        else:
+            df["player_differential_score"] = 0.0
+
+        # 2. Template player (from ownership_trends - already merged if available)
+        if "template_player" in df.columns:
+            df["player_template_player"] = df["template_player"].astype(int)
+        elif "selected_by_percent" in df.columns:
+            df["player_template_player"] = (df["selected_by_percent"] > 40).astype(int)
+        else:
+            df["player_template_player"] = 0
+
+        # 3. High ownership falling (from ownership_trends)
+        if "high_ownership_falling" in df.columns:
+            df["player_high_ownership_falling"] = df["high_ownership_falling"].astype(
+                int
+            )
+        else:
+            df["player_high_ownership_falling"] = 0
+
+        # 4. Matchup style score (team attack × opponent defense weakness)
+        if (
+            "team_attack_strength" in df.columns
+            and "opponent_defense_strength" in df.columns
+        ):
+            df["player_matchup_style_score"] = df["team_attack_strength"] * (
+                5.0 - df["opponent_defense_strength"]
+            )
+        else:
+            df["player_matchup_style_score"] = 2.5
+
+        # 5. Attacking team score (composite)
+        attack_cols = ["team_goals_scored_5gw", "team_xg_5gw"]
+        if all(col in df.columns for col in attack_cols):
+            df["player_attacking_team_score"] = (
+                df["team_goals_scored_5gw"] / 5.0 + df["team_xg_5gw"] / 5.0
+            )
+        else:
+            df["player_attacking_team_score"] = 1.5
+
+        # 6. Set piece volume score
+        if "team_corners_per_game" in df.columns and "is_on_corners" in df.columns:
+            df["player_set_piece_volume_score"] = df["team_corners_per_game"] * df[
+                "is_on_corners"
+            ].astype(float)
+        else:
+            df["player_set_piece_volume_score"] = 0.0
+
+        return df
+
+    def _add_position_specific_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add position-specific interaction features (8 features total: 2 per position).
+
+        These features capture position-specific interactions that are valuable
+        for position-specific models but are also useful for unified models.
+        Features are added for all positions (they'll naturally be 0/irrelevant
+        for positions where they don't apply).
+        """
+        # Ensure position column exists
+        if "position" not in df.columns:
+            df["position"] = "MID"  # Default fallback
+
+        # GKP-specific features (2)
+        # saves_x_opp_xg: Saves multiplied by opponent xG (captures save opportunity)
+        df["saves_x_opp_xg"] = df.get("rolling_5gw_saves", 0) * df.get(
+            "opponent_rolling_5gw_xg", 0
+        )
+
+        # clean_sheet_potential: Clean sheet probability weighted by minutes
+        df["clean_sheet_potential"] = (
+            df.get("clean_sheet_probability_enhanced", 0)
+            * df.get("rolling_5gw_minutes", 0)
+            / 90
+        )
+
+        # DEF-specific features (2)
+        # cs_x_minutes: Clean sheet probability weighted by minutes
+        df["cs_x_minutes"] = (
+            df.get("clean_sheet_probability_enhanced", 0)
+            * df.get("rolling_5gw_minutes", 0)
+            / 90
+        )
+
+        # goal_threat_def: Combined goal threat for defenders (xG + threat)
+        df["goal_threat_def"] = (
+            df.get("rolling_5gw_xg", 0) + df.get("rolling_5gw_threat", 0) / 100
+        )
+
+        # MID-specific features (2)
+        # xgi_combined: Combined expected goal involvements (xG + xA)
+        df["xgi_combined"] = df.get("rolling_5gw_xg", 0) + df.get("rolling_5gw_xa", 0)
+
+        # creativity_x_threat: Creativity × threat interaction
+        df["creativity_x_threat"] = (
+            df.get("rolling_5gw_creativity", 0) * df.get("rolling_5gw_threat", 0) / 1000
+        )
+
+        # FWD-specific features (2)
+        # xg_x_minutes: xG weighted by minutes played
+        df["xg_x_minutes"] = (
+            df.get("rolling_5gw_xg", 0) * df.get("rolling_5gw_minutes", 0) / 90
+        )
+
+        # goal_involvement: Weighted goal involvement (xG + 0.5 × xA)
+        df["goal_involvement"] = df.get("rolling_5gw_xg", 0) + 0.5 * df.get(
+            "rolling_5gw_xa", 0
+        )
+
+        return df
+
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (122 features: 65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions)."""
+        """Get list of all feature columns (155 features: 64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific)."""
         return [
             # Static (4)
             "price",
@@ -2209,6 +2643,51 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "elite_x_fixture_difficulty",
             "elite_x_opponent_strength",
             "elite_x_is_away",
+            # Phase 5: New Feature Categories (25 features total)
+            # Fixture runs (5)
+            "fixture_run_3gw_difficulty",
+            "fixture_run_5gw_difficulty",
+            "green_fixtures_next_3",
+            "green_fixtures_next_5",
+            "fixture_swing_upcoming",
+            # Ownership & opponent features (3)
+            "ownership_vs_price",
+            "opponent_goals_conceded_home_5gw",
+            "opponent_goals_conceded_away_5gw",
+            # Minutes stability (5)
+            "player_minutes_consistency",
+            "player_benching_frequency_5gw",
+            "player_substitute_appearance_rate",
+            "player_minutes_trend",
+            "player_is_nailed_starter",
+            # Bonus features (3)
+            "player_bonus_points_rate",
+            "player_three_bonus_rate",
+            "player_bps_per_point",
+            # Price momentum (3)
+            "player_price_changes_5gw",
+            "player_price_rise_streak",
+            "player_price_locked",
+            # Composite features (6)
+            "player_differential_score",
+            "player_template_player",
+            "player_high_ownership_falling",
+            "player_matchup_style_score",
+            "player_attacking_team_score",
+            "player_set_piece_volume_score",
+            # Position-specific interaction features (8) - Phase 6
+            # GKP-specific (2)
+            "saves_x_opp_xg",
+            "clean_sheet_potential",
+            # DEF-specific (2)
+            "cs_x_minutes",
+            "goal_threat_def",
+            # MID-specific (2)
+            "xgi_combined",
+            "creativity_x_threat",
+            # FWD-specific (2)
+            "xg_x_minutes",
+            "goal_involvement",
         ]
 
     def _get_team_feature_columns(self) -> list:

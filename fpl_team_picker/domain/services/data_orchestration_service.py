@@ -61,6 +61,11 @@ class DataOrchestrationService:
             fixture_difficulty,
             raw_players_df,
             betting_features_df,
+            derived_player_metrics_df,
+            player_availability_snapshot_df,
+            derived_team_form_df,
+            players_enhanced_df,
+            fixture_runs_df,
         ) = fpl_data
 
         # Validate core data contracts
@@ -107,6 +112,15 @@ class DataOrchestrationService:
             "raw_players": raw_players_df,
             # Betting odds features (Issue #38)
             "betting_features": betting_features_df,
+            # Phase 1: Player metrics and availability (injury/rotation risk)
+            "derived_player_metrics": derived_player_metrics_df,
+            "player_availability_snapshot": player_availability_snapshot_df,
+            # Phase 2: Venue-specific team strength
+            "derived_team_form": derived_team_form_df,
+            # Phase 3: Player rankings & context
+            "players_enhanced": players_enhanced_df,
+            # Phase 4: Fixture runs for transfer timing
+            "fixture_runs": fixture_runs_df,
         }
 
     def get_current_gameweek_info(self) -> Dict[str, Any]:
@@ -644,6 +658,11 @@ class DataOrchestrationService:
         pd.DataFrame,
         pd.DataFrame,
         pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
+        pd.DataFrame,
     ]:
         """
         Fetch FPL data from database for specified gameweek with historical form data
@@ -1007,6 +1026,55 @@ class DataOrchestrationService:
             f"Fixture difficulty: {len(fixture_difficulty)}"
         )
 
+        # Load Phase 1: Player metrics and availability (injury/rotation risk features)
+        logger.info("📊 Loading player metrics and availability data...")
+        try:
+            derived_player_metrics_df = client.get_derived_player_metrics()
+            logger.info(
+                f"   ✅ Derived player metrics: {len(derived_player_metrics_df)} records"
+            )
+        except (AttributeError, Exception) as e:
+            logger.warning(f"   ⚠️  Derived player metrics unavailable: {e}")
+            derived_player_metrics_df = pd.DataFrame()
+
+        try:
+            player_availability_snapshot_df = client.get_player_availability_snapshot(
+                gameweek=target_gameweek, include_backfilled=True
+            )
+            logger.info(
+                f"   ✅ Player availability snapshot: {len(player_availability_snapshot_df)} records"
+            )
+        except (AttributeError, Exception) as e:
+            logger.warning(f"   ⚠️  Player availability snapshot unavailable: {e}")
+            player_availability_snapshot_df = pd.DataFrame()
+
+        # Load Phase 2: Venue-specific team strength
+        logger.info("🏟️  Loading venue-specific team strength data...")
+        try:
+            derived_team_form_df = client.get_derived_team_form()
+            logger.info(f"   ✅ Derived team form: {len(derived_team_form_df)} records")
+        except (AttributeError, Exception) as e:
+            logger.warning(f"   ⚠️  Derived team form unavailable: {e}")
+            derived_team_form_df = pd.DataFrame()
+
+        # Load Phase 3: Player rankings & context
+        logger.info("📊 Loading player rankings & context data...")
+        try:
+            players_enhanced_df = client.get_players_enhanced()
+            logger.info(f"   ✅ Players enhanced: {len(players_enhanced_df)} records")
+        except (AttributeError, Exception) as e:
+            logger.warning(f"   ⚠️  Players enhanced unavailable: {e}")
+            players_enhanced_df = pd.DataFrame()
+
+        # Load Phase 4: Fixture runs for transfer timing
+        logger.info("🔄 Loading fixture run analysis...")
+        try:
+            fixture_runs_df = client.get_derived_fixture_runs(gameweek=target_gameweek)
+            logger.info(f"   ✅ Fixture runs: {len(fixture_runs_df)} records")
+        except (AttributeError, Exception) as e:
+            logger.warning(f"   ⚠️  Fixture runs unavailable: {e}")
+            fixture_runs_df = pd.DataFrame()
+
         # Load betting odds features (Issue #38)
         logger.info("🎲 Loading betting odds features...")
         try:
@@ -1083,6 +1151,11 @@ class DataOrchestrationService:
             fixture_difficulty,
             raw_players_df,
             betting_features_df,
+            derived_player_metrics_df,
+            player_availability_snapshot_df,
+            derived_team_form_df,
+            players_enhanced_df,
+            fixture_runs_df,
         )
 
     def _fetch_manager_team_internal(self, previous_gameweek: int) -> Optional[Dict]:

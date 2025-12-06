@@ -71,6 +71,7 @@ def load_training_data(
     pd.DataFrame,
     pd.DataFrame,
     pd.DataFrame,
+    pd.DataFrame,
 ]:
     """
     Load all data required for ML training.
@@ -83,7 +84,8 @@ def load_training_data(
     Returns:
         Tuple of (historical_df, fixtures_df, teams_df, ownership_trends_df,
                   value_analysis_df, fixture_difficulty_df, betting_features_df, raw_players_df,
-                  derived_player_metrics_df, player_availability_snapshot_df, derived_team_form_df, players_enhanced_df)
+                  derived_player_metrics_df, player_availability_snapshot_df, derived_team_form_df,
+                  players_enhanced_df, fixture_runs_df)
     """
     client = FPLDataClient()
 
@@ -263,6 +265,18 @@ def load_training_data(
             logger.warning(f"   ⚠️  Players enhanced unavailable: {e}")
         players_enhanced_df = pd.DataFrame()
 
+    # Load Phase 4: Fixture runs for transfer timing
+    if verbose:
+        logger.info("\n🔄 Loading fixture run analysis...")
+    try:
+        fixture_runs_df = client.get_derived_fixture_runs()
+        if verbose:
+            logger.info(f"   ✅ Fixture runs: {len(fixture_runs_df)} records")
+    except (AttributeError, Exception) as e:
+        if verbose:
+            logger.warning(f"   ⚠️  Fixture runs unavailable: {e}")
+        fixture_runs_df = pd.DataFrame()
+
     if verbose:
         logger.info(f"\n✅ Total records: {len(historical_df):,}")
         logger.info(f"   Unique players: {historical_df['player_id'].nunique():,}")
@@ -281,6 +295,7 @@ def load_training_data(
         player_availability_snapshot_df,
         derived_team_form_df,
         players_enhanced_df,
+        fixture_runs_df,
     )
 
 
@@ -297,6 +312,7 @@ def engineer_features(
     player_availability_snapshot_df: pd.DataFrame,
     derived_team_form_df: pd.DataFrame,
     players_enhanced_df: pd.DataFrame,
+    fixture_runs_df: pd.DataFrame,
     verbose: bool = True,
 ) -> Tuple[pd.DataFrame, np.ndarray, List[str]]:
     """
@@ -315,6 +331,7 @@ def engineer_features(
         player_availability_snapshot_df: Player availability snapshot data (Phase 1)
         derived_team_form_df: Derived team form data (Phase 2)
         players_enhanced_df: Enhanced players data (Phase 3)
+        fixture_runs_df: Fixture run analysis data (Phase 4)
         verbose: Print progress messages
 
     Returns:
@@ -322,7 +339,7 @@ def engineer_features(
     """
     if verbose:
         logger.info(
-            "\n🔧 Engineering features (FPLFeatureEngineer with 117 features)..."
+            "\n🔧 Engineering features (FPLFeatureEngineer with 155 features)..."
         )
 
     # Calculate per-gameweek team strength (no data leakage)
@@ -368,6 +385,7 @@ def engineer_features(
         players_enhanced_df=players_enhanced_df
         if not players_enhanced_df.empty
         else None,
+        fixture_runs_df=fixture_runs_df if not fixture_runs_df.empty else None,
     )
 
     # Transform
