@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/hybrid/hybrid_gw1-12_20251204_003237.joblib",
+        default="models/custom/random-forest_gw1-14_20251205_205638_pipeline.joblib",
         description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )
@@ -484,6 +484,26 @@ class OptimizationConfig(BaseModel):
     )
     budget_friendly_threshold: float = Field(
         default=7.5, description="<= £7.5m considered budget-friendly", ge=4.0, le=12.0
+    )
+
+    # Hauler-first strategy: ceiling bonus configuration
+    # Based on top 1% manager analysis: they capture 3.0 haulers/GW vs 2.4 for average
+    ceiling_bonus_enabled: bool = Field(
+        default=True,
+        description="Add ceiling bonus to optimization objective, favoring players with haul potential",
+    )
+    ceiling_bonus_factor: float = Field(
+        default=0.15,
+        description="Bonus factor per point of ceiling above threshold (ceiling = xP + 1.645*uncertainty). "
+        "Default 0.15 means a player with 20 ceiling gets +1.5 bonus vs 10 ceiling player.",
+        ge=0.0,
+        le=0.5,
+    )
+    ceiling_bonus_threshold: float = Field(
+        default=10.0,
+        description="Ceiling threshold above which bonus applies. Players with ceiling > this get bonus.",
+        ge=5.0,
+        le=15.0,
     )
 
 

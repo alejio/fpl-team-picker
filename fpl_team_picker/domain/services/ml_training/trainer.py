@@ -39,6 +39,8 @@ from ml_training_utils import (  # noqa: E402
     fpl_weighted_huber_scorer_sklearn,
     fpl_topk_scorer_sklearn,
     fpl_captain_scorer_sklearn,
+    fpl_hauler_capture_scorer_sklearn,
+    fpl_hauler_ceiling_scorer_sklearn,
 )
 
 # Custom scorer mapping
@@ -47,6 +49,8 @@ CUSTOM_SCORERS = {
     "fpl_weighted_huber": fpl_weighted_huber_scorer_sklearn,
     "fpl_top_k_ranking": fpl_topk_scorer_sklearn,
     "fpl_captain_pick": fpl_captain_scorer_sklearn,
+    "fpl_hauler_capture": fpl_hauler_capture_scorer_sklearn,
+    "fpl_hauler_ceiling": fpl_hauler_ceiling_scorer_sklearn,  # Hauler-first with variance preservation
 }
 
 

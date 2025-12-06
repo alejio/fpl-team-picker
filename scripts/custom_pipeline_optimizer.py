@@ -87,6 +87,8 @@ from ml_training_utils import (  # noqa: E402
     engineer_features,
     evaluate_fpl_comprehensive,
     fpl_captain_scorer_sklearn,
+    fpl_hauler_capture_scorer_sklearn,
+    fpl_hauler_ceiling_scorer_sklearn,
     fpl_topk_scorer_sklearn,
     fpl_weighted_huber_scorer_sklearn,
     load_training_data,
@@ -769,6 +771,8 @@ def optimize_pipeline(
             "fpl_weighted_huber": fpl_weighted_huber_scorer_sklearn,
             "fpl_top_k_ranking": fpl_topk_scorer_sklearn,
             "fpl_captain_pick": fpl_captain_scorer_sklearn,
+            "fpl_hauler_capture": fpl_hauler_capture_scorer_sklearn,
+            "fpl_hauler_ceiling": fpl_hauler_ceiling_scorer_sklearn,  # Hauler-first with variance preservation
         }
         scorer = scorer_map.get(config["scorer"], config["scorer"])
 
@@ -895,6 +899,8 @@ def run_evaluate_mode(
         "fpl_weighted_huber",
         "fpl_top_k_ranking",
         "fpl_captain_pick",
+        "fpl_hauler_capture",
+        "fpl_hauler_ceiling",
         "fpl_position_aware",
         "fpl_starting_xi",
         "fpl_comprehensive",
@@ -1255,6 +1261,8 @@ def run_train_mode(
         "fpl_weighted_huber",
         "fpl_top_k_ranking",
         "fpl_captain_pick",
+        "fpl_hauler_capture",
+        "fpl_hauler_ceiling",
         "fpl_position_aware",
         "fpl_starting_xi",
         "fpl_comprehensive",

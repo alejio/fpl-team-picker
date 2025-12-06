@@ -260,6 +260,7 @@ def full_pipeline(
     unified_results = {}
     best_unified_regressor = None
     best_unified_mae = float("inf")
+    best_unified_scorer = None  # Track scorer value (higher is better)
     best_unified_model = None
 
     for reg in unified_reg_list:
@@ -283,15 +284,33 @@ def full_pipeline(
             # Evaluate on holdout
             evaluator = ModelEvaluator()
             metrics = evaluator.evaluate_model(
-                model, X_holdout, y_holdout, holdout_cv_data
+                model, X_holdout, y_holdout, holdout_cv_data, scorer=scorer
             )
 
             mae = metrics["mae"]
-            unified_results[reg] = {"mae": mae, "model": model, "metadata": metadata}
+            scorer_value = metrics.get("scorer_value")
+            unified_results[reg] = {
+                "mae": mae,
+                "scorer_value": scorer_value,
+                "model": model,
+                "metadata": metadata,
+            }
 
-            logger.info(f"   ✅ {reg}: MAE = {mae:.4f}")
+            # Log both MAE and scorer value for transparency
+            if scorer_value is not None:
+                logger.info(f"   ✅ {reg}: {scorer}={scorer_value:.4f}, MAE={mae:.4f}")
+            else:
+                logger.info(f"   ✅ {reg}: MAE = {mae:.4f}")
 
-            if mae < best_unified_mae:
+            # Use scorer value for comparison if available (higher is better)
+            # Fall back to MAE if scorer not available (lower is better)
+            if scorer_value is not None:
+                if best_unified_scorer is None or scorer_value > best_unified_scorer:
+                    best_unified_scorer = scorer_value
+                    best_unified_mae = mae
+                    best_unified_regressor = reg
+                    best_unified_model = model
+            elif mae < best_unified_mae:
                 best_unified_mae = mae
                 best_unified_regressor = reg
                 best_unified_model = model
@@ -303,9 +322,14 @@ def full_pipeline(
         logger.error("No unified models trained successfully")
         raise typer.Exit(1)
 
-    logger.info(
-        f"\n   🏆 Best unified: {best_unified_regressor} (MAE: {best_unified_mae:.4f})"
-    )
+    if best_unified_scorer is not None:
+        logger.info(
+            f"\n   🏆 Best unified: {best_unified_regressor} ({scorer}={best_unified_scorer:.4f}, MAE={best_unified_mae:.4f})"
+        )
+    else:
+        logger.info(
+            f"\n   🏆 Best unified: {best_unified_regressor} (MAE: {best_unified_mae:.4f})"
+        )
 
     # 1b. Train position-specific models
     logger.info(
@@ -487,9 +511,28 @@ def full_pipeline(
 
     if unified_results:
         logger.info("   Unified comparison:")
-        for reg, res in sorted(unified_results.items(), key=lambda x: x[1]["mae"]):
+        # Sort by scorer if available (descending), otherwise by MAE (ascending)
+        has_scorer = any(
+            r.get("scorer_value") is not None for r in unified_results.values()
+        )
+        if has_scorer:
+            sorted_results = sorted(
+                unified_results.items(),
+                key=lambda x: x[1].get("scorer_value", 0),
+                reverse=True,
+            )
+        else:
+            sorted_results = sorted(unified_results.items(), key=lambda x: x[1]["mae"])
+
+        for reg, res in sorted_results:
             marker = "👑" if reg == best_unified_regressor else "  "
-            logger.info(f"     {marker} {reg}: MAE = {res['mae']:.4f}")
+            scorer_val = res.get("scorer_value")
+            if scorer_val is not None:
+                logger.info(
+                    f"     {marker} {reg}: {scorer}={scorer_val:.4f}, MAE={res['mae']:.4f}"
+                )
+            else:
+                logger.info(f"     {marker} {reg}: MAE = {res['mae']:.4f}")
 
     if positions_for_specific:
         logger.info(f"   Position-specific for: {positions_for_specific}")

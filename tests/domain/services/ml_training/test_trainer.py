@@ -3,8 +3,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import patch
 
 from fpl_team_picker.domain.services.ml_training.trainer import MLTrainer
 from fpl_team_picker.domain.services.ml_training.config import (

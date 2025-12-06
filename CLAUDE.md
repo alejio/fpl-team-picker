@@ -65,17 +65,20 @@ Install: `uv sync`
 
 **Unified Training CLI** (`scripts/train_model.py`):
 ```bash
-# Train unified model
-uv run python scripts/train_model.py unified --end-gw 12 --regressor lightgbm
+# Train unified model (default scorer: neg_mean_absolute_error)
+uv run python scripts/train_model.py unified --end-gw 14 --regressor lightgbm
+
+# Train with hauler-focused scorer (recommended for production)
+uv run python scripts/train_model.py unified --end-gw 14 --regressor random-forest --scorer fpl_hauler_capture
 
 # Train position-specific models
-uv run python scripts/train_model.py position --end-gw 12
+uv run python scripts/train_model.py position --end-gw 14
 
 # Full pipeline (evaluate → determine hybrid config → retrain on all data)
-uv run python scripts/train_model.py full-pipeline --end-gw 12 --holdout-gws 2
+uv run python scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2
 
 # Evaluate existing model
-uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.joblib --end-gw 12
+uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.joblib --end-gw 14
 ```
 
 **ML Training Module** (`fpl_team_picker/domain/services/ml_training/`):
@@ -101,6 +104,18 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - 4 feature selection strategies: none, correlation, permutation, rfe-smart
 - Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
 
+**Training Scorers** (`scripts/ml_training_utils.py`):
+- `neg_mean_absolute_error`: Default sklearn MAE (baseline)
+- `fpl_hauler_capture`: **Recommended** - Hauler precision@15 + point efficiency + captain accuracy
+- `fpl_hauler_ceiling`: Hauler capture + variance preservation (prevents prediction compression)
+- `fpl_weighted_huber`: Huber loss with premium/budget weighting
+- `fpl_topk`, `fpl_captain`: Legacy ranking-focused scorers
+
+**Scorer-Consistent Evaluation**: When training with custom scorers, `full-pipeline` now:
+- Reports both the scorer value AND MAE for transparency
+- Uses the scorer (not MAE) for model comparison/selection
+- Example: `✅ random-forest: fpl_hauler_ceiling=0.4015, MAE=1.08`
+
 **Multi-Model Comparison Tool** (`scripts/compare_all_models.py`):
 - **Compare all 5 uncertainty-supporting models in one command**
 - Trains & evaluates RandomForest, XGBoost, LightGBM, GradientBoosting, AdaBoost
@@ -108,6 +123,11 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - Parallel execution support (`--parallel` flag for simultaneous training)
 - Saves comparison report to `models/comparisons/comparison_{timestamp}.json`
 - Identifies best model automatically with comprehensive metrics
+
+**Top Manager Analysis** (`scripts/fetch_top_manager_ids.py`):
+- Fetches top 1% manager IDs from FPL API for strategy analysis
+- Usage: `uv run python scripts/fetch_top_manager_ids.py [num_managers]`
+- Saves to `experiments/top_manager_ids.json` and `experiments/top_manager_ids.txt`
 
 **TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
 - MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)
@@ -134,7 +154,8 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
   - **Ridge/Lasso/ElasticNet**: Returns zero uncertainty (non-ensemble models)
 - Extracts per-player prediction uncertainty from ensemble disagreement
 - Requires .joblib artifact from custom_pipeline_optimizer.py
-- Config: `config.xp_model.ml_model_path = "models/custom/random-forest_gw1-9_20251031_140131_pipeline.joblib"`
+- Config: `config.xp_model.ml_model_path = "models/custom/random-forest_gw1-14_20251205_205638_pipeline.joblib"`
+- Current model trained with `fpl_hauler_capture` scorer on GW1-14 data
 
 **Legacy: Rule-Based** (`ExpectedPointsService`):
 - Form-weighted (70/30), live data, dynamic team strength
@@ -167,11 +188,13 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 **Two methods available:**
 
 ### Basic: `get_captain_recommendation()`
-- Upside-seeking (90th percentile: xP + 1.28 × uncertainty)
+- **Ceiling-seeking**: Uses 95th percentile (xP + 1.645 × uncertainty) for high-variance explosive players
+- **Consistent players**: Uses 90th percentile (xP + 1.28 × uncertainty) for players with uncertainty ≤ 1.5
+- **Haul bonus**: Players with ceiling (xP + 2×uncertainty) > 12 get additional bonus
 - Template protection (20-40% boost for >50% owned in good fixtures)
 - Matchup quality bonus from betting odds
 
-### Advanced: `get_intelligent_captain_recommendation()` (NEW)
+### Advanced: `get_intelligent_captain_recommendation()`
 Situation-aware captain selection with configurable strategy modes:
 
 **Strategy Modes** (`CaptainSelectionConfig.strategy_mode`):
@@ -198,6 +221,28 @@ Situation-aware captain selection with configurable strategy modes:
 - Free Hit active → `chase_rank`
 
 **Marimo UI**: Strategy dropdown, rank impact toggle, haul probability matrix
+
+## Hauler-First Strategy (Top 1% Analysis)
+
+Based on empirical analysis of top 1% FPL managers comparing to average players:
+
+| Metric | Top 1% | Average | Difference |
+|--------|--------|---------|------------|
+| Captain Points | 18.7 | 15.0 | +24% |
+| Haulers/GW | 3.0 | 2.4 | +25% |
+
+**Key Insight**: Top managers don't just find haulers - they find *optimal* haulers with higher ceilings.
+
+**Implementation** (see `experiments/HAULER_STRATEGY_IMPLEMENTATION.md`):
+1. **Training**: Use `fpl_hauler_capture` or `fpl_hauler_ceiling` scorer instead of MAE
+2. **Variance Preservation**: `fpl_hauler_ceiling_scorer` penalizes models that compress predictions to 5-7 xP for everyone
+3. **Captain Selection**: 95th percentile for high-uncertainty players (ceiling-seeking)
+4. **Optimization Bonus**: SA optimizer adds ceiling bonus for players with haul potential (ceiling > 10)
+
+**Configuration** (`OptimizationConfig`):
+- `ceiling_bonus_enabled`: Add ceiling bonus to SA objective (default: True)
+- `ceiling_bonus_factor`: Bonus per point above threshold (default: 0.15)
+- `ceiling_bonus_threshold`: Ceiling threshold for bonus (default: 10.0)
 
 ## Historical xP Recomputation
 
@@ -227,6 +272,7 @@ marimo check fpl_team_picker/interfaces/ --fix
 
 **Tests**: `pytest tests/domain/services/ -v`
 - LP optimization: `pytest tests/domain/services/test_optimization_service_lp.py -v`
+- Hauler scorers: `pytest tests/domain/services/ml_training/test_scorers.py -v`
 
 ## Transfer Optimization (LP vs SA)
 
@@ -238,10 +284,11 @@ marimo check fpl_team_picker/interfaces/ --fix
 
 **SIMULATED ANNEALING (exploratory)**: Good for non-linear objectives, exploration
 - Probabilistic search with temperature-based acceptance
+- **Ceiling bonus**: Adds bonus for high-upside players (ceiling > 10) when `ceiling_bonus_enabled=True`
 - Useful for generating diverse options or complex heuristics
 - Configure: `config.optimization.transfer_optimization_method = "simulated_annealing"`
 
-**Performance**: LP is 10-50x faster than SA and finds provably optimal solutions. SA still used for initial squad generation and exploratory scenarios.
+**Performance**: LP is 10-50x faster than SA and finds provably optimal solutions. SA still used for initial squad generation, exploratory scenarios, and when ceiling bonus is desired.
 
 ## Configuration
 

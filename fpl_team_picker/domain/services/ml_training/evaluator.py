@@ -6,9 +6,10 @@ Provides comprehensive evaluation metrics for FPL ML models including:
 - FPL-specific metrics (captain accuracy, squad overlap)
 - Position-specific analysis
 - Unified vs position-specific comparison
+- Custom scorer support for training-consistent evaluation
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -17,6 +18,40 @@ from scipy.stats import spearmanr
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from .config import EvaluationConfig
+
+# Lazy import of custom scorers to avoid circular imports
+# These are loaded on-demand in evaluate_model when scorer is specified
+SCORER_FUNCTIONS: Dict[str, Callable] = {}
+
+
+def _load_scorer_functions():
+    """Load scorer functions lazily to avoid import issues."""
+    global SCORER_FUNCTIONS
+    if SCORER_FUNCTIONS:
+        return
+
+    try:
+        import sys
+        from pathlib import Path
+
+        # Add scripts to path if needed
+        scripts_path = Path(__file__).parent.parent.parent.parent.parent / "scripts"
+        if str(scripts_path) not in sys.path:
+            sys.path.insert(0, str(scripts_path))
+
+        from ml_training_utils import (
+            fpl_hauler_capture_scorer,
+            fpl_hauler_ceiling_scorer,
+        )
+
+        SCORER_FUNCTIONS.update(
+            {
+                "fpl_hauler_capture": fpl_hauler_capture_scorer,
+                "fpl_hauler_ceiling": fpl_hauler_ceiling_scorer,
+            }
+        )
+    except ImportError as e:
+        logger.warning(f"Could not load custom scorers: {e}")
 
 
 class ModelEvaluator:
@@ -42,6 +77,7 @@ class ModelEvaluator:
         X: pd.DataFrame,
         y: np.ndarray,
         cv_data: Optional[pd.DataFrame] = None,
+        scorer: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a model on test data.
@@ -51,6 +87,7 @@ class ModelEvaluator:
             X: Test features
             y: Test target
             cv_data: Optional DataFrame with position/gameweek for detailed metrics
+            scorer: Optional scorer name (e.g., 'fpl_hauler_capture') to include
 
         Returns:
             Dictionary of evaluation metrics
@@ -68,6 +105,14 @@ class ModelEvaluator:
         # Spearman correlation (ranking quality)
         corr, _ = spearmanr(y, y_pred)
         metrics["spearman"] = corr
+
+        # Custom scorer metric (if specified)
+        if scorer:
+            _load_scorer_functions()  # Lazy load scorers
+            if scorer in SCORER_FUNCTIONS:
+                scorer_func = SCORER_FUNCTIONS[scorer]
+                metrics["scorer_value"] = scorer_func(y, y_pred)
+                metrics["scorer_name"] = scorer
 
         # FPL-specific metrics if cv_data provided
         if cv_data is not None and "gameweek" in cv_data.columns:
@@ -309,6 +354,11 @@ class ModelEvaluator:
         lines.append(f"   RMSE:     {metrics.get('rmse', 0):.3f}")
         lines.append(f"   R²:       {metrics.get('r2', 0):.3f}")
         lines.append(f"   Spearman: {metrics.get('spearman', 0):.3f}")
+
+        # Custom scorer if present
+        if "scorer_value" in metrics:
+            scorer_name = metrics.get("scorer_name", "scorer")
+            lines.append(f"   {scorer_name}: {metrics['scorer_value']:.4f}")
 
         if "captain_accuracy" in metrics:
             lines.append(

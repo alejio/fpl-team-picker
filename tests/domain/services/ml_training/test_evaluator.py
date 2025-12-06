@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from fpl_team_picker.domain.services.ml_training.evaluator import ModelEvaluator
 from fpl_team_picker.domain.services.ml_training.config import EvaluationConfig

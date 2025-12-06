@@ -74,20 +74,51 @@ class CaptainServiceMixin(OptimizationBaseMixin):
             uncertainty = player.get("xP_uncertainty", 0)
             ownership_pct = player.get("selected_by_percent", 0)
 
-            # Calculate upside (90th percentile) instead of penalizing uncertainty
+            # Calculate upside using ceiling-seeking approach
             # Philosophy: Captaincy seeks ceiling/explosive potential, not safety
-            # 90th percentile = mean + 1.28 * std_dev (normal distribution)
+            #
+            # Based on top 1% manager analysis:
+            # - Top managers average 18.7 captain points vs 15.0 for average
+            # - They capture 3.0 haulers per GW vs 2.4 for average
+            # - Key: They don't just find haulers, they find OPTIMAL haulers (higher ceiling)
+            #
+            # High-uncertainty players have higher ceiling potential:
+            # - Use 95th percentile (1.645 * std) for high-variance explosive players
+            # - Use 90th percentile (1.28 * std) for consistent players
             xp_upside = xp_value
             if has_uncertainty and uncertainty > 0:
-                # Players with high uncertainty have higher ceiling potential
-                # Example: Haaland vs Leeds (8.5 ± 2.2 xP) → upside = 11.3 xP
-                xp_upside = xp_value + (1.28 * uncertainty)
+                # High variance = explosive potential → use 95th percentile
+                # Low variance = consistent player → use 90th percentile
+                if uncertainty > 1.5:
+                    # High-ceiling explosive player (e.g., Haaland vs weak team)
+                    # 95th percentile = mean + 1.645 * std_dev
+                    xp_upside = xp_value + (1.645 * uncertainty)
+                else:
+                    # Consistent player (e.g., Salah home fixture)
+                    # 90th percentile = mean + 1.28 * std_dev
+                    xp_upside = xp_value + (1.28 * uncertainty)
 
             # Base captain score uses upside (seeking ceiling, not mean)
             base_score = xp_upside * 2
 
             # Store upside for transparency (used in candidate analysis)
             upside_boost = xp_upside - xp_value
+
+            # HAUL POTENTIAL BONUS (NEW)
+            # Based on top 1% analysis: they identify players with 12+ point ceiling
+            # Add bonus for players with genuine haul potential
+            haul_bonus = 0.0
+            if has_uncertainty and uncertainty > 0:
+                # Calculate ceiling (99th percentile: mean + 2.33 * std)
+                haul_ceiling = xp_value + (2.33 * uncertainty)
+
+                # Bonus for players with ceiling > 12 (genuine haul potential)
+                if haul_ceiling > 12:
+                    # Up to 25% bonus for players with 20+ ceiling
+                    haul_bonus = min((haul_ceiling - 12) * 0.03, 0.25)
+
+            # Apply haul bonus to base score before other adjustments
+            base_score = base_score * (1 + haul_bonus)
 
             # Template protection + Matchup quality: Boost high ownership in good fixtures
             # UPGRADED 2025/26: Increased from 5-10% to 20-40% + betting odds integration
@@ -152,6 +183,7 @@ class CaptainServiceMixin(OptimizationBaseMixin):
             player["_xp_upside"] = xp_upside
             player["_ownership_bonus"] = ownership_bonus
             player["_matchup_bonus"] = matchup_bonus
+            player["_haul_bonus"] = haul_bonus
 
         # Sort by enhanced captain score
         captain_candidates = sorted(
@@ -244,6 +276,7 @@ class CaptainServiceMixin(OptimizationBaseMixin):
             candidate["captain_score"] = player.get("_captain_score", captain_potential)
             candidate["base_score"] = player.get("_base_score", captain_potential)
             candidate["matchup_bonus"] = player.get("_matchup_bonus", 0)
+            candidate["haul_bonus"] = player.get("_haul_bonus", 0)
             # Add ownership_bonus even if 0 (for consistent API)
             if not has_ownership:
                 candidate["ownership_bonus"] = 0

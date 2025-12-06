@@ -1053,14 +1053,14 @@ class TestCombinedScoring:
         # NEW LOGIC: High uncertainty should score HIGHER (seeking ceiling)
         assert high_var["captain_score"] > low_var["captain_score"]
 
-        # Check upside boosts (90th percentile calculation)
-        # low_var: upside = 8.0 + 1.28 * 0.5 = 8.64 → boost = 0.64
-        # high_var: upside = 8.0 + 1.28 * 3.0 = 11.84 → boost = 3.84
+        # Check upside boosts (percentile-based calculation)
+        # low_var (uncertainty 0.5 <= 1.5): uses 90th percentile → 1.28 * 0.5 = 0.64
+        # high_var (uncertainty 3.0 > 1.5): uses 95th percentile → 1.645 * 3.0 = 4.935
         low_var_boost = low_var["upside_boost"]
         high_var_boost = high_var["upside_boost"]
 
         assert abs(low_var_boost - 0.64) < 0.1
-        assert abs(high_var_boost - 3.84) < 0.1
+        assert abs(high_var_boost - 4.935) < 0.1
         assert high_var_boost > low_var_boost  # Higher uncertainty = higher boost
 
     def test_premium_differential_with_high_xp(self):
@@ -1199,6 +1199,314 @@ class TestScoringComponentsOutput:
         expected_final = base_score * (1 + ownership_bonus + matchup_bonus)
 
         assert abs(final_score - expected_final) < 0.1
+
+
+# ============================================================================
+# Hauler Strategy Tests (2025/26 Enhancement)
+# ============================================================================
+
+
+class TestHaulerCeilingStrategy:
+    """Test ceiling-seeking captain selection based on top 1% manager analysis.
+
+    Based on analysis of top 1% FPL managers:
+    - Top managers average 18.7 captain points vs 15.0 for average
+    - They capture 3.0 haulers per GW vs 2.4 for average
+    - Key insight: They identify OPTIMAL haulers with highest ceilings
+    """
+
+    def test_high_uncertainty_uses_95th_percentile(self):
+        """Test that high-uncertainty players use 95th percentile (1.645 * std)."""
+        service = OptimizationService()
+
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Explosive",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "xP_uncertainty": 2.0,  # High uncertainty (> 1.5)
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=1)
+        candidate = result["top_candidates"][0]
+
+        # Should use 95th percentile: 8.0 + 1.645 * 2.0 = 11.29
+        expected_upside = 8.0 + 1.645 * 2.0
+
+        assert abs(candidate["xP_upside"] - expected_upside) < 0.1
+
+    def test_low_uncertainty_uses_90th_percentile(self):
+        """Test that low-uncertainty players use 90th percentile (1.28 * std)."""
+        service = OptimizationService()
+
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Consistent",
+                    "position": "MID",
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.0,  # Low uncertainty (<= 1.5)
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=1)
+        candidate = result["top_candidates"][0]
+
+        # Should use 90th percentile: 8.0 + 1.28 * 1.0 = 9.28
+        expected_upside = 8.0 + 1.28 * 1.0
+
+        assert abs(candidate["xP_upside"] - expected_upside) < 0.1
+
+    def test_haul_bonus_for_high_ceiling_players(self):
+        """Test that players with ceiling > 12 get haul bonus (up to 25%)."""
+        service = OptimizationService()
+
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "HaulPotential",
+                    "position": "FWD",
+                    "xP": 9.0,
+                    "xP_uncertainty": 3.0,  # Ceiling = 9 + 2.33*3 = 15.99 → bonus
+                    "price": 14.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "LowCeiling",
+                    "position": "MID",
+                    "xP": 6.0,
+                    "xP_uncertainty": 1.0,  # Ceiling = 6 + 2.33*1 = 8.33 → no bonus
+                    "price": 8.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=2)
+        candidates = {c["web_name"]: c for c in result["top_candidates"]}
+
+        # HaulPotential should have haul bonus
+        assert "haul_bonus" in candidates["HaulPotential"]
+        assert candidates["HaulPotential"]["haul_bonus"] > 0
+
+        # LowCeiling should have no haul bonus
+        assert candidates["LowCeiling"]["haul_bonus"] == 0
+
+    def test_haul_bonus_capped_at_25_percent(self):
+        """Test that haul bonus is capped at 25% maximum."""
+        service = OptimizationService()
+
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "MassiveCeiling",
+                    "position": "FWD",
+                    "xP": 10.0,
+                    "xP_uncertainty": 8.0,  # Ceiling = 10 + 2.33*8 = 28.64 → max bonus
+                    "price": 15.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 60.0,
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=1)
+        candidate = result["top_candidates"][0]
+
+        # Haul bonus should be capped at 0.25 (25%)
+        assert candidate["haul_bonus"] == 0.25
+
+    def test_explosive_player_beats_consistent_with_same_xp(self):
+        """Test that high-ceiling player ranks higher than consistent one with same xP."""
+        service = OptimizationService()
+
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Explosive",
+                    "position": "FWD",
+                    "xP": 8.0,
+                    "xP_uncertainty": 3.0,  # High variance
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Consistent",
+                    "position": "MID",
+                    "xP": 8.0,  # Same xP
+                    "xP_uncertainty": 0.5,  # Low variance
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                    "selected_by_percent": 40.0,
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=2)
+
+        # Explosive player should be captain (seeking ceiling)
+        assert result["captain"]["web_name"] == "Explosive"
+        assert result["vice_captain"]["web_name"] == "Consistent"
+
+    def test_upside_percentile_transition_at_1_5(self):
+        """Test that percentile transition happens at uncertainty = 1.5."""
+        service = OptimizationService()
+
+        # Just below threshold (1.49)
+        players_below = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Below",
+                    "position": "MID",
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.49,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
+
+        # Just above threshold (1.51)
+        players_above = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Above",
+                    "position": "MID",
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.51,
+                    "price": 10.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
+
+        result_below = service.get_captain_recommendation(players_below, top_n=1)
+        result_above = service.get_captain_recommendation(players_above, top_n=1)
+
+        below_upside = result_below["top_candidates"][0]["xP_upside"]
+        above_upside = result_above["top_candidates"][0]["xP_upside"]
+
+        # Below threshold: 8.0 + 1.28 * 1.49 = 9.9072
+        expected_below = 8.0 + 1.28 * 1.49
+
+        # Above threshold: 8.0 + 1.645 * 1.51 = 10.484
+        expected_above = 8.0 + 1.645 * 1.51
+
+        assert abs(below_upside - expected_below) < 0.1
+        assert abs(above_upside - expected_above) < 0.1
+
+        # Higher percentile should give higher upside
+        assert above_upside > below_upside
+
+
+class TestHaulBonusCalculation:
+    """Detailed tests for haul bonus calculation."""
+
+    def test_haul_bonus_formula(self):
+        """Test haul bonus formula: min((ceiling - 12) * 0.03, 0.25)."""
+        service = OptimizationService()
+
+        # Formula: ceiling = xP + 2.33 * uncertainty
+        # haul_bonus = min((ceiling - 12) * 0.03, 0.25) if ceiling > 12 else 0
+        test_cases = [
+            # (xP, uncertainty, expected_haul_bonus)
+            (8.0, 1.0, 0.0),      # Ceiling = 8 + 2.33 = 10.33 < 12 → no bonus
+            (10.0, 1.0, 0.01),    # Ceiling = 10 + 2.33 = 12.33 → 0.33 * 0.03 = 0.0099
+            (10.0, 2.0, 0.08),    # Ceiling = 10 + 4.66 = 14.66 → 2.66 * 0.03 = 0.0798
+            (10.0, 4.0, 0.22),    # Ceiling = 10 + 9.32 = 19.32 → 7.32 * 0.03 = 0.2196
+            (12.0, 4.0, 0.25),    # Ceiling = 12 + 9.32 = 21.32 → 9.32 * 0.03 = 0.28 → capped at 0.25
+        ]
+
+        for xp, uncertainty, expected_bonus in test_cases:
+            players_df = pd.DataFrame(
+                [
+                    {
+                        "player_id": 1,
+                        "web_name": "Test",
+                        "position": "FWD",
+                        "xP": xp,
+                        "xP_uncertainty": uncertainty,
+                        "price": 10.0,
+                        "expected_minutes": 90,
+                        "fixture_outlook": "🟢 Easy",
+                        "status": "a",
+                    },
+                ]
+            )
+
+            result = service.get_captain_recommendation(players_df, top_n=1)
+            actual_bonus = result["top_candidates"][0]["haul_bonus"]
+
+            assert abs(actual_bonus - expected_bonus) < 0.02, (
+                f"xP={xp}, uncertainty={uncertainty}: "
+                f"expected haul_bonus ~{expected_bonus:.3f}, got {actual_bonus:.3f}"
+            )
+
+    def test_haul_bonus_requires_uncertainty(self):
+        """Test that haul bonus requires xP_uncertainty column."""
+        service = OptimizationService()
+
+        # Player without uncertainty data
+        players_df = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "NoUncertainty",
+                    "position": "FWD",
+                    "xP": 10.0,
+                    "price": 12.0,
+                    "expected_minutes": 90,
+                    "fixture_outlook": "🟢 Easy",
+                    "status": "a",
+                },
+            ]
+        )
+
+        result = service.get_captain_recommendation(players_df, top_n=1)
+        candidate = result["top_candidates"][0]
+
+        # Should have no haul bonus without uncertainty data
+        assert candidate["haul_bonus"] == 0
 
 
 class TestBackwardsCompatibility:

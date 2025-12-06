@@ -571,6 +571,24 @@ class TransferSAMixin(OptimizationBaseMixin):
             new_starting_11 = self._get_best_starting_11_from_squad(new_team, xp_column)
             squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in new_starting_11)
 
+            # CEILING BONUS: Prefer players with haul potential
+            # Based on top 1% manager analysis: they capture 3.0 haulers/GW vs 2.4 for average
+            # Add bonus for players with high ceiling (95th percentile > 10)
+            ceiling_bonus = 0.0
+            if config.optimization.ceiling_bonus_enabled:
+                for p in new_starting_11:
+                    xp = p.get(xp_column, 0)
+                    uncertainty = p.get("xP_uncertainty", 0)
+                    if uncertainty > 0:
+                        # Calculate ceiling (95th percentile: mean + 1.645 * std)
+                        ceiling = xp + 1.645 * uncertainty
+                        # Bonus for players with ceiling > 10 (haul potential)
+                        if ceiling > 10:
+                            # Up to 1.5 bonus per player with 20 ceiling
+                            ceiling_bonus += (
+                                ceiling - 10
+                            ) * config.optimization.ceiling_bonus_factor
+
             # For 1GW optimization, penalize expensive bench
             bench_cost_penalty = 0.0
             if xp_column == "xP":
@@ -586,7 +604,9 @@ class TransferSAMixin(OptimizationBaseMixin):
                 max(0, num_transfers_from_original - free_transfers)
                 * config.optimization.transfer_cost
             )
-            new_objective = squad_xp - bench_cost_penalty - transfer_penalty
+            new_objective = (
+                squad_xp + ceiling_bonus - bench_cost_penalty - transfer_penalty
+            )
 
             # Accept if better or with probability
             delta = new_objective - current_objective
@@ -1049,11 +1069,25 @@ class TransferSAMixin(OptimizationBaseMixin):
                             new_squad, xp_column
                         )
                         squad_xp = sum(p[xp_column] for p in starting_11)
+
+                        # CEILING BONUS for exhaustive search
+                        ceiling_bonus = 0.0
+                        if config.optimization.ceiling_bonus_enabled:
+                            for p in starting_11:
+                                xp = p.get(xp_column, 0)
+                                uncertainty = p.get("xP_uncertainty", 0)
+                                if uncertainty > 0:
+                                    ceiling = xp + 1.645 * uncertainty
+                                    if ceiling > 10:
+                                        ceiling_bonus += (
+                                            ceiling - 10
+                                        ) * config.optimization.ceiling_bonus_factor
+
                         transfer_penalty = (
                             max(0, num_transfers - free_transfers)
                             * config.optimization.transfer_cost
                         )
-                        net_xp = squad_xp - transfer_penalty
+                        net_xp = squad_xp + ceiling_bonus - transfer_penalty
 
                         if net_xp > best_net_xp:
                             best_net_xp = net_xp
@@ -1141,11 +1175,25 @@ class TransferSAMixin(OptimizationBaseMixin):
                                 new_squad, xp_column
                             )
                             squad_xp = sum(p[xp_column] for p in starting_11)
+
+                            # CEILING BONUS for exhaustive search (2+ transfers)
+                            ceiling_bonus = 0.0
+                            if config.optimization.ceiling_bonus_enabled:
+                                for p in starting_11:
+                                    xp = p.get(xp_column, 0)
+                                    uncertainty = p.get("xP_uncertainty", 0)
+                                    if uncertainty > 0:
+                                        ceiling = xp + 1.645 * uncertainty
+                                        if ceiling > 10:
+                                            ceiling_bonus += (
+                                                ceiling - 10
+                                            ) * config.optimization.ceiling_bonus_factor
+
                             transfer_penalty = (
                                 max(0, num_transfers - free_transfers)
                                 * config.optimization.transfer_cost
                             )
-                            net_xp = squad_xp - transfer_penalty
+                            net_xp = squad_xp + ceiling_bonus - transfer_penalty
 
                             if net_xp > best_net_xp:
                                 best_net_xp = net_xp
