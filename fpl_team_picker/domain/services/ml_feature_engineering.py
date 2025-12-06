@@ -2225,28 +2225,30 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         # Group by player for rolling calculations
         player_groups = df.sort_values("gameweek").groupby("player_id")
 
-        # 1. Minutes consistency (std dev)
+        # 1. Minutes consistency (std dev) - use shift(1) to avoid leakage
         df["player_minutes_consistency"] = (
             player_groups["minutes"]
-            .transform(lambda x: x.rolling(5, min_periods=2).std())
+            .transform(lambda x: x.shift(1).rolling(5, min_periods=2).std())
             .fillna(15.0)
         )
 
-        # 2. Benching frequency (< 30 mins rate)
+        # 2. Benching frequency (< 30 mins rate) - use shift(1) to avoid leakage
         df["player_benching_frequency_5gw"] = (
             player_groups["minutes"]
-            .transform(lambda x: (x < 30).rolling(5, min_periods=2).mean())
+            .transform(lambda x: (x.shift(1) < 30).rolling(5, min_periods=2).mean())
             .fillna(0.2)
         )
 
-        # 3. Substitute appearance rate (1-60 mins)
+        # 3. Substitute appearance rate (1-60 mins) - use shift(1) to avoid leakage
         df["player_substitute_appearance_rate"] = (
             player_groups["minutes"]
-            .transform(lambda x: x.between(1, 60).rolling(5, min_periods=2).mean())
+            .transform(
+                lambda x: x.shift(1).between(1, 60).rolling(5, min_periods=2).mean()
+            )
             .fillna(0.1)
         )
 
-        # 4. Minutes trend (linear regression slope)
+        # 4. Minutes trend (linear regression slope) - use shift(1) to avoid leakage
         def calculate_trend(series):
             if len(series) < 3:
                 return 0.0
@@ -2257,15 +2259,19 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df["player_minutes_trend"] = (
             player_groups["minutes"]
             .transform(
-                lambda x: x.rolling(5, min_periods=3).apply(calculate_trend, raw=False)
+                lambda x: x.shift(1)
+                .rolling(5, min_periods=3)
+                .apply(calculate_trend, raw=False)
             )
             .fillna(0.0)
         )
 
-        # 5. Nailed starter (90+ mins in 4/5 games)
+        # 5. Nailed starter (90+ mins in 4/5 games) - use shift(1) to avoid leakage
         df["player_is_nailed_starter"] = (
             player_groups["minutes"]
-            .transform(lambda x: (x >= 90).rolling(5, min_periods=4).sum() >= 4)
+            .transform(
+                lambda x: (x.shift(1) >= 90).rolling(5, min_periods=4).sum() >= 4
+            )
             .fillna(False)
             .astype(int)
         )
@@ -2276,26 +2282,26 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         """Calculate bonus points efficiency features (Category 3)."""
         player_groups = df.sort_values("gameweek").groupby("player_id")
 
-        # 1. Bonus points rate (any bonus)
+        # 1. Bonus points rate (any bonus) - use shift(1) to avoid leakage
         df["player_bonus_points_rate"] = (
             player_groups["bonus"]
-            .transform(lambda x: (x > 0).rolling(5, min_periods=2).mean())
+            .transform(lambda x: (x.shift(1) > 0).rolling(5, min_periods=2).mean())
             .fillna(0.15)
         )
 
-        # 2. Three bonus rate
+        # 2. Three bonus rate - use shift(1) to avoid leakage
         df["player_three_bonus_rate"] = (
             player_groups["bonus"]
-            .transform(lambda x: (x == 3).rolling(5, min_periods=2).mean())
+            .transform(lambda x: (x.shift(1) == 3).rolling(5, min_periods=2).mean())
             .fillna(0.05)
         )
 
-        # 3. BPS per point (efficiency)
+        # 3. BPS per point (efficiency) - use shift(1) to avoid leakage
         rolling_bps = player_groups["bps"].transform(
-            lambda x: x.rolling(5, min_periods=2).mean()
+            lambda x: x.shift(1).rolling(5, min_periods=2).mean()
         )
         rolling_points = player_groups["total_points"].transform(
-            lambda x: x.rolling(5, min_periods=2).mean()
+            lambda x: x.shift(1).rolling(5, min_periods=2).mean()
         )
 
         # Avoid division by zero
@@ -2428,10 +2434,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             df["player_matchup_style_score"] = 2.5
 
         # 5. Attacking team score (composite)
-        attack_cols = ["team_goals_scored_5gw", "team_xg_5gw"]
+        # Use team_rolling_5gw_goals_scored and team_rolling_5gw_xg (already shifted, leak-free)
+        attack_cols = ["team_rolling_5gw_goals_scored", "team_rolling_5gw_xg"]
         if all(col in df.columns for col in attack_cols):
             df["player_attacking_team_score"] = (
-                df["team_goals_scored_5gw"] / 5.0 + df["team_xg_5gw"] / 5.0
+                df["team_rolling_5gw_goals_scored"] / 5.0
+                + df["team_rolling_5gw_xg"] / 5.0
             )
         else:
             df["player_attacking_team_score"] = 1.5
