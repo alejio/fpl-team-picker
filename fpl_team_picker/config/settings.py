@@ -19,9 +19,8 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/hybrid/hybrid_gw1-14_20251206_123305.joblib",
-        description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
-        "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
+        default="models/custom/random-forest_gw1-14_20251206_213342_pipeline.joblib",
+        description="Trained using scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --scorer fpl_hauler_ceiling --n-trials 75",
     )
     ml_ensemble_rule_weight: float = Field(
         default=0.0,

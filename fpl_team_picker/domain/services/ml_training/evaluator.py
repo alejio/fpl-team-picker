@@ -199,6 +199,7 @@ class ModelEvaluator:
         X: pd.DataFrame,
         y: np.ndarray,
         positions: pd.Series,
+        scorer: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Compare unified model vs position-specific models.
@@ -209,14 +210,29 @@ class ModelEvaluator:
             X: Test features
             y: Test target
             positions: Position labels
+            scorer: Optional scorer name (e.g., 'fpl_hauler_ceiling') to use for comparison.
+                   If None, uses MAE. Should match the scorer used during training.
 
         Returns:
             Comparison results with per-position breakdown
         """
+        # Load scorer function if specified
+        scorer_func = None
+        if scorer:
+            _load_scorer_functions()
+            if scorer in SCORER_FUNCTIONS:
+                scorer_func = SCORER_FUNCTIONS[scorer]
+                logger.info(
+                    f"   Using {scorer} scorer for comparison (higher is better)"
+                )
+            else:
+                logger.warning(f"   Scorer '{scorer}' not found, falling back to MAE")
+
         results = {
             "unified_overall": {},
             "position_specific_overall": {},
             "per_position": {},
+            "scorer_name": scorer if scorer_func else None,
         }
 
         # Unified predictions
@@ -226,6 +242,8 @@ class ModelEvaluator:
             "rmse": np.sqrt(mean_squared_error(y, unified_preds)),
             "spearman": spearmanr(y, unified_preds)[0],
         }
+        if scorer_func:
+            results["unified_overall"]["scorer_value"] = scorer_func(y, unified_preds)
 
         # Position-specific predictions (combined)
         position_preds = np.zeros_like(unified_preds)
@@ -241,6 +259,7 @@ class ModelEvaluator:
             # Get unified performance for this position
             unified_pos_preds = unified_preds[mask]
             unified_mae = mean_absolute_error(y_pos, unified_pos_preds)
+            unified_metric = unified_mae  # Default to MAE
 
             # Get position-specific performance
             if pos in position_models:
@@ -267,21 +286,42 @@ class ModelEvaluator:
                 specific_preds = unified_pos_preds
 
             specific_mae = mean_absolute_error(y_pos, specific_preds)
+            specific_metric = specific_mae  # Default to MAE
             position_preds[mask] = specific_preds
 
-            # Calculate improvement
-            improvement = unified_mae - specific_mae
-            improvement_pct = (
-                (improvement / unified_mae) * 100 if unified_mae > 0 else 0
-            )
+            # Calculate scorer metric if available
+            if scorer_func:
+                unified_scorer_value = scorer_func(y_pos, unified_pos_preds)
+                specific_scorer_value = scorer_func(y_pos, specific_preds)
+                # For scorer (higher is better), improvement = specific - unified
+                # For MAE (lower is better), improvement = unified - specific
+                improvement = specific_scorer_value - unified_scorer_value
+                improvement_pct = (
+                    (improvement / unified_scorer_value) * 100
+                    if unified_scorer_value > 0
+                    else 0
+                )
+                unified_metric = unified_scorer_value
+                specific_metric = specific_scorer_value
+            else:
+                # MAE: lower is better, so improvement = unified - specific
+                improvement = unified_mae - specific_mae
+                improvement_pct = (
+                    (improvement / unified_mae) * 100 if unified_mae > 0 else 0
+                )
 
             results["per_position"][pos] = {
                 "unified_mae": unified_mae,
                 "specific_mae": specific_mae,
+                "unified_metric": unified_metric,  # Scorer value if scorer_func, else MAE
+                "specific_metric": specific_metric,  # Scorer value if scorer_func, else MAE
                 "improvement": improvement,
                 "improvement_pct": improvement_pct,
                 "n_samples": int(mask.sum()),
             }
+            if scorer_func:
+                results["per_position"][pos]["unified_scorer"] = unified_scorer_value
+                results["per_position"][pos]["specific_scorer"] = specific_scorer_value
 
         # Overall position-specific performance
         results["position_specific_overall"] = {
@@ -289,6 +329,10 @@ class ModelEvaluator:
             "rmse": np.sqrt(mean_squared_error(y, position_preds)),
             "spearman": spearmanr(y, position_preds)[0],
         }
+        if scorer_func:
+            results["position_specific_overall"]["scorer_value"] = scorer_func(
+                y, position_preds
+            )
 
         return results
 
@@ -300,6 +344,9 @@ class ModelEvaluator:
         """
         Determine which positions should use position-specific models.
 
+        Uses the scorer metric if available (from training), otherwise falls back to MAE.
+        This ensures decisions are made using the same metric the models were optimized for.
+
         Args:
             comparison_results: Output from compare_unified_vs_position
             threshold: Minimum improvement (as fraction) to use specific model
@@ -308,16 +355,24 @@ class ModelEvaluator:
             List of positions that should use position-specific models
         """
         positions_for_specific = []
+        scorer_name = comparison_results.get("scorer_name")
+
+        # Determine metric to use for comparison
+        use_scorer = scorer_name is not None
 
         logger.info(f"\n📊 Hybrid Configuration (threshold: {threshold * 100:.1f}%)")
+        if use_scorer:
+            logger.info(f"   Using {scorer_name} scorer (higher is better)")
+        else:
+            logger.info("   Using MAE (lower is better)")
         logger.info(
             f"   {'Position':<8} {'Unified':<10} {'Specific':<10} {'Improve':<10} {'Use Specific?'}"
         )
         logger.info("   " + "-" * 50)
 
         for pos, metrics in comparison_results.get("per_position", {}).items():
-            unified_mae = metrics["unified_mae"]
-            specific_mae = metrics["specific_mae"]
+            unified_metric = metrics.get("unified_metric", metrics["unified_mae"])
+            specific_metric = metrics.get("specific_metric", metrics["specific_mae"])
             improvement_pct = metrics["improvement_pct"] / 100  # Convert to fraction
 
             use_specific = improvement_pct >= threshold
@@ -325,10 +380,18 @@ class ModelEvaluator:
                 positions_for_specific.append(pos)
 
             marker = "✅ YES" if use_specific else "❌ NO"
-            logger.info(
-                f"   {pos:<8} {unified_mae:<10.3f} {specific_mae:<10.3f} "
-                f"{improvement_pct:>+8.1%}   {marker}"
-            )
+
+            # Format metric display (show scorer value if available, else MAE)
+            if use_scorer:
+                logger.info(
+                    f"   {pos:<8} {unified_metric:<10.4f} {specific_metric:<10.4f} "
+                    f"{improvement_pct:>+8.1%}   {marker}"
+                )
+            else:
+                logger.info(
+                    f"   {pos:<8} {unified_metric:<10.3f} {specific_metric:<10.3f} "
+                    f"{improvement_pct:>+8.1%}   {marker}"
+                )
 
         logger.info(
             f"\n   Result: {positions_for_specific or 'None (use unified for all)'}"

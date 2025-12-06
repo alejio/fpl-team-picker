@@ -426,6 +426,7 @@ def full_pipeline(
         X_holdout,
         y_holdout,
         holdout_cv_data["position"],
+        scorer=scorer,  # Use the same scorer as training
     )
 
     positions_for_specific = evaluator.determine_hybrid_config(
