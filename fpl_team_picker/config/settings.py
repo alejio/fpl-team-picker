@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-14_20251205_205638_pipeline.joblib",
+        default="models/hybrid/hybrid_gw1-14_20251206_123305.joblib",
         description="Path to pre-trained ML model with 117 features (Custom RF with RFE-smart + penalty features, trained on GW1-10). "
         "Trained using: scripts/custom_pipeline_optimizer.py train --use-best-params-from <json>",
     )

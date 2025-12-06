@@ -53,6 +53,45 @@ CUSTOM_SCORERS = {
     "fpl_hauler_ceiling": fpl_hauler_ceiling_scorer_sklearn,  # Hauler-first with variance preservation
 }
 
+# Position-specific feature exclusions
+# Only exclude features that are logically impossible for each position
+POSITION_FEATURE_EXCLUSIONS = {
+    "GKP": [
+        # Player goal-related (GKP essentially never score)
+        "cumulative_goals",
+        "rolling_5gw_goals",
+        "goals_per_90",
+        "rolling_5gw_goals_per_90",
+        "cumulative_xg",
+        "rolling_5gw_xg",
+        "xg_per_90",
+        "rolling_5gw_xgi",  # xG + xA combined metric
+        # Player attacking metrics (GKP never in attacking third)
+        "rolling_5gw_threat",
+        "rolling_5gw_creativity",
+        # Outfield defensive actions (GKP don't tackle/recover)
+        "tackles",
+        "recoveries",
+        "defensive_contribution",
+    ],
+    "DEF": [
+        "rolling_5gw_saves",  # Only GKP make saves
+    ],
+    "MID": [
+        "rolling_5gw_saves",  # Only GKP make saves
+    ],
+    "FWD": [
+        # GKP-specific
+        "rolling_5gw_saves",
+        # FWD don't score clean sheet points
+        "cumulative_clean_sheets",
+        "rolling_5gw_clean_sheets",
+        "clean_sheet_rate",
+        "clean_sheet_probability_enhanced",
+        "implied_clean_sheet_probability",
+    ],
+}
+
 
 class MLTrainer:
     """
@@ -360,8 +399,19 @@ class MLTrainer:
 
         logger.info(f"📍 Training {position} model ({len(features_pos)} samples)...")
 
+        # Apply position-specific feature exclusions (before adding position features)
+        excluded_features = POSITION_FEATURE_EXCLUSIONS.get(position, [])
+        base_feature_names = [
+            f for f in all_feature_names if f not in excluded_features
+        ]
+
+        if excluded_features:
+            logger.info(
+                f"   Excluding {len(excluded_features)} logically impossible features for {position}"
+            )
+
         # Add position-specific features
-        pos_feature_names = list(all_feature_names)
+        pos_feature_names = list(base_feature_names)
         pos_additions = self._get_position_feature_additions(position)
 
         for feat_name, feat_func in pos_additions:
@@ -375,7 +425,7 @@ class MLTrainer:
         X = features_pos[pos_feature_names].copy()
         y = target_pos
 
-        # Feature selection
+        # Feature selection (further filters based on importance)
         selected_features = self.select_features(X, y, pos_feature_names)
 
         if best_params is not None:

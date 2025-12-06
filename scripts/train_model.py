@@ -24,9 +24,10 @@ Usage:
 
 import json
 import sys
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import joblib
 import typer
@@ -173,6 +174,52 @@ def train_position(
 
 
 # =============================================================================
+# PARALLEL TRAINING HELPERS
+# =============================================================================
+
+
+def _train_unified_regressor(
+    reg: str,
+    config_dict: Dict[str, Any],
+    X_holdout,
+    y_holdout,
+    holdout_cv_data,
+    scorer: str,
+) -> tuple[str, Optional[Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Train and evaluate a single unified regressor (for parallel execution).
+
+    Args:
+        reg: Regressor name
+        config_dict: TrainingConfig as dict
+        X_holdout: Holdout features
+        y_holdout: Holdout target
+        holdout_cv_data: CV metadata for holdout
+        scorer: Scorer name
+
+    Returns:
+        Tuple of (regressor_name, model, metadata, metrics) or (reg, None, None, None) on failure
+    """
+    try:
+        # Recreate config from dict
+        config = TrainingConfig(**config_dict, regressor=reg)
+        trainer = MLTrainer(config)
+        model, metadata = trainer.train_unified()
+
+        # Evaluate on holdout
+        evaluator = ModelEvaluator()
+        metrics = evaluator.evaluate_model(
+            model, X_holdout, y_holdout, holdout_cv_data, scorer=scorer
+        )
+
+        return reg, model, metadata, metrics
+
+    except Exception as e:
+        logger.warning(f"   ❌ {reg} failed: {e}")
+        return reg, None, None, None
+
+
+# =============================================================================
 # FULL HYBRID PIPELINE
 # =============================================================================
 
@@ -196,6 +243,9 @@ def full_pipeline(
     ),
     output_dir: str = typer.Option("models", help="Base output directory"),
     random_seed: int = typer.Option(42, help="Random seed"),
+    max_workers: int = typer.Option(
+        4, help="Max parallel workers for unified training (default: 4)"
+    ),
 ):
     """
     Full pipeline: Evaluate → Determine best config → Retrain on all data.
@@ -254,8 +304,10 @@ def full_pipeline(
     y_holdout = target[test_mask]
     holdout_cv_data = cv_data[test_mask].reset_index(drop=True)
 
-    # 1a. Train and evaluate unified models
-    logger.info(f"\n🔧 Step 1a: Training unified models on GW1-{train_end_gw}...")
+    # 1a. Train and evaluate unified models (PARALLEL)
+    logger.info(
+        f"\n🔧 Step 1a: Training {len(unified_reg_list)} unified models in parallel on GW1-{train_end_gw}..."
+    )
 
     unified_results = {}
     best_unified_regressor = None
@@ -263,33 +315,47 @@ def full_pipeline(
     best_unified_scorer = None  # Track scorer value (higher is better)
     best_unified_model = None
 
-    for reg in unified_reg_list:
-        logger.info(f"\n   Training {reg}...")
+    # Prepare config dict (without regressor - will be set per worker)
+    config_dict = {
+        "start_gw": 1,
+        "end_gw": train_end_gw,
+        "n_trials": n_trials,
+        "scorer": scorer,
+        "output_dir": output_path / "custom",
+        "random_seed": random_seed,
+        "verbose": 0,
+    }
 
-        config = TrainingConfig(
-            start_gw=1,
-            end_gw=train_end_gw,
-            regressor=reg,
-            n_trials=n_trials,
-            scorer=scorer,
-            output_dir=output_path / "custom",
-            random_seed=random_seed,
-            verbose=0,
-        )
+    # Parallel training
+    n_workers = min(len(unified_reg_list), max_workers)
+    logger.info(f"   Using {n_workers} parallel workers")
 
-        try:
-            trainer = MLTrainer(config)
-            model, metadata = trainer.train_unified()
+    with ProcessPoolExecutor(max_workers=n_workers) as executor:
+        # Submit all jobs
+        futures = {
+            executor.submit(
+                _train_unified_regressor,
+                reg,
+                config_dict,
+                X_holdout,
+                y_holdout,
+                holdout_cv_data,
+                scorer,
+            ): reg
+            for reg in unified_reg_list
+        }
 
-            # Evaluate on holdout
-            evaluator = ModelEvaluator()
-            metrics = evaluator.evaluate_model(
-                model, X_holdout, y_holdout, holdout_cv_data, scorer=scorer
-            )
+        # Process results as they complete
+        for future in as_completed(futures):
+            reg = futures[future]
+            reg_name, model, metadata, metrics = future.result()
+
+            if model is None or metrics is None:
+                continue  # Failed (already logged in worker)
 
             mae = metrics["mae"]
             scorer_value = metrics.get("scorer_value")
-            unified_results[reg] = {
+            unified_results[reg_name] = {
                 "mae": mae,
                 "scorer_value": scorer_value,
                 "model": model,
@@ -298,9 +364,11 @@ def full_pipeline(
 
             # Log both MAE and scorer value for transparency
             if scorer_value is not None:
-                logger.info(f"   ✅ {reg}: {scorer}={scorer_value:.4f}, MAE={mae:.4f}")
+                logger.info(
+                    f"   ✅ {reg_name}: {scorer}={scorer_value:.4f}, MAE={mae:.4f}"
+                )
             else:
-                logger.info(f"   ✅ {reg}: MAE = {mae:.4f}")
+                logger.info(f"   ✅ {reg_name}: MAE = {mae:.4f}")
 
             # Use scorer value for comparison if available (higher is better)
             # Fall back to MAE if scorer not available (lower is better)
@@ -308,15 +376,12 @@ def full_pipeline(
                 if best_unified_scorer is None or scorer_value > best_unified_scorer:
                     best_unified_scorer = scorer_value
                     best_unified_mae = mae
-                    best_unified_regressor = reg
+                    best_unified_regressor = reg_name
                     best_unified_model = model
             elif mae < best_unified_mae:
                 best_unified_mae = mae
-                best_unified_regressor = reg
+                best_unified_regressor = reg_name
                 best_unified_model = model
-
-        except Exception as e:
-            logger.warning(f"   ❌ {reg} failed: {e}")
 
     if not best_unified_regressor:
         logger.error("No unified models trained successfully")

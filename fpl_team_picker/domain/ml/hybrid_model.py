@@ -20,23 +20,36 @@ from sklearn.pipeline import Pipeline
 
 # Position-specific feature engineering additions
 # These are interaction features that capture position-specific scoring patterns
-# Must match those used during training in position_specific_optimizer.py
+# Includes BOTH old and new feature sets for backward compatibility
 POSITION_FEATURE_ADDITIONS: dict[str, list[tuple[str, Callable]]] = {
     "GKP": [
-        # GKP scoring is dominated by saves and clean sheets
+        # Current trainer features
         (
             "saves_x_opp_xg",
             lambda df: df.get("rolling_5gw_saves", 0)
-            * df.get("opponent_rolling_5gw_xg", 1),
+            * df.get("opponent_rolling_5gw_xg", 0),
         ),
         (
             "clean_sheet_potential",
-            lambda df: df.get("team_rolling_5gw_clean_sheets", 0)
-            / (df.get("games_played", 1).clip(lower=1)),
+            lambda df: df.get("clean_sheet_probability_enhanced", 0)
+            * df.get("rolling_5gw_minutes", 0)
+            / 90,
         ),
     ],
     "DEF": [
-        # DEF scoring: clean sheets + occasional goals (set pieces)
+        # Current trainer features
+        (
+            "cs_x_minutes",
+            lambda df: df.get("clean_sheet_probability_enhanced", 0)
+            * df.get("rolling_5gw_minutes", 0)
+            / 90,
+        ),
+        (
+            "goal_threat_def",
+            lambda df: df.get("rolling_5gw_xg", 0)
+            + df.get("rolling_5gw_threat", 0) / 100,
+        ),
+        # Legacy features (for old models)
         (
             "cs_x_fixture",
             lambda df: df.get("rolling_5gw_clean_sheets", 0)
@@ -49,7 +62,18 @@ POSITION_FEATURE_ADDITIONS: dict[str, list[tuple[str, Callable]]] = {
         ),
     ],
     "MID": [
-        # MID scoring: goals and assists primarily
+        # Current trainer features
+        (
+            "xgi_combined",
+            lambda df: df.get("rolling_5gw_xg", 0) + df.get("rolling_5gw_xa", 0),
+        ),
+        (
+            "creativity_x_threat",
+            lambda df: df.get("rolling_5gw_creativity", 0)
+            * df.get("rolling_5gw_threat", 0)
+            / 1000,
+        ),
+        # Legacy features (for old models)
         (
             "goal_involvement",
             lambda df: df.get("rolling_5gw_goals", 0)
@@ -62,7 +86,18 @@ POSITION_FEATURE_ADDITIONS: dict[str, list[tuple[str, Callable]]] = {
         ),
     ],
     "FWD": [
-        # FWD scoring: goals are everything
+        # Current trainer features
+        (
+            "xg_x_minutes",
+            lambda df: df.get("rolling_5gw_xg", 0)
+            * df.get("rolling_5gw_minutes", 0)
+            / 90,
+        ),
+        (
+            "goal_involvement",
+            lambda df: df.get("rolling_5gw_xg", 0) + 0.5 * df.get("rolling_5gw_xa", 0),
+        ),
+        # Legacy features (for old models)
         (
             "xg_efficiency",
             lambda df: df.get("rolling_5gw_goals", 0)

@@ -75,7 +75,11 @@ uv run python scripts/train_model.py unified --end-gw 14 --regressor random-fore
 uv run python scripts/train_model.py position --end-gw 14
 
 # Full pipeline (evaluate → determine hybrid config → retrain on all data)
+# PARALLELIZED: Unified models train in parallel (default: 4 workers)
 uv run python scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2
+
+# Full pipeline with custom parallelization (e.g., 8 workers for high-CPU systems)
+uv run python scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --max-workers 8
 
 # Evaluate existing model
 uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.joblib --end-gw 14
@@ -86,11 +90,15 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - `MLTrainer` - Core training orchestrator (unified, position-specific, all positions)
 - `ModelEvaluator` - Evaluation metrics, hybrid config determination
 - `build_pipeline()`, `get_param_space()` - Pipeline construction utilities
+- **Parallel Training**: `full-pipeline` trains unified regressors in parallel (ProcessPoolExecutor)
+  - Default: 4 workers, customizable via `--max-workers`
+  - Speedup: ~4x faster for Step 1a (e.g., 40min → 10min with 4 regressors)
 
 **Hybrid Model** (`fpl_team_picker/domain/ml/`):
 - `HybridPositionModel` - Routes predictions to position-specific or unified models
 - `FeatureSelector` - Self-contained transformer for feature selection by name
 - Based on experiment results: GKP/FWD use position-specific, DEF/MID use unified
+- **Position-Specific Features**: `POSITION_FEATURE_ADDITIONS` includes BOTH current and legacy features for backward compatibility with old models
 
 **Training Utilities** (`scripts/ml_training_utils.py`):
 - `load_training_data()` - Load all 12 data sources
@@ -103,6 +111,15 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - RandomForest/GradientBoosting: Standard sklearn param spaces
 - 4 feature selection strategies: none, correlation, permutation, rfe-smart
 - Self-contained pipelines: FeatureSelector → StandardScaler → Regressor
+
+**Position-Specific Feature Exclusions** (`POSITION_FEATURE_EXCLUSIONS`):
+- **Logic-based filtering**: Only excludes features that are impossible for each position
+- **GKP** (13 excluded): Player goals/xG, threat, creativity, tackles/recoveries → ~109 features
+- **DEF** (1 excluded): saves → ~121 features
+- **MID** (1 excluded): saves → ~121 features
+- **FWD** (6 excluded): saves, clean sheets (FWD don't get CS points) → ~116 features
+- **Team-level features kept**: Team stats (goals, xG, clean sheets) retained for all positions
+- **Applied before feature selection**: Exclusions happen first, then permutation/RFE filters further
 
 **Training Scorers** (`scripts/ml_training_utils.py`):
 - `neg_mean_absolute_error`: Default sklearn MAE (baseline)
