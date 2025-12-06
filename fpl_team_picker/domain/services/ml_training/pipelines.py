@@ -214,7 +214,7 @@ def get_feature_groups() -> Dict[str, List[str]]:
     """
     Define feature groups for grouped preprocessing.
 
-    Categorizes all 155 FPL features into appropriate preprocessing groups.
+    Categorizes all 156 FPL features into appropriate preprocessing groups.
     """
     return {
         # Count features (Poisson-like, many zeros) - Use Robust Scaler

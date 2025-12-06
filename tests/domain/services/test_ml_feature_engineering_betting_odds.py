@@ -9,7 +9,7 @@ Test coverage:
 3. Features default to neutral values when betting_features_df not provided
 4. Missing betting data (e.g., GW1) fills with neutral defaults
 5. Betting features have correct values from source data
-6. Feature count includes 15 betting odds features (99 total)
+6. Feature count includes 15 betting odds features (156 total)
 """
 
 import pytest
@@ -354,7 +354,7 @@ class TestBettingOddsFeatures:
         mock_betting_features,
         minimal_enhanced_data,
     ):
-        """Test that total feature count is 155."""
+        """Test that total feature count is 156."""
         engineer = FPLFeatureEngineer(
             fixtures_df=mock_fixtures_data,
             teams_df=mock_teams_data,
@@ -372,10 +372,10 @@ class TestBettingOddsFeatures:
 
         feature_names = engineer.get_feature_names_out()
 
-        # Should be 155 features total
-        assert len(feature_names) == 155, (
-            f"Expected 155 features, got {len(feature_names)}"
+        # Should be 156 features total
+        assert len(feature_names) == 156, (
+            f"Expected 156 features, got {len(feature_names)}"
         )
-        assert result.shape[1] == 155, (
-            f"Result should have 155 columns, got {result.shape[1]}"
+        assert result.shape[1] == 156, (
+            f"Result should have 156 columns, got {result.shape[1]}"
         )

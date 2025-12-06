@@ -471,7 +471,7 @@ def get_feature_groups() -> dict[str, list[str]]:
     """
     Define feature groups for grouped preprocessing.
 
-    Categorizes all 155 FPL features into appropriate preprocessing groups based on their
+    Categorizes all 156 FPL features into appropriate preprocessing groups based on their
     distribution characteristics and semantic meaning.
 
     Returns:
@@ -868,7 +868,7 @@ def run_evaluate_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (default: none = keep all 155 features)",
+            help="Feature selection strategy (default: none = keep all 156 features)",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1231,7 +1231,7 @@ def run_train_mode(
         typer.Option(
             "none",
             "--feature-selection",
-            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 155 features",
+            help="Feature selection strategy (ignored if --use-best-params-from is provided, uses saved config). Default: none = keep all 156 features",
         )
     ),
     keep_penalty_features: bool = typer.Option(
@@ -1639,7 +1639,7 @@ def run_train_mode(
     logger.info("\n💾 Model saved:")
     logger.info(f"   Pipeline (for deployment): {pipeline_path.name}")
     logger.info(f"   Metadata (for analysis): {metadata_path.name}")
-    logger.info(f"   Features: {len(selected_features)}/155")
+    logger.info(f"   Features: {len(selected_features)}/156")
     logger.info(f"   Training samples: {len(y_final):,}")
 
     logger.info("\n" + "=" * 80)

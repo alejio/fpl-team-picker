@@ -339,7 +339,7 @@ def engineer_features(
     """
     if verbose:
         logger.info(
-            "\n🔧 Engineering features (FPLFeatureEngineer with 155 features)..."
+            "\n🔧 Engineering features (FPLFeatureEngineer with 156 features)..."
         )
 
     # Calculate per-gameweek team strength (no data leakage)

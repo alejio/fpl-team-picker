@@ -168,7 +168,7 @@ def engineer_features(
     Replicates TPOT optimizer feature engineering pipeline.
     """
     print(
-        "\n🔧 Engineering features (production FPLFeatureEngineer with 155 features)..."
+        "\n🔧 Engineering features (production FPLFeatureEngineer with 156 features)..."
     )
 
     # Calculate per-gameweek team strength (no data leakage)

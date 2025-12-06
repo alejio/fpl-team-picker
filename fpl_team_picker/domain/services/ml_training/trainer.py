@@ -418,7 +418,7 @@ class MLTrainer:
         pos_feature_names = list(base_feature_names)
 
         # Note: Position-specific features (saves_x_opp_xg, clean_sheet_potential, etc.)
-        # are now included in the base 155 features from FPLFeatureEngineer.
+        # are now included in the base 156 features from FPLFeatureEngineer.
         # No need to add them dynamically here.
 
         X = features_pos[pos_feature_names].copy()

@@ -68,7 +68,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     """
     Scikit-learn transformer for FPL feature engineering.
 
-    Generates 155 features (64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific):
+    Generates 156 features (64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific + 1 opponent xG):
 
     Base features (64):
     - Cumulative season statistics (up to GW N-1)
@@ -305,7 +305,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                minutes, goals_scored, assists, total_points, etc.]
 
         Returns:
-            DataFrame with 155 engineered features per player-gameweek
+            DataFrame with 156 engineered features per player-gameweek
             (65 base + 11 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation +
              6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features)
         """
@@ -895,6 +895,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             df["opponent_rolling_5gw_goals_conceded"] = 0
             df["opponent_rolling_5gw_clean_sheets"] = 0
             df["opponent_rolling_5gw_xgc"] = 0
+            df["opponent_rolling_5gw_xg"] = 0
             return df
 
         # Data contract: fixtures has [event, home_team_id, away_team_id]
@@ -1023,8 +1024,8 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         df["opponent_strength"] = df["opponent_strength"].fillna(1.0)
         df["fixture_difficulty"] = df["fixture_difficulty"].fillna(1.0)
 
-        # Opponent defensive metrics
-        opponent_defensive_stats = (
+        # Opponent defensive and attacking metrics
+        opponent_stats = (
             df.groupby(["team_id", "gameweek"])
             .agg(
                 {
@@ -1035,33 +1036,43 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
                     "expected_goals_conceded": "first"
                     if "expected_goals_conceded" in df.columns
                     else lambda x: 0,
+                    "expected_goals": "sum"  # Sum of player xG = team xG
+                    if "expected_goals" in df.columns
+                    else lambda x: 0,
                 }
             )
             .reset_index()
         )
 
-        opponent_defensive_stats = opponent_defensive_stats.sort_values(
+        opponent_stats = opponent_stats.sort_values(
             ["team_id", "gameweek"]
         ).reset_index(drop=True)
 
-        opp_grouped = opponent_defensive_stats.groupby("team_id", group_keys=False)
+        opp_grouped = opponent_stats.groupby("team_id", group_keys=False)
 
-        opponent_defensive_stats["opponent_rolling_5gw_goals_conceded"] = (
+        opponent_stats["opponent_rolling_5gw_goals_conceded"] = (
             opp_grouped["goals_conceded"]
             .shift(1)
             .rolling(window=5, min_periods=1)
             .mean()
             .fillna(0)
         )
-        opponent_defensive_stats["opponent_rolling_5gw_clean_sheets"] = (
+        opponent_stats["opponent_rolling_5gw_clean_sheets"] = (
             opp_grouped["clean_sheets"]
             .shift(1)
             .rolling(window=5, min_periods=1)
             .mean()
             .fillna(0)
         )
-        opponent_defensive_stats["opponent_rolling_5gw_xgc"] = (
+        opponent_stats["opponent_rolling_5gw_xgc"] = (
             opp_grouped["expected_goals_conceded"]
+            .shift(1)
+            .rolling(window=5, min_periods=1)
+            .mean()
+            .fillna(0)
+        )
+        opponent_stats["opponent_rolling_5gw_xg"] = (
+            opp_grouped["expected_goals"]
             .shift(1)
             .rolling(window=5, min_periods=1)
             .mean()
@@ -1075,15 +1086,16 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             how="left",
         )
 
-        # Merge opponent defensive metrics
+        # Merge opponent defensive and attacking metrics
         df = df.merge(
-            opponent_defensive_stats[
+            opponent_stats[
                 [
                     "team_id",
                     "gameweek",
                     "opponent_rolling_5gw_goals_conceded",
                     "opponent_rolling_5gw_clean_sheets",
                     "opponent_rolling_5gw_xgc",
+                    "opponent_rolling_5gw_xg",
                 ]
             ],
             left_on=["opponent_team_id", "gameweek"],
@@ -1100,6 +1112,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "opponent_rolling_5gw_clean_sheets"
         ].fillna(0)
         df["opponent_rolling_5gw_xgc"] = df["opponent_rolling_5gw_xgc"].fillna(0)
+        df["opponent_rolling_5gw_xg"] = df["opponent_rolling_5gw_xg"].fillna(0)
 
         return df
 
@@ -2378,12 +2391,12 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
     def _add_composite_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate composite strategic features (Category 5)."""
 
-        # 1. Differential score (low ownership × high xP)
-        # Note: We don't have xP_next_gw in the transform phase, so we'll use total_points as proxy
-        if "selected_by_percent" in df.columns:
-            df["player_differential_score"] = (
-                100 - df["selected_by_percent"]
-            ) * df.get("total_points", 0)
+        # 1. Differential score (low ownership × recent form)
+        # Use rolling_5gw_points (shifted, leak-free) instead of total_points to avoid leakage
+        if "selected_by_percent" in df.columns and "rolling_5gw_points" in df.columns:
+            df["player_differential_score"] = (100 - df["selected_by_percent"]) * df[
+                "rolling_5gw_points"
+            ]
         else:
             df["player_differential_score"] = 0.0
 
@@ -2494,7 +2507,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
         return df
 
     def _get_feature_columns(self) -> list:
-        """Get list of all feature columns (155 features: 64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific)."""
+        """Get list of all feature columns (156 features: 64 base + 12 enhanced + 4 penalty/set-piece + 15 betting + 5 injury/rotation + 6 venue-specific + 7 rankings + 5 data quality + 4 elite interactions + 25 new features + 8 position-specific + 1 opponent xG)."""
         return [
             # Static (4)
             "price",
@@ -2569,6 +2582,7 @@ class FPLFeatureEngineer(BaseEstimator, TransformerMixin):
             "opponent_rolling_5gw_goals_conceded",
             "opponent_rolling_5gw_clean_sheets",
             "opponent_rolling_5gw_xgc",
+            "opponent_rolling_5gw_xg",
             # Enhanced ownership features (4) - Issue #37
             # Removed: avg_net_transfers_5gw, ownership_velocity (perfect correlation with net_transfers_gw)
             "selected_by_percent",
