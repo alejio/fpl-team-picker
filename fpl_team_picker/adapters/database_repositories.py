@@ -522,9 +522,12 @@ class DatabasePlayerRepository(PlayerRepository):
                         "selected_by_percent": player.to_numeric("selected_by_percent"),
                         "status": player.status,
                         # Season performance stats using validated conversion
-                        "total_points_season": player.to_int("total_points"),
+                        # Clamp negative values to 0 (FPL can have negative points from red cards/own goals)
+                        "total_points_season": max(0, player.to_int("total_points")),
                         "form_season": player.to_numeric("form"),
-                        "points_per_game_season": player.to_numeric("points_per_game"),
+                        "points_per_game_season": max(
+                            0.0, player.to_numeric("points_per_game")
+                        ),
                         "minutes": player.to_int("minutes"),
                         "starts": player.to_int("starts"),
                         # Match stats
@@ -554,7 +557,8 @@ class DatabasePlayerRepository(PlayerRepository):
                         ),
                         # Market data
                         "value_form": player.to_numeric("value_form"),
-                        "value_season": player.to_numeric("value_season"),
+                        # Clamp negative value_season to 0 (can be negative in raw FPL data)
+                        "value_season": max(0.0, player.to_numeric("value_season")),
                         "transfers_in": player.to_int("transfers_in"),
                         "transfers_out": player.to_int("transfers_out"),
                         "transfers_in_event": player.to_int("transfers_in_event"),
