@@ -339,6 +339,63 @@ class FixtureDifficultyConfig(BaseModel):
         return v
 
 
+class XPCalibrationConfig(BaseModel):
+    """Simple Probabilistic XP Calibration Configuration"""
+
+    enabled: bool = Field(
+        default=True,
+        description="Enable probabilistic calibration of ML predictions",
+    )
+
+    # Simplified categorization (2-tier fixture only)
+    premium_price_threshold: float = Field(
+        default=8.0,
+        description="Price threshold for premium tier (>= this price = premium)",
+        ge=4.0,
+        le=15.0,
+    )
+    mid_price_threshold: float = Field(
+        default=6.0,
+        description="Price threshold for mid tier (>= this price = mid, < premium)",
+        ge=4.0,
+        le=10.0,
+    )
+    easy_fixture_threshold: float = Field(
+        default=1.538,
+        description="Fixture difficulty threshold for easy fixtures (>= this = easy)",
+        ge=1.0,
+        le=2.2,
+    )
+
+    # Distribution file
+    distributions_path: str = Field(
+        default="data/calibration/distributions.json",
+        description="Path to fitted distributions JSON file (relative to project root)",
+    )
+
+    # Regularization (for distribution fitting)
+    regularization_lambda: float = Field(
+        default=0.3,
+        description="L2 regularization strength (higher = more shrinkage toward prior)",
+        ge=0.0,
+        le=1.0,
+    )
+
+    # Minimum sample size
+    minimum_sample_size: int = Field(
+        default=30,
+        description="Minimum samples required to use fitted distribution (else use prior)",
+        ge=10,
+        le=100,
+    )
+
+    # Debug logging
+    debug: bool = Field(
+        default=False,
+        description="Enable debug logging for calibration service",
+    )
+
+
 class OptimizationConfig(BaseModel):
     """Transfer Optimization Configuration"""
 
@@ -700,6 +757,10 @@ class FPLConfig(BaseModel):
     fixture_difficulty: FixtureDifficultyConfig = Field(
         default_factory=FixtureDifficultyConfig,
         description="Fixture Difficulty Configuration",
+    )
+    xp_calibration: XPCalibrationConfig = Field(
+        default_factory=XPCalibrationConfig,
+        description="Probabilistic XP Calibration Configuration",
     )
     optimization: OptimizationConfig = Field(
         default_factory=OptimizationConfig, description="Optimization Configuration"
