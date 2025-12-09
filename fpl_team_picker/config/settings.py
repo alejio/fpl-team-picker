@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/custom/random-forest_gw1-14_20251206_213342_pipeline.joblib",
+        default="models/hybrid/hybrid_gw1-15_20251209_195913.joblib",
         description="Trained using scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --scorer fpl_hauler_ceiling --n-trials 75",
     )
     ml_ensemble_rule_weight: float = Field(
@@ -365,20 +365,12 @@ class OptimizationConfig(BaseModel):
             )
         return v
 
-    # Transfer optimization method
+    # Transfer optimization method (removed - always uses simulated_annealing)
+    # This field is kept for backwards compatibility but is no longer used
     transfer_optimization_method: str = Field(
-        default="linear_programming",
-        description="Transfer optimization method: 'linear_programming' (optimal, fast) or 'simulated_annealing' (exploratory)",
+        default="simulated_annealing",
+        description="Transfer optimization method (deprecated - always uses simulated_annealing)",
     )
-
-    @field_validator("transfer_optimization_method")
-    @classmethod
-    def validate_transfer_method(cls, v):
-        if v not in ["linear_programming", "simulated_annealing"]:
-            raise ValueError(
-                "transfer_optimization_method must be 'linear_programming' or 'simulated_annealing'"
-            )
-        return v
 
     # Simulated Annealing parameters
     sa_iterations: int = Field(
