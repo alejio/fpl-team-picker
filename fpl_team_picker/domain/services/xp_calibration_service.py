@@ -1,7 +1,14 @@
 """Simple probabilistic calibration of ML xP predictions.
 
-Uses regularized Negative Binomial distributions to adjust
-ML predictions based on player quality × fixture difficulty.
+Uses empirical distributions to adjust ML predictions based on
+player quality × fixture difficulty interaction.
+
+NOTE: This service uses simple blend weighting (NOT precision weighting) because:
+- ML uncertainty (tree variance) measures model disagreement, not prediction bias
+- Distribution std measures outcome variance (FPL points are inherently noisy)
+- These are fundamentally different quantities - precision weighting would give
+  ML ~99% weight, making calibration useless
+- Simple blend weighting allows controllable calibration strength
 """
 
 import json
@@ -15,8 +22,13 @@ from loguru import logger
 class XPCalibrationService:
     """Simple probabilistic calibration of ML xP predictions.
 
-    Uses regularized Negative Binomial distributions to adjust
-    ML predictions based on player quality × fixture difficulty.
+    Uses empirical distributions to adjust ML predictions based on
+    player quality × fixture difficulty interaction.
+
+    The calibration addresses a specific problem: ML models underweight
+    fixture difficulty for premium players because fixture difficulty
+    is just 1 of 150+ features. This service uses historical data to
+    learn the (tier × fixture) interaction and applies a correction.
     """
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
@@ -30,6 +42,8 @@ class XPCalibrationService:
                 - easy_fixture_threshold: Fixture difficulty threshold for easy (default: 1.538)
                 - distributions_path: Path to distributions.json (default: data/calibration/distributions.json)
                 - minimum_sample_size: Minimum samples required (default: 30)
+                - empirical_blend_weight: Weight for empirical distribution (default: 0.2)
+                - risk_adjustment_multiplier: Std multiplier for risk profiles (default: 0.67)
                 - debug: Enable debug logging (default: False)
         """
         self.config = config or {}
@@ -39,6 +53,17 @@ class XPCalibrationService:
         self.mid_price_threshold = self.config.get("mid_price_threshold", 6.0)
         self.easy_fixture_threshold = self.config.get("easy_fixture_threshold", 1.538)
         self.minimum_sample_size = self.config.get("minimum_sample_size", 30)
+
+        # Blend weight: how much of the fixture effect to apply
+        # 0.5 = apply 50% of the historical (tier × fixture) effect
+        # This creates meaningful adjustments while being conservative
+        self.empirical_blend_weight = self.config.get("empirical_blend_weight", 0.5)
+
+        # Risk adjustment: how many std deviations for conservative/risk-taking
+        self.risk_adjustment_multiplier = self.config.get(
+            "risk_adjustment_multiplier", 0.67
+        )
+
         self.debug = self.config.get("debug", False)
 
         # Get distributions path (relative to project root)
@@ -57,7 +82,8 @@ class XPCalibrationService:
         if self.debug:
             logger.info(
                 f"✅ XPCalibrationService initialized - "
-                f"Loaded {len(self.distributions)} distributions from {self.distributions_path}"
+                f"Loaded {len(self.distributions)} distributions from {self.distributions_path}, "
+                f"empirical_blend_weight={self.empirical_blend_weight:.2f}"
             )
 
     def _load_distributions(self) -> Dict[str, Dict[str, Any]]:
@@ -107,6 +133,35 @@ class XPCalibrationService:
             "default_std": 3.0,  # High uncertainty for fallback
         }
 
+    def _get_tier_baseline(self, tier: str) -> float:
+        """Calculate the baseline (average) for a tier across fixtures.
+
+        This is used for additive fixture effect correction:
+        - fixture_effect = distribution_mean - tier_baseline
+        - The effect captures how much better/worse easy/hard fixtures are
+
+        Args:
+            tier: Player tier ("premium", "mid", "budget")
+
+        Returns:
+            Tier baseline (average of easy and hard distribution means)
+        """
+        easy_key = f"{tier}_easy"
+        hard_key = f"{tier}_hard"
+
+        easy_dist = self.distributions.get(easy_key, {})
+        hard_dist = self.distributions.get(hard_key, {})
+
+        # Use distribution means if available, else fall back to priors
+        easy_mean = easy_dist.get("mean") if easy_dist else None
+        hard_mean = hard_dist.get("mean") if hard_dist else None
+
+        if easy_mean is not None and hard_mean is not None:
+            return (easy_mean + hard_mean) / 2
+        else:
+            # Fallback to prior
+            return self.priors["tier_means"].get(tier, 5.0)
+
     def _get_player_tier(self, price: float) -> str:
         """Determine player tier from price.
 
@@ -151,20 +206,35 @@ class XPCalibrationService:
         risk_profile: str = "balanced",
         fixture_difficulty_df: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
-        """Calibrate ML predictions using fitted distributions.
+        """Calibrate ML predictions using additive fixture effect correction.
 
-        Simple approach:
+        Approach:
         1. Map player to (tier, fixture) combination
         2. Get fitted distribution for that combination
-        3. Combine ML prediction with distribution mean (precision-weighted)
-        4. Extract risk-adjusted value
+        3. Apply risk adjustment (using percentiles for skewed FPL data)
+        4. Calculate fixture effect = (distribution_mean - tier_baseline)
+        5. Apply additive correction: calibrated_xp = ml_xp + weight * fixture_effect
+
+        Why ADDITIVE correction (not blending):
+        - Blending toward distribution means creates weak adjustments when ML is close
+        - Additive correction preserves ML as baseline while adding fixture effect
+        - This captures the full historical easy/hard differential that ML underweights
+
+        Example with premium player (empirical_weight=0.5):
+        - tier_baseline = (premium_easy_mean + premium_hard_mean) / 2 = 4.0
+        - easy fixture_effect = 4.62 - 4.0 = +0.62
+        - hard fixture_effect = 3.37 - 4.0 = -0.63
+        - ML predicts 5.0 for both → after calibration:
+          - easy: 5.0 + 0.5 * 0.62 = 5.31
+          - hard: 5.0 + 0.5 * (-0.63) = 4.69
+        - Creates 0.62 point differential (half of 1.25 historical difference)
 
         Args:
             players_df: DataFrame with player data including:
                 - "price": Player price in millions
                 - "xP": ML predicted expected points
-                - "fixture_difficulty": Fixture difficulty (optional, can be in players_df or separate)
-                - "xP_uncertainty": ML prediction uncertainty (optional, defaults to 1.5)
+                - "fixture_difficulty": Fixture difficulty (can be in players_df or separate)
+                - "xP_uncertainty": ML prediction uncertainty (optional, used for output)
             risk_profile: Risk profile for calibration:
                 - "conservative": Use lower credible interval (~25th percentile)
                 - "balanced": Use mean (default)
@@ -176,7 +246,7 @@ class XPCalibrationService:
         Returns:
             DataFrame with calibrated predictions:
                 - "xP": Calibrated expected points
-                - "xP_uncertainty": Calibrated uncertainty
+                - "xP_uncertainty": Combined uncertainty estimate
                 - "xP_calibrated": Boolean flag indicating calibration was applied
                 - "xP_raw": Original ML prediction (for comparison)
         """
@@ -218,15 +288,16 @@ class XPCalibrationService:
         if "xP_raw" not in result.columns:
             result["xP_raw"] = result["xP"]
 
-        # Validate xP_uncertainty exists (required for precision weighting)
-        if "xP_uncertainty" not in result.columns:
-            raise ValueError(
-                "Missing required column: xP_uncertainty. "
-                "This is required for precision-weighted calibration."
-            )
+        # xP_uncertainty is optional - if missing, we'll calculate it from distribution std
+        has_ml_uncertainty = "xP_uncertainty" in result.columns
 
         calibrated_count = 0
         fallback_count = 0
+
+        # Get blend weights
+        empirical_weight = self.empirical_blend_weight
+        1.0 - empirical_weight
+        risk_multiplier = self.risk_adjustment_multiplier
 
         for idx, player in result.iterrows():
             # Get player attributes (direct access - will raise KeyError if missing)
@@ -236,9 +307,9 @@ class XPCalibrationService:
             fixture_difficulty = player["fixture_difficulty"]
             fixture = self._get_fixture_category(fixture_difficulty)
 
-            # Get ML prediction (direct access - will raise KeyError if missing)
+            # Get ML prediction
             ml_xp = player["xP"]
-            ml_std = player["xP_uncertainty"]
+            ml_std = player["xP_uncertainty"] if has_ml_uncertainty else 1.5
 
             # Get fitted distribution
             combination_key = f"{tier}_{fixture}"
@@ -253,61 +324,96 @@ class XPCalibrationService:
                     self.priors["tier_means"][tier]
                     + self.priors["fixture_boosts"][fixture]
                 )
-                posterior_mean = prior_mean
-                posterior_std = self.priors["default_std"]
+                distribution_mean = prior_mean
+                distribution_std = self.priors["default_std"]
                 fallback_count += 1
 
                 if self.debug and idx < 5:  # Log first few for debugging
                     logger.debug(
                         f"Fallback to prior for {combination_key}: "
-                        f"mean={posterior_mean:.2f}, std={posterior_std:.2f}"
+                        f"mean={distribution_mean:.2f}, std={distribution_std:.2f}"
                     )
             else:
                 # Use fitted distribution
-                posterior_mean = distribution["mean"]
-                posterior_std = distribution["std"]
+                distribution_mean = distribution["mean"]
+                distribution_std = distribution["std"]
                 calibrated_count += 1
 
                 if self.debug and idx < 5:  # Log first few for debugging
                     logger.debug(
                         f"Using fitted distribution for {combination_key}: "
-                        f"mean={posterior_mean:.2f}, std={posterior_std:.2f}, "
+                        f"mean={distribution_mean:.2f}, std={distribution_std:.2f}, "
                         f"sample_size={distribution['sample_size']}"
                     )
 
-            # Precision-weighted combination (Bayesian update)
-            # Higher precision = lower variance = more weight
-            if ml_std <= 0:
-                raise ValueError(
-                    f"Invalid xP_uncertainty value: {ml_std} for player {player.get('player_id', idx)}. "
-                    f"Uncertainty must be positive."
-                )
-            if posterior_std <= 0:
-                raise ValueError(
-                    f"Invalid posterior_std value: {posterior_std} for combination {combination_key}. "
-                    f"Standard deviation must be positive."
-                )
-
-            ml_precision = 1.0 / (ml_std**2)
-            posterior_precision = 1.0 / (posterior_std**2)
-            total_precision = ml_precision + posterior_precision
-
-            calibrated_mean = (ml_precision / total_precision) * ml_xp + (
-                posterior_precision / total_precision
-            ) * posterior_mean
-            calibrated_std = np.sqrt(1.0 / total_precision)
-
-            # Risk-adjusted value
+            # Apply risk adjustment BEFORE blending
+            # Use actual percentiles when available (more robust for skewed FPL data)
+            # Fall back to mean ± k*std only when percentiles aren't available
             if risk_profile == "conservative":
-                # Use lower credible interval (~25th percentile, -0.67 std)
-                calibrated_xp = calibrated_mean - 0.67 * calibrated_std
+                # Conservative: use lower bound (25th percentile or interpolated)
+                if distribution and "percentile_25" in distribution:
+                    # Use actual 25th percentile from data
+                    p25 = distribution["percentile_25"]
+                    # Interpolate between mean and p25 based on risk_multiplier
+                    # At multiplier=0.67, we get ~60% of the way from mean to p25
+                    risk_adjusted_distribution_mean = (
+                        distribution_mean - risk_multiplier * (distribution_mean - p25)
+                    )
+                else:
+                    # Fallback: mean - k*std, but capped at 50% of mean
+                    adjustment = min(
+                        risk_multiplier * distribution_std, 0.5 * distribution_mean
+                    )
+                    risk_adjusted_distribution_mean = distribution_mean - adjustment
             elif risk_profile == "risk-taking":
-                # Use upper credible interval (~75th percentile, +0.67 std)
-                calibrated_xp = calibrated_mean + 0.67 * calibrated_std
+                # Risk-taking: use upper bound (75th percentile or interpolated)
+                if distribution and "percentile_75" in distribution:
+                    # Use actual 75th percentile from data
+                    p75 = distribution["percentile_75"]
+                    # Interpolate between mean and p75 based on risk_multiplier
+                    # At multiplier=0.67, we get ~60% of the way from mean to p75
+                    risk_adjusted_distribution_mean = (
+                        distribution_mean + risk_multiplier * (p75 - distribution_mean)
+                    )
+                else:
+                    # Fallback: mean + k*std, but capped at 2x mean
+                    adjustment = min(
+                        risk_multiplier * distribution_std,
+                        distribution_mean,  # Cap at doubling the mean
+                    )
+                    risk_adjusted_distribution_mean = distribution_mean + adjustment
             else:  # balanced
-                calibrated_xp = calibrated_mean
+                risk_adjusted_distribution_mean = distribution_mean
 
             # Ensure non-negative
+            risk_adjusted_distribution_mean = max(0.0, risk_adjusted_distribution_mean)
+
+            # ADDITIVE FIXTURE EFFECT CORRECTION
+            # Instead of blending toward distribution mean, we ADD the fixture effect
+            # that ML underweights. This preserves ML as the baseline while correcting
+            # for the (tier × fixture) interaction.
+            #
+            # fixture_effect = risk_adjusted_distribution_mean - tier_baseline
+            # calibrated_xp = ml_xp + empirical_weight * fixture_effect
+            #
+            # Example with premium player:
+            # - tier_baseline = (4.62 + 3.37) / 2 = 4.0
+            # - easy fixture_effect = 4.62 - 4.0 = +0.62
+            # - hard fixture_effect = 3.37 - 4.0 = -0.63
+            # - With empirical_weight=0.5: easy gets +0.31, hard gets -0.32
+            # - This creates a 0.63 point differential (half the historical difference)
+            tier_baseline = self._get_tier_baseline(tier)
+            fixture_effect = risk_adjusted_distribution_mean - tier_baseline
+
+            calibrated_xp = ml_xp + empirical_weight * fixture_effect
+
+            # Calculate uncertainty: ML uncertainty + scaled fixture effect uncertainty
+            # Fixture effect uncertainty comes from distribution std
+            calibrated_std = np.sqrt(
+                ml_std**2 + (empirical_weight**2) * (distribution_std**2)
+            )
+
+            # Ensure non-negative prediction
             calibrated_xp = max(0.0, calibrated_xp)
 
             # Update player
@@ -320,7 +426,8 @@ class XPCalibrationService:
             logger.info(
                 f"✅ Calibration complete: {calibrated_count} players calibrated, "
                 f"{fallback_count} players used priors, "
-                f"risk_profile={risk_profile}"
+                f"risk_profile={risk_profile}, "
+                f"empirical_weight={empirical_weight:.2f}"
             )
 
         return result

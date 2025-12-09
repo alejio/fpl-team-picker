@@ -389,6 +389,34 @@ class XPCalibrationConfig(BaseModel):
         le=100,
     )
 
+    # Weight for additive fixture effect correction
+    # This controls how much of the historical (tier × fixture) effect to apply
+    # The calibration adds: empirical_blend_weight * (distribution_mean - tier_baseline)
+    # where fixture_effect captures easy vs hard fixture difference
+    empirical_blend_weight: float = Field(
+        default=0.5,
+        description=(
+            "Weight for fixture effect correction (0=pure ML, 1=full historical effect). "
+            "This adds an adjustment to ML predictions based on historical tier×fixture data. "
+            "0.5 = apply 50% of the historical fixture effect difference. "
+            "Higher values increase the easy/hard fixture differential for premium players."
+        ),
+        ge=0.0,
+        le=1.0,
+    )
+
+    # Risk adjustment multiplier (how many std deviations for conservative/risk-taking)
+    risk_adjustment_multiplier: float = Field(
+        default=0.67,
+        description=(
+            "Standard deviation multiplier for risk profiles. "
+            "0.67 = ~25th/75th percentile, 1.0 = ~16th/84th percentile. "
+            "Higher values create larger differences between risk profiles."
+        ),
+        ge=0.0,
+        le=2.0,
+    )
+
     # Debug logging
     debug: bool = Field(
         default=False,

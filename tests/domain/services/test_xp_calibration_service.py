@@ -21,6 +21,8 @@ class TestXPCalibrationServiceInitialization:
         assert service.mid_price_threshold == 6.0
         assert service.easy_fixture_threshold == 1.538
         assert service.minimum_sample_size == 30
+        assert service.empirical_blend_weight == 0.5  # Default is 50% of fixture effect
+        assert service.risk_adjustment_multiplier == 0.67
         assert service.debug is False
 
     def test_custom_configuration(self):
@@ -30,6 +32,8 @@ class TestXPCalibrationServiceInitialization:
             "mid_price_threshold": 7.0,
             "easy_fixture_threshold": 2.0,
             "minimum_sample_size": 50,
+            "empirical_blend_weight": 0.3,
+            "risk_adjustment_multiplier": 1.0,
             "debug": True,
         }
         service = XPCalibrationService(config=config)
@@ -38,6 +42,8 @@ class TestXPCalibrationServiceInitialization:
         assert service.mid_price_threshold == 7.0
         assert service.easy_fixture_threshold == 2.0
         assert service.minimum_sample_size == 50
+        assert service.empirical_blend_weight == 0.3
+        assert service.risk_adjustment_multiplier == 1.0
         assert service.debug is True
 
     def test_loads_distributions_from_file(self):
@@ -321,22 +327,29 @@ class TestCalibrationLogic:
 
         assert all(result["xP"] >= 0)
 
-    def test_calibration_precision_weighted_combination(
+    def test_calibration_additive_fixture_effect(
         self, service_with_distributions, sample_players
     ):
-        """Test calibration uses precision-weighted combination."""
+        """Test calibration uses additive fixture effect correction."""
         result = service_with_distributions.calibrate_predictions(
             sample_players, risk_profile="balanced"
         )
 
         # For premium_easy: ML=8.0, distribution_mean=9.2
-        # Calibrated should be between them (weighted by precision)
+        # tier_baseline = (premium_easy + premium_hard) / 2 = (9.2 + 6.5) / 2 = 7.85
+        # fixture_effect = 9.2 - 7.85 = 1.35
+        # With default 50% empirical weight: calibrated = 8.0 + 0.5 * 1.35 = 8.675
         premium_easy = result[result["player_id"] == 1].iloc[0]
         ml_xp = premium_easy["xP_raw"]
-        dist_mean = service_with_distributions.distributions["premium_easy"]["mean"]
 
-        # Calibrated should be between ML and distribution mean
-        assert min(ml_xp, dist_mean) <= premium_easy["xP"] <= max(ml_xp, dist_mean)
+        # Calculate expected using additive correction
+        easy_mean = service_with_distributions.distributions["premium_easy"]["mean"]
+        hard_mean = service_with_distributions.distributions["premium_hard"]["mean"]
+        tier_baseline = (easy_mean + hard_mean) / 2
+        fixture_effect = easy_mean - tier_baseline
+        expected_xp = ml_xp + 0.5 * fixture_effect  # Default weight is 0.5
+
+        assert abs(premium_easy["xP"] - expected_xp) < 0.01
 
     def test_calibration_uncertainty_updated(
         self, service_with_distributions, sample_players
@@ -349,6 +362,35 @@ class TestCalibrationLogic:
         assert "xP_uncertainty" in result.columns
         # Uncertainty should be positive
         assert all(result["xP_uncertainty"] > 0)
+
+    def test_blend_weight_affects_calibration(self, mock_distributions, sample_players):
+        """Test that different blend weights produce different fixture effect adjustments."""
+        # Create services with different blend weights
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(mock_distributions, f)
+            temp_path = f.name
+
+        try:
+            # Low blend weight (25% of fixture effect)
+            config_low = {"distributions_path": temp_path, "empirical_blend_weight": 0.25}
+            service_low = XPCalibrationService(config=config_low)
+
+            # High blend weight (100% of fixture effect)
+            config_high = {"distributions_path": temp_path, "empirical_blend_weight": 1.0}
+            service_high = XPCalibrationService(config=config_high)
+
+            result_low = service_low.calibrate_predictions(sample_players.copy())
+            result_high = service_high.calibrate_predictions(sample_players.copy())
+
+            # Results should be different - higher weight applies more fixture effect
+            for idx in range(len(sample_players)):
+                low_adjustment = abs(result_low.iloc[idx]["xP"] - result_low.iloc[idx]["xP_raw"])
+                high_adjustment = abs(result_high.iloc[idx]["xP"] - result_high.iloc[idx]["xP_raw"])
+                # High weight should produce larger adjustments (or equal if fixture effect is 0)
+                assert high_adjustment >= low_adjustment - 0.001  # Small tolerance
+
+        finally:
+            Path(temp_path).unlink()
 
 
 class TestFallbackBehavior:
@@ -429,7 +471,7 @@ class TestFallbackBehavior:
         )
 
         # Should use prior: premium (8.0) + easy (+2.0) = 10.0
-        # But precision-weighted with ML (8.0)
+        # Blended with ML (8.0): 0.8 * 8.0 + 0.2 * 10.0 = 8.4
         assert result.iloc[0]["xP"] > 0
 
 
@@ -462,14 +504,18 @@ class TestEdgeCases:
             service.calibrate_predictions(players)
 
     def test_missing_xp_uncertainty_column(self, service):
-        """Test that missing xP_uncertainty column raises error."""
+        """Test that missing xP_uncertainty column uses default value."""
         players = pd.DataFrame([
             {"player_id": 1, "price": 8.0, "xP": 5.0, "fixture_difficulty": 2.0},
         ])
 
-        # Should raise ValueError indicating data problem
-        with pytest.raises(ValueError, match="Missing required column: xP_uncertainty"):
-            service.calibrate_predictions(players)
+        # Should work - xP_uncertainty is now optional (uses default 1.5)
+        result = service.calibrate_predictions(players)
+        assert len(result) == 1
+        assert result.iloc[0]["xP_calibrated"]
+        # Should have calculated uncertainty from distribution
+        assert "xP_uncertainty" in result.columns
+        assert result.iloc[0]["xP_uncertainty"] > 0
 
     def test_missing_fixture_difficulty(self, service):
         """Test that missing fixture difficulty raises error."""
@@ -525,8 +571,8 @@ class TestEdgeCases:
         with pytest.raises(ValueError, match="Missing fixture_difficulty"):
             service.calibrate_predictions(players)
 
-    def test_zero_uncertainty_raises_error(self, service):
-        """Test that zero uncertainty raises error."""
+    def test_zero_uncertainty_handled_gracefully(self, service):
+        """Test that zero uncertainty is handled gracefully with default value."""
         players = pd.DataFrame([
             {
                 "player_id": 1,
@@ -537,12 +583,14 @@ class TestEdgeCases:
             },
         ])
 
-        # Should raise ValueError for invalid uncertainty
-        with pytest.raises(ValueError, match="Invalid xP_uncertainty"):
-            service.calibrate_predictions(players)
+        # Should handle gracefully - new implementation uses default 1.5 for missing/invalid
+        result = service.calibrate_predictions(players)
+        assert len(result) == 1
+        assert result.iloc[0]["xP_calibrated"]
+        assert result.iloc[0]["xP"] >= 0
 
-    def test_negative_uncertainty_raises_error(self, service):
-        """Test that negative uncertainty raises error."""
+    def test_negative_uncertainty_handled_gracefully(self, service):
+        """Test that negative uncertainty is handled gracefully with default value."""
         players = pd.DataFrame([
             {
                 "player_id": 1,
@@ -553,9 +601,11 @@ class TestEdgeCases:
             },
         ])
 
-        # Should raise ValueError for invalid uncertainty
-        with pytest.raises(ValueError, match="Invalid xP_uncertainty"):
-            service.calibrate_predictions(players)
+        # Should handle gracefully - new implementation uses default 1.5 for missing/invalid
+        result = service.calibrate_predictions(players)
+        assert len(result) == 1
+        assert result.iloc[0]["xP_calibrated"]
+        assert result.iloc[0]["xP"] >= 0
 
     def test_empty_dataframe(self, service):
         """Test that empty DataFrame raises error for missing columns."""

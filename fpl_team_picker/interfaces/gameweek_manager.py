@@ -806,8 +806,6 @@ def _(gameweek_data, mo):
         # NOTE: Higher fixture_difficulty = easier fixture (inverse of opponent strength)
         # Use configurable thresholds that match the actual distribution
         if "fixture_outlook" not in players_with_xp.columns:
-            from fpl_team_picker.config import config
-
             easy_threshold = config.fixture_difficulty.easy_fixture_threshold
             average_min = config.fixture_difficulty.average_fixture_min
 
@@ -1277,6 +1275,12 @@ def _(mo):
         options=["5gw", "3gw", "1gw"], value="5gw", label="Optimization Horizon:"
     )
 
+    risk_profile_selector = mo.ui.radio(
+        options=["conservative", "balanced", "risk-taking"],
+        value="balanced",
+        label="Optimization Risk Profile:",
+    )
+
     # Optimization method (always uses Simulated Annealing)
     # Toggle removed - LP optimization has been removed from codebase
 
@@ -1304,6 +1308,18 @@ def _(mo):
                 "**3GW (Medium-term)**: Optimizes for 3-gameweek fixture outlook and form trends"
             ),
             mo.md("**1GW (Immediate)**: Focuses only on current gameweek performance"),
+            mo.md(""),
+            mo.md("**Optimization Risk Profile:**"),
+            risk_profile_selector,
+            mo.md(
+                "**Conservative**: Uses lower credible interval (~25th percentile) - safer picks"
+            ),
+            mo.md(
+                "**Balanced**: Uses mean prediction (default) - balanced risk/reward"
+            ),
+            mo.md(
+                "**Risk-taking**: Uses upper credible interval (~75th percentile) - higher upside"
+            ),
             mo.md("---"),
         ]
     )
@@ -1311,6 +1327,7 @@ def _(mo):
         free_hit_checkbox,
         free_transfer_selector,
         optimization_horizon_toggle,
+        risk_profile_selector,
     )
 
 
@@ -1321,8 +1338,11 @@ def _(
     mo,
     optimization_horizon_toggle,
     players_with_xp,
+    risk_profile_selector,
 ):
     # Transfer Constraints UI - using PlayerAnalyticsService
+    # Note: This cell runs before calibration, so it uses the original players_with_xp
+    # The optimization cell will use calibrated_players_with_xp if available
     must_include_dropdown = mo.ui.multiselect(options=[], value=[])
     must_exclude_dropdown = mo.ui.multiselect(options=[], value=[])
     optimize_button = mo.ui.run_button(label="Loading...", disabled=True)
@@ -1479,7 +1499,106 @@ def _(
 
 
 @app.cell
+def _(gameweek_data, players_with_xp, risk_profile_selector):
+    # Apply probabilistic calibration if enabled (only for ML model)
+    # Note: config is imported in the ML prediction cell above
+    from fpl_team_picker.config import config as _calibration_config
+    from fpl_team_picker.domain.services import XPCalibrationService
+    from loguru import logger
+
+    # Create a copy to avoid redefinition issues
+    calibrated_players_with_xp = (
+        players_with_xp.copy() if not players_with_xp.empty else players_with_xp
+    )
+
+    if (
+        not calibrated_players_with_xp.empty
+        and _calibration_config.xp_calibration.enabled
+        and "xP" in calibrated_players_with_xp.columns
+        and "xP_uncertainty" in calibrated_players_with_xp.columns
+    ):
+        # Check if ML model was used (has ml_xP column or xP_calibrated flag)
+        # If xP_calibrated already exists, calibration was already applied
+        if "xP_calibrated" not in calibrated_players_with_xp.columns:
+            # Convert config to dict for calibration service
+            calibration_config_dict = {
+                "premium_price_threshold": _calibration_config.xp_calibration.premium_price_threshold,
+                "mid_price_threshold": _calibration_config.xp_calibration.mid_price_threshold,
+                "easy_fixture_threshold": _calibration_config.xp_calibration.easy_fixture_threshold,
+                "distributions_path": _calibration_config.xp_calibration.distributions_path,
+                "minimum_sample_size": _calibration_config.xp_calibration.minimum_sample_size,
+                "empirical_blend_weight": _calibration_config.xp_calibration.empirical_blend_weight,
+                "risk_adjustment_multiplier": _calibration_config.xp_calibration.risk_adjustment_multiplier,
+                "debug": _calibration_config.xp_calibration.debug,
+            }
+
+            # Get risk profile from selector
+            # risk_profile_selector is always available since it's defined in a previous cell
+            risk_profile = risk_profile_selector.value
+
+            # Apply calibration - let errors surface so we can fix root causes
+            calibration_service = XPCalibrationService(config=calibration_config_dict)
+            calibrated_players_with_xp = calibration_service.calibrate_predictions(
+                calibrated_players_with_xp,
+                risk_profile=risk_profile,
+                fixture_difficulty_df=gameweek_data.get("fixture_difficulty"),
+            )
+
+            # Log calibration statistics for debugging
+            if (
+                _calibration_config.xp_model.debug
+                or _calibration_config.xp_calibration.debug
+            ):
+                calibrated_count = (
+                    calibrated_players_with_xp["xP_calibrated"].sum()
+                    if "xP_calibrated" in calibrated_players_with_xp.columns
+                    else 0
+                )
+                if calibrated_count > 0:
+                    # Show detailed calibration adjustments
+                    calibrated_mask = calibrated_players_with_xp["xP_calibrated"]
+                    calibrated_subset = calibrated_players_with_xp[
+                        calibrated_mask
+                    ].copy()
+
+                    if "xP_raw" in calibrated_subset.columns:
+                        adjustments = (
+                            calibrated_subset["xP"] - calibrated_subset["xP_raw"]
+                        )
+                        max_adjustment = adjustments.abs().max()
+                        mean_adjustment = adjustments.mean()
+
+                        # Show top 10 players by absolute adjustment
+                        top_adjustments = calibrated_subset.copy()
+                        top_adjustments["adjustment"] = adjustments
+                        top_adjustments = top_adjustments.nlargest(
+                            10, "adjustment", keep="all"
+                        )
+
+                        logger.info(
+                            f"✅ Applied probabilistic calibration "
+                            f"(risk_profile={risk_profile}, empirical_weight={calibration_config_dict['empirical_blend_weight']:.0%}, "
+                            f"{calibrated_count} players calibrated). "
+                            f"Mean adjustment: {mean_adjustment:.2f}, Max: {max_adjustment:.2f}"
+                        )
+
+                        if _calibration_config.xp_calibration.debug:
+                            logger.debug(
+                                f"Top 10 calibration adjustments:\n"
+                                f"{top_adjustments[['web_name', 'xP_raw', 'xP', 'adjustment']].to_string()}"
+                            )
+                    else:
+                        logger.info(
+                            f"✅ Applied probabilistic calibration "
+                            f"(risk_profile={risk_profile}, {calibrated_count} players calibrated)"
+                        )
+
+    return calibrated_players_with_xp
+
+
+@app.cell
 def _(
+    calibrated_players_with_xp,
     free_hit_checkbox,
     free_transfer_selector,
     gameweek_data,
@@ -1488,8 +1607,8 @@ def _(
     must_include_dropdown,
     optimization_horizon_toggle,
     optimize_button,
-    players_with_xp,
 ):
+    # Use calibrated players_with_xp for optimization (calibrated_players_with_xp is the output from calibration cell)
     # before we do the transfer optimisation analysis, so we have a visual comparison.
     # Transfer optimization using interactive optimization engine
     from fpl_team_picker.interfaces.display_utils import (
@@ -1601,7 +1720,7 @@ def _(
     optimal_starting_11 = []
 
     if optimize_button is not None and optimize_button.value:
-        if not players_with_xp.empty and gameweek_data:
+        if not calibrated_players_with_xp.empty and gameweek_data:
             current_squad = gameweek_data.get("current_squad")
             team_data = gameweek_data.get("manager_team")
             _teams2 = gameweek_data.get("teams")
@@ -1648,7 +1767,7 @@ def _(
 
                     optimal_squad_df, best_scenario, optimization_metadata = (
                         _optimization_service.optimize_transfers(
-                            players_with_xp=players_with_xp,
+                            players_with_xp=calibrated_players_with_xp,
                             current_squad=current_squad,
                             team_data=team_data,
                             must_include_ids=must_include_ids,

@@ -17,6 +17,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **DataOrchestrationService**: Boundary validation, guaranteed clean data
 - **ExpectedPointsService**: Rule-based XP (1GW + 5GW projections)
 - **MLExpectedPointsService**: Pre-trained ML predictions (99 features)
+- **XPCalibrationService**: Probabilistic calibration using additive fixture effect correction
 - **TeamAnalyticsService**: Dynamic team strength ratings
 - **OptimizationService**: SA for transfers (exploratory), XI selection, captain picks
 - **ChipAssessmentService**: Traffic light chip recommendations
@@ -179,6 +180,53 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - Used for GW1-5 (insufficient ML training data) and as ML benchmark only
 - No uncertainty quantification
 
+## XP Calibration (Probabilistic)
+
+**XPCalibrationService** (`domain/services/xp_calibration_service.py`):
+- **Additive fixture effect correction** for ML predictions
+- Addresses ML underweighting fixture difficulty for premium players (fixture difficulty is just 1 of 150+ features)
+- Uses historical (tier × fixture) distributions from `data/calibration/distributions.json`
+
+**Approach**:
+1. Map player to (tier, fixture) combination based on price and fixture difficulty
+2. Get fitted distribution mean for that combination (or fallback to priors)
+3. Calculate tier baseline = average of easy and hard distribution means
+4. Calculate fixture effect = distribution_mean - tier_baseline
+5. Apply additive correction: `calibrated_xp = ml_xp + empirical_blend_weight * fixture_effect`
+
+**Why Additive (Not Blending)**:
+- Blending toward distribution means creates weak adjustments when ML is close
+- Additive correction preserves ML as baseline while adding fixture effect
+- Captures full historical easy/hard differential that ML underweights
+
+**Example** (premium player, `empirical_blend_weight=0.5`):
+- tier_baseline = (premium_easy_mean + premium_hard_mean) / 2 = (4.62 + 3.37) / 2 = 4.0
+- easy fixture_effect = 4.62 - 4.0 = +0.62
+- hard fixture_effect = 3.37 - 4.0 = -0.63
+- ML predicts 5.0 for both → after calibration:
+  - easy: 5.0 + 0.5 × 0.62 = **5.31**
+  - hard: 5.0 + 0.5 × (-0.63) = **4.69**
+- Creates **0.62 point differential** (50% of 1.25 historical difference)
+
+**Risk Profiles**:
+- **Conservative**: Uses 25th percentile (interpolated) → lower fixture effect
+- **Balanced**: Uses distribution mean (default)
+- **Risk-taking**: Uses 75th percentile (interpolated) → higher fixture effect
+
+**Configuration** (`XPCalibrationConfig`):
+- `enabled`: Enable/disable calibration (default: True)
+- `empirical_blend_weight`: Weight for fixture effect (default: 0.5 = 50% of historical effect)
+- `risk_adjustment_multiplier`: Std multiplier for risk profiles (default: 0.67)
+- `premium_price_threshold`: Price threshold for premium tier (default: 8.0)
+- `mid_price_threshold`: Price threshold for mid tier (default: 6.0)
+- `easy_fixture_threshold`: Fixture difficulty threshold for easy (default: 1.538)
+- `minimum_sample_size`: Minimum samples required to use fitted distribution (default: 30)
+
+**Distributions File** (`data/calibration/distributions.json`):
+- Contains fitted means, stds, percentiles for 6 combinations: premium/mid/budget × easy/hard
+- Generated from historical FPL data analysis
+- Includes sample sizes for quality assessment
+
 ## Expected Minutes Model (EWMA)
 
 **Implementation** (`ExpectedPointsService._calculate_expected_minutes()`):
@@ -302,7 +350,7 @@ marimo check fpl_team_picker/interfaces/ --fix
 
 Pydantic models with env var overrides (`FPL_{SECTION}_{FIELD}`). Override via `config.json`.
 
-Config sections: XPModel, TeamStrength, MinutesModel, StatisticalEstimation, Optimization, Visualization, ChipAssessment.
+Config sections: XPModel, XPCalibration, TeamStrength, MinutesModel, StatisticalEstimation, Optimization, Visualization, ChipAssessment.
 
 ## Data Contract & Boundary Validation
 
