@@ -1521,10 +1521,11 @@ def _(gameweek_data, players_with_xp, risk_profile_selector):
         # If xP_calibrated already exists, calibration was already applied
         if "xP_calibrated" not in calibrated_players_with_xp.columns:
             # Convert config to dict for calibration service
+            # Use fixture_difficulty.easy_fixture_threshold to avoid duplication
             calibration_config_dict = {
                 "premium_price_threshold": _calibration_config.xp_calibration.premium_price_threshold,
                 "mid_price_threshold": _calibration_config.xp_calibration.mid_price_threshold,
-                "easy_fixture_threshold": _calibration_config.xp_calibration.easy_fixture_threshold,
+                "easy_fixture_threshold": _calibration_config.fixture_difficulty.easy_fixture_threshold,
                 "distributions_path": _calibration_config.xp_calibration.distributions_path,
                 "minimum_sample_size": _calibration_config.xp_calibration.minimum_sample_size,
                 "empirical_blend_weight": _calibration_config.xp_calibration.empirical_blend_weight,
@@ -1744,10 +1745,7 @@ def _(
                     if optimization_horizon_toggle.value
                     else "5gw"
                 )
-                # Always use simulated_annealing (LP has been removed)
-                _config.optimization.transfer_optimization_method = (
-                    "simulated_annealing"
-                )
+                # Always uses simulated_annealing (LP has been removed)
                 _optimization_service = OptimizationService()
 
                 try:

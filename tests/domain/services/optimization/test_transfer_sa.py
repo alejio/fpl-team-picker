@@ -112,9 +112,7 @@ class TestExhaustiveSearch:
     ):
         """Test that exhaustive search is used for 1 free transfer."""
         original_max = config.optimization.sa_exhaustive_search_max_transfers
-        original_method = config.optimization.transfer_optimization_method
         try:
-            config.optimization.transfer_optimization_method = "simulated_annealing"
             config.optimization.sa_exhaustive_search_max_transfers = 2
             config.optimization.sa_use_consensus_mode = (
                 False  # Disable consensus to test exhaustive
@@ -140,7 +138,6 @@ class TestExhaustiveSearch:
         finally:
             config.optimization.sa_exhaustive_search_max_transfers = original_max
             config.optimization.sa_use_consensus_mode = True
-            config.optimization.transfer_optimization_method = original_method
 
     def test_exhaustive_search_guarantees_optimal(
         self, optimization_service, current_squad, team_data, sample_players

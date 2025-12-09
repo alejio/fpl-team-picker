@@ -360,12 +360,8 @@ class XPCalibrationConfig(BaseModel):
         ge=4.0,
         le=10.0,
     )
-    easy_fixture_threshold: float = Field(
-        default=1.538,
-        description="Fixture difficulty threshold for easy fixtures (>= this = easy)",
-        ge=1.0,
-        le=2.2,
-    )
+    # Note: easy_fixture_threshold is now sourced from fixture_difficulty config
+    # to avoid duplication. Use config.fixture_difficulty.easy_fixture_threshold
 
     # Distribution file
     distributions_path: str = Field(
@@ -449,13 +445,6 @@ class OptimizationConfig(BaseModel):
                 "optimization_horizon must be either '1gw', '3gw', or '5gw'"
             )
         return v
-
-    # Transfer optimization method (removed - always uses simulated_annealing)
-    # This field is kept for backwards compatibility but is no longer used
-    transfer_optimization_method: str = Field(
-        default="simulated_annealing",
-        description="Transfer optimization method (deprecated - always uses simulated_annealing)",
-    )
 
     # Simulated Annealing parameters
     sa_iterations: int = Field(
@@ -807,11 +796,8 @@ class FPLConfig(BaseModel):
     @model_validator(mode="after")
     def validate_config_consistency(self):
         """Validate cross-field consistency"""
-        # Ensure team strength range is consistent
-        if self.team_strength.max_strength <= self.team_strength.min_strength:
-            raise ValueError(
-                "team_strength.max_strength must be greater than min_strength"
-            )
+        # Note: team_strength range validation is handled by TeamStrengthConfig.field_validator
+        # No need to duplicate here
 
         # Ensure fixture difficulty thresholds are ordered correctly
         if (

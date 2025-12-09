@@ -40,6 +40,7 @@ class XPCalibrationService:
                 - premium_price_threshold: Price threshold for premium tier (default: 8.0)
                 - mid_price_threshold: Price threshold for mid tier (default: 6.0)
                 - easy_fixture_threshold: Fixture difficulty threshold for easy (default: 1.538)
+                    Note: This should match config.fixture_difficulty.easy_fixture_threshold
                 - distributions_path: Path to distributions.json (default: data/calibration/distributions.json)
                 - minimum_sample_size: Minimum samples required (default: 30)
                 - empirical_blend_weight: Weight for empirical distribution (default: 0.2)
@@ -51,6 +52,8 @@ class XPCalibrationService:
         # Load configuration with defaults
         self.premium_price_threshold = self.config.get("premium_price_threshold", 8.0)
         self.mid_price_threshold = self.config.get("mid_price_threshold", 6.0)
+        # easy_fixture_threshold should be sourced from fixture_difficulty config
+        # but we accept it here for backwards compatibility and flexibility
         self.easy_fixture_threshold = self.config.get("easy_fixture_threshold", 1.538)
         self.minimum_sample_size = self.config.get("minimum_sample_size", 30)
 
