@@ -58,19 +58,21 @@ def get_player_tier(price: float) -> str:
         return "budget"
 
 
-def get_fixture_category(fixture_difficulty: float, threshold: float = 1.538) -> str:
+def get_fixture_category(fixture_difficulty: float, threshold: float = 3.8) -> str:
     """Determine fixture category (2-tier only for simplicity).
 
     Args:
-        fixture_difficulty: Overall fixture difficulty rating
-        threshold: Threshold for easy vs hard (default 1.538)
+        fixture_difficulty: Overall fixture difficulty rating (0-5 scale, where 5 = hardest)
+        threshold: Threshold for easy vs hard (default 3.8 on 0-5 scale, near median)
+                   Lower values (< threshold) = easy, Higher values (>= threshold) = hard
 
     Returns:
         "easy" or "hard"
     """
     if pd.isna(fixture_difficulty):
         return "unknown"
-    if fixture_difficulty >= threshold:
+    # On 0-5 scale: lower values = easier, higher values = harder
+    if fixture_difficulty < threshold:
         return "easy"
     else:
         return "hard"
