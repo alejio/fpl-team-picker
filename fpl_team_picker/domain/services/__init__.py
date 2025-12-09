@@ -9,6 +9,7 @@ try:
     from .performance_analytics_service import PerformanceAnalyticsService
     from .player_analytics_service import PlayerAnalyticsService
     from .team_analytics_service import TeamAnalyticsService
+    from .xp_calibration_service import XPCalibrationService
 
     __all__ = [
         "DataOrchestrationService",
@@ -19,6 +20,7 @@ try:
         "PerformanceAnalyticsService",
         "PlayerAnalyticsService",
         "TeamAnalyticsService",
+        "XPCalibrationService",
     ]
 except ImportError:
     # Handle import errors gracefully during development
