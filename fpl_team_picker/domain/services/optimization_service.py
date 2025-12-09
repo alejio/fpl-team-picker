@@ -4,14 +4,13 @@ This service contains core FPL optimization algorithms including:
 - Starting XI selection with formation optimization
 - Bench player selection
 - Budget pool calculations
-- Transfer scenario analysis (0-3 transfers) using LP or SA
+- Transfer scenario analysis (0-3 transfers) using Simulated Annealing
 - Premium player acquisition planning
 - Captain selection
 - Initial squad generation using simulated annealing
 
-Optimization Methods:
-- Linear Programming (LP): Optimal, fast, deterministic (default for transfers)
-- Simulated Annealing (SA): Exploratory, non-linear objectives (squad generation)
+Optimization Method:
+- Simulated Annealing (SA): Exploratory, non-linear objectives (transfers and squad generation)
 
 This is a thin facade that composes all optimization mixins.
 """
@@ -36,7 +35,7 @@ class OptimizationService(
     - OptimizationBaseMixin: Shared utilities (inherited via other mixins)
     - SquadSelectionMixin: Starting XI, bench, budget calculations
     - CaptainServiceMixin: Captain recommendations
-    - TransferOptimizationMixin: LP/SA transfer optimization (inherited via SquadGenerationMixin)
+    - TransferOptimizationMixin: SA transfer optimization (inherited via SquadGenerationMixin)
     - SquadGenerationMixin: Initial squad/wildcard optimization
     """
 

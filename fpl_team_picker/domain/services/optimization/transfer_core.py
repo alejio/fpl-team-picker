@@ -1,7 +1,7 @@
 """Core transfer optimization entry point for FPL.
 
 This module provides:
-- Main optimize_transfers() entry point that routes to LP or SA
+- Main optimize_transfers() entry point using Simulated Annealing
 - Premium acquisition planning
 
 Copy the following methods from optimization_service.py:
@@ -14,15 +14,11 @@ import pandas as pd
 from loguru import logger
 
 from fpl_team_picker.config import config
-from .transfer_lp import TransferLPMixin
 from .transfer_sa import TransferSAMixin
 
 
-class TransferOptimizationMixin(TransferLPMixin, TransferSAMixin):
-    """Mixin providing unified transfer optimization.
-
-    Routes to LP or SA based on configuration.
-    """
+class TransferOptimizationMixin(TransferSAMixin):
+    """Mixin providing transfer optimization using Simulated Annealing."""
 
     def optimize_transfers(
         self,
@@ -45,10 +41,8 @@ class TransferOptimizationMixin(TransferLPMixin, TransferSAMixin):
         - Wildcard chip: free_transfers=15 (rebuild entire squad, budget resets to £100m)
         - Free Hit chip: free_transfers=15 + is_free_hit=True (1GW optimization, squad reverts after)
 
-        **Optimization Methods:**
-        - Linear Programming (default): Guarantees optimal solution, fast (~1-2s), deterministic
+        **Optimization Method:**
         - Simulated Annealing: Exploratory, good for non-linear objectives (~10-45s)
-        - Configure via config.optimization.transfer_optimization_method
 
         Args:
             current_squad: Current squad DataFrame
@@ -83,32 +77,15 @@ class TransferOptimizationMixin(TransferLPMixin, TransferSAMixin):
                     + (" (1GW only, squad reverts)" if is_free_hit else "")
                 )
 
-        # Route to appropriate optimizer based on configuration
-        method = config.optimization.transfer_optimization_method
-
-        if method == "linear_programming":
-            return self._optimize_transfers_lp(
-                current_squad,
-                team_data,
-                players_with_xp,
-                must_include_ids,
-                must_exclude_ids,
-                is_free_hit=is_free_hit,
-            )
-        elif method == "simulated_annealing":
-            return self._optimize_transfers_sa(
-                current_squad,
-                team_data,
-                players_with_xp,
-                must_include_ids,
-                must_exclude_ids,
-                is_free_hit=is_free_hit,
-            )
-        else:
-            raise ValueError(
-                f"Unknown optimization method: {method}. "
-                "Must be 'linear_programming' or 'simulated_annealing'"
-            )
+        # Use Simulated Annealing for transfer optimization
+        return self._optimize_transfers_sa(
+            current_squad,
+            team_data,
+            players_with_xp,
+            must_include_ids,
+            must_exclude_ids,
+            is_free_hit=is_free_hit,
+        )
 
     def plan_premium_acquisition(
         self,

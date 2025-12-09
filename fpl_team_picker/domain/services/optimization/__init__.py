@@ -3,7 +3,7 @@
 This module provides:
 - Starting XI and bench selection
 - Captain recommendations
-- Transfer optimization (LP and SA)
+- Transfer optimization (Simulated Annealing)
 - Squad generation and wildcard optimization
 
 Usage:
