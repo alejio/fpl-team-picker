@@ -277,11 +277,7 @@ def _(gameweek_input, mo):
 
 @app.cell
 def _(gameweek_data, gameweek_input, mo):
-    # TODO: where are these XP coming from? I don't remember storing them
-    # Squad Performance Review - Simple Implementation
-    # TODO: This is the last gw retro. We need to improve visuals. We should
-    # particularly evaluate the quality of the transfers we did
-    # it should be moved after the XP calculation
+    # Squad Performance Review - Uses saved predictions for accuracy
     if not gameweek_data or not gameweek_input.value:
         performance_review = mo.md(
             "📊 Select gameweek and load data to see performance analysis"
@@ -289,9 +285,8 @@ def _(gameweek_data, gameweek_input, mo):
     else:
         try:
             from fpl_team_picker.domain.services import (
-                DataOrchestrationService as _DataServicePerf,
-                ExpectedPointsService as _XPServicePerf,
                 PerformanceAnalyticsService as _AnalyticsServicePerf,
+                PredictionStorageService as _StorageServicePerf,
             )
             from client import FPLDataClient as _ClientPerf
 
@@ -302,57 +297,80 @@ def _(gameweek_data, gameweek_input, mo):
             _team_data_perf = gameweek_data.get("manager_team")
 
             if _team_data_perf and "picks" in _team_data_perf:
-                # Load previous gameweek predictions
-                _data_svc = _DataServicePerf()
-                prev_data = _data_svc.load_gameweek_data(
-                    target_gameweek=previous_gw, form_window=5
-                )
-                # TODO: this on-the-fly prediction is definitely false
-                # we should implement xp storing and manually trigger when
-                #  we have finalised our team selection in FPL site
-                _xp_svc = _XPServicePerf()
-                prev_predictions = _xp_svc.calculate_combined_results(
-                    prev_data, use_ml_model=False
-                )
+                # Load saved predictions - REQUIRED for accurate performance tracking
+                _storage_svc = _StorageServicePerf()
+                saved_predictions = _storage_svc.load_predictions(previous_gw)
 
-                # Get actual results
-                _client = _ClientPerf()
-                actual_results = _client.get_gameweek_performance(previous_gw)
-
-                if not actual_results.empty:
-                    # Analyze performance
-                    _analytics_svc = _AnalyticsServicePerf()
-                    analysis = _analytics_svc.analyze_squad_performance(
-                        prev_predictions,
-                        actual_results,
-                        _team_data_perf["picks"],
-                        previous_gw,
-                    )
-
-                    if "error" not in analysis:
-                        sa = analysis["squad_analysis"]
-                        performance_review = mo.md(
+                if not saved_predictions:
+                    # No saved predictions - show instructions
+                    performance_review = mo.callout(
+                        mo.md(
                             f"""
+                            ## 🎯 GW{previous_gw} Squad Performance
+
+                            **No saved predictions found for GW{previous_gw}**
+
+                            To track performance accurately, you need to save your predictions BEFORE the gameweek deadline:
+
+                            1. Load GW{previous_gw} data (if reviewing past gameweek)
+                            2. Calculate xP predictions (ML + calibration)
+                            3. Finalize your team in FPL website
+                            4. Click **"💾 Save Team Predictions"** button
+
+                            *Saved predictions ensure you're comparing actual decisions vs results, not retroactive calculations.*
+                            """
+                        ),
+                        kind="warn",
+                    )
+                else:
+                    # Use saved predictions (what we actually committed to)
+                    prev_predictions = saved_predictions.to_dataframe()
+                    # Rename columns to match expected format
+                    if "calibrated_xp" in prev_predictions.columns:
+                        prev_predictions = prev_predictions.rename(
+                            columns={"calibrated_xp": "xP"}
+                        )
+
+                    # Get actual results
+                    _client = _ClientPerf()
+                    actual_results = _client.get_gameweek_performance(previous_gw)
+
+                    if not actual_results.empty:
+                        # Analyze performance
+                        _analytics_svc = _AnalyticsServicePerf()
+                        analysis = _analytics_svc.analyze_squad_performance(
+                            prev_predictions,
+                            actual_results,
+                            _team_data_perf["picks"],
+                            previous_gw,
+                        )
+
+                        if "error" not in analysis:
+                            sa = analysis["squad_analysis"]
+
+                            performance_review = mo.md(
+                                f"""
     ## 🎯 GW{previous_gw} Squad Performance
 
-    **Total:** {sa["total_predicted"]} xP → {sa["total_actual"]} pts ({sa["difference"]:+.1f})
+    **Source:** 💾 Saved Predictions (committed on {saved_predictions.saved_at.strftime("%Y-%m-%d %H:%M")})
+    **Total:** {sa["total_predicted"]:.1f} xP → {sa["total_actual"]} pts ({sa["difference"]:+.1f})
     **Accuracy:** {sa["accuracy_percentage"]:.1f}% • **Players:** {sa["players_analyzed"]}
 
     **Top 5 Performers:**
     """
-                            + "\n".join(
-                                [
-                                    f"• {p['web_name']} ({p['position']}): {p['xP']:.1f} → {p['total_points']} ({p['xP_diff']:+.1f})"
-                                    for p in analysis["individual_performance"][:5]
-                                ]
+                                + "\n".join(
+                                    [
+                                        f"• {p['web_name']} ({p['position']}): {p['xP']:.1f} → {p['total_points']} ({p['xP_diff']:+.1f})"
+                                        for p in analysis["individual_performance"][:5]
+                                    ]
+                                )
                             )
-                        )
+                        else:
+                            performance_review = mo.md(f"❌ {analysis['error']}")
                     else:
-                        performance_review = mo.md(f"❌ {analysis['error']}")
-                else:
-                    performance_review = mo.md(
-                        f"❌ No actual data available for GW{previous_gw}"
-                    )
+                        performance_review = mo.md(
+                            f"❌ No actual data available for GW{previous_gw}"
+                        )
             else:
                 performance_review = mo.md(
                     "📊 Load your team data to see squad performance"
@@ -1338,7 +1356,6 @@ def _(
     mo,
     optimization_horizon_toggle,
     players_with_xp,
-    risk_profile_selector,
 ):
     # Transfer Constraints UI - using PlayerAnalyticsService
     # Note: This cell runs before calibration, so it uses the original players_with_xp
@@ -1593,8 +1610,124 @@ def _(gameweek_data, players_with_xp, risk_profile_selector):
                             f"✅ Applied probabilistic calibration "
                             f"(risk_profile={risk_profile}, {calibrated_count} players calibrated)"
                         )
+    return (calibrated_players_with_xp,)
 
-    return calibrated_players_with_xp
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ---
+    ### 💾 Save Team Predictions
+
+    **Important:** Click this button AFTER you've finalized your team selection in the FPL website.
+    This saves your committed predictions (ML xP, calibrated xP, captain choice) for accurate performance tracking.
+    """)
+    return
+
+
+@app.cell
+def _(calibrated_players_with_xp, gameweek_data, gameweek_input, mo):
+    # Save Predictions Button
+    save_predictions_button = mo.ui.button(
+        label="💾 Save Team Predictions",
+        kind="success",
+        disabled=not (
+            gameweek_data
+            and gameweek_input.value
+            and not calibrated_players_with_xp.empty
+            and "manager_team" in gameweek_data
+        ),
+    )
+
+    save_predictions_button
+    return (save_predictions_button,)
+
+
+@app.cell
+def _(
+    calibrated_players_with_xp,
+    gameweek_data,
+    gameweek_input,
+    mo,
+    save_predictions_button,
+):
+    # Handle save predictions action
+    from fpl_team_picker.domain.services import PredictionStorageService
+    from fpl_team_picker.config import config as _save_config
+    from pathlib import Path as _PathSave
+
+    save_message = None
+
+    if save_predictions_button.value:
+        try:
+            storage_svc = PredictionStorageService()
+            _save_gw = gameweek_input.value
+
+            # Check if predictions already exist
+            if storage_svc.prediction_exists(_save_gw):
+                existing_summary = storage_svc.get_prediction_summary(_save_gw)
+                save_message = mo.callout(
+                    mo.md(
+                        f"""
+                        ⚠️ **Predictions already exist for GW{_save_gw}**
+
+                        Previously saved:
+                        - **Date:** {existing_summary["saved_at"].strftime("%Y-%m-%d %H:%M")}
+                        - **Total xP:** {existing_summary["total_xp"]:.1f}
+                        - **Captain:** {existing_summary["captain"]} ({existing_summary["captain_xp"]:.1f} xP)
+
+                        *Overwriting not yet implemented - delete the file manually if needed:*
+                        `data/predictions/gw{_save_gw}_predictions.json`
+                        """
+                    ),
+                    kind="warn",
+                )
+            else:
+                # Prepare model info for metadata
+                _save_model_info = {
+                    "model_path": str(_save_config.xp_model.ml_model_path),
+                    "calibration_enabled": _save_config.xp_calibration.enabled,
+                    "empirical_blend_weight": _save_config.xp_calibration.empirical_blend_weight,
+                    "risk_adjustment_multiplier": _save_config.xp_calibration.risk_adjustment_multiplier,
+                }
+
+                # Save predictions
+                result_path = storage_svc.save_predictions(
+                    gameweek=_save_gw,
+                    predictions_df=calibrated_players_with_xp,
+                    team_data=gameweek_data["manager_team"],
+                    model_info=_save_model_info,
+                )
+
+                # Get summary for confirmation
+                summary = storage_svc.get_prediction_summary(_save_gw)
+
+                save_message = mo.callout(
+                    mo.md(
+                        f"""
+                        ✅ **Predictions Saved for GW{_save_gw}**
+
+                        - **Total Squad xP:** {summary["total_xp"]:.1f}
+                        - **Captain:** {summary["captain"]} ({summary["captain_xp"]:.1f} xP)
+                        - **Squad Value:** £{summary["squad_value"]:.1f}m
+                        - **Players:** {summary["num_players"]}
+                        - **Saved to:** `{result_path.relative_to(_PathSave.cwd())}`
+
+                        *Your predictions are now locked in for performance tracking! 🎯*
+                        """
+                    ),
+                    kind="success",
+                )
+
+        except Exception as e:
+            save_message = mo.callout(
+                mo.md(f"❌ **Error saving predictions:** {str(e)}"),
+                kind="danger",
+            )
+
+    if save_message:
+        save_message
+    return
 
 
 @app.cell

@@ -23,6 +23,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **ChipAssessmentService**: Traffic light chip recommendations
 - **PerformanceAnalyticsService**: Historical recomputation & accuracy tracking
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
+- **PredictionStorageService**: Save/load committed predictions for accurate performance tracking
 
 **Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py, season_planner.py, ml_xp_experiment.py)
 
@@ -318,6 +319,17 @@ Retroactive testing with arbitrary algorithms for A/B comparisons.
 - `PerformanceAnalyticsService.recompute_historical_xp(gw)`
 - `PerformanceAnalyticsService.batch_recompute_season()`
 - Metrics: MAE/RMSE/correlation by position
+
+## Prediction Storage (Performance Tracking)
+
+**PredictionStorageService** - Save committed predictions for accurate historical performance analysis.
+
+**Saved Data**:
+- Player predictions: `ml_xp`, `calibrated_xp`, `xp_uncertainty`, fixture context
+- Squad composition: Captain/vice, starting XI, bench positions
+- Squad financials: Total value, in the bank, free transfers
+- Model metadata: Model path, calibration config, risk profile
+
 
 ## CLI Commands
 
