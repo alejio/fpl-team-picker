@@ -189,10 +189,10 @@ class MinutesModelConfig(BaseModel):
 
     # Injury/availability adjustments
     injury_full_game_multiplier: float = Field(
-        default=0.7, description="Injury full game multiplier", ge=0.0, le=1.0
+        default=0.1, description="Injury full game multiplier", ge=0.0, le=1.0
     )
     injury_avg_minutes_multiplier: float = Field(
-        default=0.8, description="Injury average minutes multiplier", ge=0.0, le=1.0
+        default=0.4, description="Injury average minutes multiplier", ge=0.0, le=1.0
     )
 
 

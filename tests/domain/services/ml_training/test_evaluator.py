@@ -27,16 +27,20 @@ class TestModelEvaluator:
     @pytest.fixture
     def sample_data(self):
         """Create sample test data."""
-        X = pd.DataFrame({
-            "feat1": [1, 2, 3, 4, 5],
-            "feat2": [5, 4, 3, 2, 1],
-        })
+        X = pd.DataFrame(
+            {
+                "feat1": [1, 2, 3, 4, 5],
+                "feat2": [5, 4, 3, 2, 1],
+            }
+        )
         y = np.array([2.5, 3.5, 4.5, 5.5, 6.5])
-        cv_data = pd.DataFrame({
-            "gameweek": [10, 10, 11, 11, 11],
-            "position": ["GKP", "DEF", "MID", "MID", "FWD"],
-            "player_id": [1, 2, 3, 4, 5],
-        })
+        cv_data = pd.DataFrame(
+            {
+                "gameweek": [10, 10, 11, 11, 11],
+                "position": ["GKP", "DEF", "MID", "MID", "FWD"],
+                "player_id": [1, 2, 3, 4, 5],
+            }
+        )
         return X, y, cv_data
 
     def test_evaluate_model_basic_metrics(self, evaluator, mock_model, sample_data):
@@ -82,9 +86,11 @@ class TestModelEvaluator:
         model = MagicMock()
         model.predict = MagicMock(return_value=np.array([1, 2, 3, 4, 5, 6, 7, 8]))
 
-        X = pd.DataFrame({
-            "feat1": range(8),
-        })
+        X = pd.DataFrame(
+            {
+                "feat1": range(8),
+            }
+        )
         y = np.array([1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5])
         positions = pd.Series(["GKP", "GKP", "DEF", "DEF", "MID", "MID", "FWD", "FWD"])
 
@@ -107,10 +113,30 @@ class TestModelEvaluator:
         """Test hybrid config when no position beats threshold."""
         comparison = {
             "per_position": {
-                "GKP": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
-                "DEF": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
-                "MID": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
-                "FWD": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
+                "GKP": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
+                "DEF": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
+                "MID": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
+                "FWD": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
             }
         }
 
@@ -123,10 +149,30 @@ class TestModelEvaluator:
         """Test hybrid config when some positions beat threshold."""
         comparison = {
             "per_position": {
-                "GKP": {"unified_mae": 1.0, "specific_mae": 0.95, "improvement": 0.05, "improvement_pct": 5.0},
-                "DEF": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
-                "MID": {"unified_mae": 1.0, "specific_mae": 0.99, "improvement": 0.01, "improvement_pct": 1.0},
-                "FWD": {"unified_mae": 1.0, "specific_mae": 0.92, "improvement": 0.08, "improvement_pct": 8.0},
+                "GKP": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.95,
+                    "improvement": 0.05,
+                    "improvement_pct": 5.0,
+                },
+                "DEF": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
+                "MID": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.99,
+                    "improvement": 0.01,
+                    "improvement_pct": 1.0,
+                },
+                "FWD": {
+                    "unified_mae": 1.0,
+                    "specific_mae": 0.92,
+                    "improvement": 0.08,
+                    "improvement_pct": 8.0,
+                },
             }
         }
 

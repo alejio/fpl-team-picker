@@ -1,0 +1,191 @@
+{
+  "tournament_name": "Africa Cup of Nations 2025",
+  "tournament_dates": {
+    "start": "2025-12-21",
+    "end": "2026-01-18",
+    "player_release_date": "2025-12-15"
+  },
+  "affected_gameweeks": [17, 18, 19, 20, 21, 22],
+  "players": [
+    {
+      "player_id": 381,
+      "web_name": "M.Salah",
+      "full_name": "Mohamed Salah",
+      "team": "Liverpool",
+      "country": "Egypt",
+      "position": "MID",
+      "impact": "high"
+    },
+    {
+      "player_id": 413,
+      "web_name": "Marmoush",
+      "full_name": "Omar Marmoush",
+      "team": "Man City",
+      "country": "Egypt",
+      "position": "MID",
+      "impact": "high"
+    },
+    {
+      "player_id": 119,
+      "web_name": "Mbeumo",
+      "full_name": "Bryan Mbeumo",
+      "team": "Brentford",
+      "country": "Cameroon",
+      "position": "MID",
+      "impact": "high"
+    },
+    {
+      "player_id": 452,
+      "web_name": "Amad",
+      "full_name": "Amad Diallo",
+      "team": "Man Utd",
+      "country": "Ivory Coast",
+      "position": "MID",
+      "impact": "high"
+    },
+    {
+      "player_id": 587,
+      "web_name": "Bissouma",
+      "full_name": "Yves Bissouma",
+      "team": "Spurs",
+      "country": "Mali",
+      "position": "MID",
+      "impact": "medium"
+    },
+    {
+      "player_id": 324,
+      "web_name": "Iwobi",
+      "full_name": "Alex Iwobi",
+      "team": "Fulham",
+      "country": "Nigeria",
+      "position": "MID",
+      "impact": "medium"
+    },
+    {
+      "player_id": 318,
+      "web_name": "Bassey",
+      "full_name": "Calvin Bassey",
+      "team": "Fulham",
+      "country": "Nigeria",
+      "position": "DEF",
+      "impact": "medium"
+    },
+    {
+      "player_id": 727,
+      "web_name": "Chukwueze",
+      "full_name": "Samuel Chukwueze",
+      "team": "Fulham",
+      "country": "Nigeria",
+      "position": "MID",
+      "impact": "medium"
+    },
+    {
+      "player_id": 128,
+      "web_name": "Onyeka",
+      "full_name": "Frank Onyeka",
+      "team": "Brentford",
+      "country": "Nigeria",
+      "position": "MID",
+      "impact": "low"
+    },
+    {
+      "player_id": 438,
+      "web_name": "Mazraoui",
+      "full_name": "Noussair Mazraoui",
+      "team": "Man Utd",
+      "country": "Morocco",
+      "position": "DEF",
+      "impact": "medium"
+    },
+    {
+      "player_id": 167,
+      "web_name": "Baleba",
+      "full_name": "Carlos Baleba",
+      "team": "Brighton",
+      "country": "Cameroon",
+      "position": "MID",
+      "impact": "medium"
+    },
+    {
+      "player_id": 610,
+      "web_name": "Wan-Bissaka",
+      "full_name": "Aaron Wan-Bissaka",
+      "team": "West Ham",
+      "country": "DR Congo",
+      "position": "DEF",
+      "impact": "medium"
+    },
+    {
+      "player_id": 83,
+      "web_name": "O.Dango",
+      "full_name": "Dango Ouattara",
+      "team": "Brentford",
+      "country": "Burkina Faso",
+      "position": "MID",
+      "impact": "medium"
+    },
+    {
+      "player_id": 631,
+      "web_name": "Agbadou",
+      "full_name": "Emmanuel Agbadou",
+      "team": "Wolves",
+      "country": "Ivory Coast",
+      "position": "DEF",
+      "impact": "low"
+    },
+    {
+      "player_id": 514,
+      "web_name": "Boly",
+      "full_name": "Willy Boly",
+      "team": "Nott'm Forest",
+      "country": "Ivory Coast",
+      "position": "DEF",
+      "impact": "low"
+    },
+    {
+      "player_id": 521,
+      "web_name": "Sangaré",
+      "full_name": "Ibrahim Sangaré",
+      "team": "Nott'm Forest",
+      "country": "Ivory Coast",
+      "position": "MID",
+      "impact": "low"
+    },
+    {
+      "player_id": 217,
+      "web_name": "Foster",
+      "full_name": "Lyle Foster",
+      "team": "Burnley",
+      "country": "South Africa",
+      "position": "FWD",
+      "impact": "low"
+    },
+    {
+      "player_id": 198,
+      "web_name": "Tuanzebe",
+      "full_name": "Axel Tuanzebe",
+      "team": "Burnley",
+      "country": "DR Congo",
+      "position": "DEF",
+      "impact": "low"
+    },
+    {
+      "player_id": 207,
+      "web_name": "Hannibal",
+      "full_name": "Hannibal Mejbri",
+      "team": "Burnley",
+      "country": "Tunisia",
+      "position": "MID",
+      "impact": "low"
+    }
+  ],
+  "notes": [
+    "Players will be released from clubs on Monday 15 December 2025",
+    "Tournament runs 21 December 2025 - 18 January 2026",
+    "Affects Premier League gameweeks 17-22",
+    "High impact = popular FPL assets (>5% ownership), Medium = regular starters, Low = squad players",
+    "Sunderland, Leeds, and Burnley are Championship teams (promoted teams not in current FPL dataset)",
+    "Source: Premier League official squads announced December 2025",
+    "Match using player_id or web_name for exact identification"
+  ]
+}

@@ -131,8 +131,8 @@ class TestCreatePreprocessor:
         # Use actual feature names from the groups
         feature_groups = get_feature_groups()
         feature_names = (
-            feature_groups["binary_features"][:2] +
-            feature_groups["continuous_features"][:2]
+            feature_groups["binary_features"][:2]
+            + feature_groups["continuous_features"][:2]
         )
 
         preprocessor = create_preprocessor("grouped", feature_names)
@@ -196,10 +196,12 @@ class TestBuildPipeline:
         """Test that built pipeline can fit and predict."""
         # Create simple test data
         np.random.seed(42)
-        X = pd.DataFrame({
-            "feat1": np.random.randn(100),
-            "feat2": np.random.randn(100),
-        })
+        X = pd.DataFrame(
+            {
+                "feat1": np.random.randn(100),
+                "feat2": np.random.randn(100),
+            }
+        )
         y = np.random.randn(100)
 
         pipeline = build_pipeline("random-forest", ["feat1", "feat2"])
@@ -239,4 +241,6 @@ class TestFeatureGroups:
             all_features.extend(group_features)
 
         # Check for duplicates
-        assert len(all_features) == len(set(all_features)), "Duplicate features in groups"
+        assert len(all_features) == len(set(all_features)), (
+            "Duplicate features in groups"
+        )

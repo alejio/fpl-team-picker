@@ -2,7 +2,6 @@
 
 import json
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -10,8 +9,6 @@ import pytest
 from fpl_team_picker.domain.services.prediction_storage_service import (
     PredictionStorageService,
     GameweekPredictions,
-    SavedPrediction,
-    SquadSnapshot,
 )
 
 
@@ -56,9 +53,24 @@ def sample_team_data():
         "picks": [
             {"element": 1, "position": 1, "is_captain": True, "is_vice_captain": False},
             {"element": 2, "position": 2, "is_captain": False, "is_vice_captain": True},
-            {"element": 3, "position": 3, "is_captain": False, "is_vice_captain": False},
-            {"element": 4, "position": 4, "is_captain": False, "is_vice_captain": False},
-            {"element": 5, "position": 5, "is_captain": False, "is_vice_captain": False},
+            {
+                "element": 3,
+                "position": 3,
+                "is_captain": False,
+                "is_vice_captain": False,
+            },
+            {
+                "element": 4,
+                "position": 4,
+                "is_captain": False,
+                "is_vice_captain": False,
+            },
+            {
+                "element": 5,
+                "position": 5,
+                "is_captain": False,
+                "is_vice_captain": False,
+            },
         ],
         "entry": {"value": 1005, "bank": 5},  # £100.5m squad, £0.5m in bank
         "transfers": {"limit": 1},
@@ -237,7 +249,9 @@ class TestPredictionStorageService:
         assert not storage_service.prediction_exists(14)
 
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         assert storage_service.prediction_exists(14)
@@ -264,7 +278,9 @@ class TestPredictionStorageService:
     ):
         """Test getting prediction summary."""
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         summary = storage_service.get_prediction_summary(14)
@@ -286,7 +302,9 @@ class TestPredictionStorageService:
     ):
         """Test converting GameweekPredictions to DataFrame."""
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         loaded = storage_service.load_predictions(14)
@@ -304,7 +322,9 @@ class TestPredictionStorageService:
     ):
         """Test squad snapshot captures correct totals."""
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         loaded = storage_service.load_predictions(14)
@@ -378,7 +398,9 @@ class TestPredictionStorageService:
     ):
         """Test calculating total squad xP."""
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         loaded = storage_service.load_predictions(14)
@@ -393,7 +415,9 @@ class TestPredictionStorageService:
     ):
         """Test captain-related methods."""
         storage_service.save_predictions(
-            gameweek=14, predictions_df=sample_predictions_df, team_data=sample_team_data
+            gameweek=14,
+            predictions_df=sample_predictions_df,
+            team_data=sample_team_data,
         )
 
         loaded = storage_service.load_predictions(14)

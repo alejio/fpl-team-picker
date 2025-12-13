@@ -29,6 +29,7 @@ class TransferOptimizationMixin(TransferSAMixin):
         must_exclude_ids: Set[int] = None,
         free_transfers_override: Optional[int] = None,
         is_free_hit: bool = False,
+        is_bench_boost: bool = False,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Unified transfer optimization supporting normal gameweeks and chips.
 
@@ -40,6 +41,7 @@ class TransferOptimizationMixin(TransferSAMixin):
         - Saved transfer: free_transfers=2 (analyze 0-4 transfers)
         - Wildcard chip: free_transfers=15 (rebuild entire squad, budget resets to £100m)
         - Free Hit chip: free_transfers=15 + is_free_hit=True (1GW optimization, squad reverts after)
+        - Bench Boost chip: is_bench_boost=True (optimize all 15 players, not just starting 11)
 
         **Optimization Method:**
         - Simulated Annealing: Exploratory, good for non-linear objectives (~10-45s)
@@ -55,6 +57,7 @@ class TransferOptimizationMixin(TransferSAMixin):
                 - 15: Wildcard chip (rebuild entire squad)
                 - 2: Saved transfer from previous week
             is_free_hit: If True, optimize for 1GW only (squad reverts after deadline)
+            is_bench_boost: If True, optimize for all 15 players (bench players also score)
 
         Returns:
             Tuple of (optimal_squad_df, best_scenario_dict, optimization_metadata_dict)
@@ -77,6 +80,10 @@ class TransferOptimizationMixin(TransferSAMixin):
                     + (" (1GW only, squad reverts)" if is_free_hit else "")
                 )
 
+        # Log Bench Boost mode
+        if is_bench_boost:
+            logger.info("🪑 Bench Boost Active: Optimizing for all 15 players")
+
         # Use Simulated Annealing for transfer optimization
         return self._optimize_transfers_sa(
             current_squad,
@@ -85,6 +92,7 @@ class TransferOptimizationMixin(TransferSAMixin):
             must_include_ids,
             must_exclude_ids,
             is_free_hit=is_free_hit,
+            is_bench_boost=is_bench_boost,
         )
 
     def plan_premium_acquisition(

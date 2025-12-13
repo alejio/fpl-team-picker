@@ -70,7 +70,9 @@ class TestVariancePreservation:
         y_pred_good = np.array([3, 4, 12, 5, 9, 3, 5, 10, 6, 8, 3, 2, 8, 4, 7])
 
         # Bad model: compresses to mean (misses haulers)
-        y_pred_bad = np.array([5.5, 5.5, 6.0, 5.5, 5.8, 5.5, 5.5, 5.8, 5.5, 5.7, 5.5, 5.5, 5.6, 5.5, 5.6])
+        y_pred_bad = np.array(
+            [5.5, 5.5, 6.0, 5.5, 5.8, 5.5, 5.5, 5.8, 5.5, 5.7, 5.5, 5.5, 5.6, 5.5, 5.6]
+        )
 
         good_score = fpl_hauler_ceiling_scorer(y_true, y_pred_good)
         bad_score = fpl_hauler_ceiling_scorer(y_true, y_pred_bad)
@@ -121,10 +123,14 @@ class TestHaulerCapture:
         y_true = np.array([2, 3, 15, 6, 8, 2, 4, 12, 5, 7, 2, 1, 9, 3, 6, 20, 5, 4])
 
         # Model that captures haulers in top-15
-        y_pred_captures = np.array([3, 4, 14, 5, 9, 3, 5, 11, 6, 8, 3, 2, 8, 4, 7, 18, 6, 5])
+        y_pred_captures = np.array(
+            [3, 4, 14, 5, 9, 3, 5, 11, 6, 8, 3, 2, 8, 4, 7, 18, 6, 5]
+        )
 
         # Model that misses haulers
-        y_pred_misses = np.array([8, 9, 5, 10, 4, 9, 10, 3, 11, 5, 10, 9, 2, 10, 8, 4, 9, 10])
+        y_pred_misses = np.array(
+            [8, 9, 5, 10, 4, 9, 10, 3, 11, 5, 10, 9, 2, 10, 8, 4, 9, 10]
+        )
 
         captures_score = fpl_hauler_ceiling_scorer(y_true, y_pred_captures)
         misses_score = fpl_hauler_ceiling_scorer(y_true, y_pred_misses)
@@ -164,7 +170,9 @@ class TestComponentWeights:
         y_pred_hauler = np.array([3, 4, 14, 5, 9, 3, 5, 11, 6, 8])
 
         # Model bad at hauler capture but good at captain (somehow)
-        y_pred_captain = np.array([6, 6, 6, 6, 6, 6, 6, 15, 6, 6])  # Only predicts one hauler
+        y_pred_captain = np.array(
+            [6, 6, 6, 6, 6, 6, 6, 15, 6, 6]
+        )  # Only predicts one hauler
 
         hauler_score = fpl_hauler_ceiling_scorer(y_true, y_pred_hauler)
         captain_score = fpl_hauler_ceiling_scorer(y_true, y_pred_captain)
@@ -228,7 +236,9 @@ class TestComparisonWithOtherScorers:
         y_pred_good = np.array([3, 4, 12, 5, 9, 3, 5, 10, 6, 8, 3, 2, 8, 4, 7])
 
         # Bad model: compresses variance
-        y_pred_bad = np.array([5.5, 5.5, 6.0, 5.5, 5.8, 5.5, 5.5, 5.8, 5.5, 5.7, 5.5, 5.5, 5.6, 5.5, 5.6])
+        y_pred_bad = np.array(
+            [5.5, 5.5, 6.0, 5.5, 5.8, 5.5, 5.5, 5.8, 5.5, 5.7, 5.5, 5.5, 5.6, 5.5, 5.6]
+        )
 
         # Hauler capture alone might not distinguish (both capture haulers in top-15)
         hauler_good = fpl_hauler_capture_scorer(y_true, y_pred_good)
@@ -264,22 +274,40 @@ class TestRealWorldScenarios:
     def test_typical_gameweek_distribution(self):
         """Test with typical gameweek point distribution."""
         # Typical GW: 2 haulers (10+), 5-6 returns (5-9), rest blanks
-        y_true = np.array([
-            2, 2, 3, 1, 4, 15, 8, 7, 3, 2,  # 15 and 8 are haulers
-            6, 5, 4, 2, 1, 3, 2, 12, 5, 6   # 12 is also a hauler
-        ])
+        y_true = np.array(
+            [
+                2,
+                2,
+                3,
+                1,
+                4,
+                15,
+                8,
+                7,
+                3,
+                2,  # 15 and 8 are haulers
+                6,
+                5,
+                4,
+                2,
+                1,
+                3,
+                2,
+                12,
+                5,
+                6,  # 12 is also a hauler
+            ]
+        )
 
         # Good model preserving shape
-        y_pred_good = np.array([
-            3, 2, 4, 2, 5, 12, 9, 8, 4, 3,
-            7, 6, 5, 3, 2, 4, 3, 10, 6, 7
-        ])
+        y_pred_good = np.array(
+            [3, 2, 4, 2, 5, 12, 9, 8, 4, 3, 7, 6, 5, 3, 2, 4, 3, 10, 6, 7]
+        )
 
         # Bad model compressing to mean ~4.5
-        y_pred_bad = np.array([
-            4, 4, 5, 4, 5, 6, 5, 5, 4, 4,
-            5, 5, 5, 4, 4, 4, 4, 6, 5, 5
-        ])
+        y_pred_bad = np.array(
+            [4, 4, 5, 4, 5, 6, 5, 5, 4, 4, 5, 5, 5, 4, 4, 4, 4, 6, 5, 5]
+        )
 
         good_score = fpl_hauler_ceiling_scorer(y_true, y_pred_good)
         bad_score = fpl_hauler_ceiling_scorer(y_true, y_pred_bad)
@@ -290,22 +318,67 @@ class TestRealWorldScenarios:
     def test_captain_scenario(self):
         """Test captain selection scenario (top 1% insight)."""
         # Top 1% managers average 18.7 captain points - they pick the right haulers
-        y_true = np.array([
-            8.0, 15.0, 6.0, 4.0, 20.0, 7.0, 5.0, 3.0,  # 20pt is ideal captain
-            10.0, 6.0, 4.0, 2.0, 8.0, 5.0, 3.0
-        ])
+        y_true = np.array(
+            [
+                8.0,
+                15.0,
+                6.0,
+                4.0,
+                20.0,
+                7.0,
+                5.0,
+                3.0,  # 20pt is ideal captain
+                10.0,
+                6.0,
+                4.0,
+                2.0,
+                8.0,
+                5.0,
+                3.0,
+            ]
+        )
 
         # Good model: correctly identifies 20pt as top
-        y_pred_good = np.array([
-            7.0, 12.0, 5.0, 4.0, 16.0, 6.0, 5.0, 3.0,
-            9.0, 6.0, 4.0, 2.0, 7.0, 5.0, 3.0
-        ])
+        y_pred_good = np.array(
+            [
+                7.0,
+                12.0,
+                5.0,
+                4.0,
+                16.0,
+                6.0,
+                5.0,
+                3.0,
+                9.0,
+                6.0,
+                4.0,
+                2.0,
+                7.0,
+                5.0,
+                3.0,
+            ]
+        )
 
         # Bad model: picks wrong captain
-        y_pred_bad = np.array([
-            14.0, 7.0, 5.0, 4.0, 8.0, 6.0, 5.0, 3.0,  # Thinks first player is best
-            9.0, 6.0, 4.0, 2.0, 7.0, 5.0, 3.0
-        ])
+        y_pred_bad = np.array(
+            [
+                14.0,
+                7.0,
+                5.0,
+                4.0,
+                8.0,
+                6.0,
+                5.0,
+                3.0,  # Thinks first player is best
+                9.0,
+                6.0,
+                4.0,
+                2.0,
+                7.0,
+                5.0,
+                3.0,
+            ]
+        )
 
         good_score = fpl_hauler_ceiling_scorer(y_true, y_pred_good)
         bad_score = fpl_hauler_ceiling_scorer(y_true, y_pred_bad)

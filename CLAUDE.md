@@ -24,6 +24,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **PerformanceAnalyticsService**: Historical recomputation & accuracy tracking
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
 - **PredictionStorageService**: Save/load committed predictions for accurate performance tracking
+- **AFCONExclusionService**: Tournament-based player exclusions (AFCON 2025: GW17-22)
 
 **Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py, season_planner.py, ml_xp_experiment.py)
 
@@ -180,6 +181,10 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - Form-weighted (70/30), live data, dynamic team strength
 - Used for GW1-5 (insufficient ML training data) and as ML benchmark only
 - No uncertainty quantification
+
+**Fixture Difficulty Consistency Architecture**:
+- **Single Source of Truth**: `fixture_difficulty` is computed ONCE by `FPLFeatureEngineer.transform()`
+
 
 ## XP Calibration (Probabilistic)
 
@@ -357,6 +362,38 @@ marimo check fpl_team_picker/interfaces/ --fix
 - **Ceiling bonus**: Adds bonus for high-upside players (ceiling > 10) when `ceiling_bonus_enabled=True`
 - Used for weekly transfers (1-3 players), wildcards, and initial squad generation
 - Typical runtime: ~10-45 seconds depending on iterations
+
+## AFCON Player Exclusions (GW16-22, 2025-26 Season)
+
+**AFCONExclusionService** - Automatic exclusion of players participating in Africa Cup of Nations 2025.
+
+**Tournament Details**:
+- **Dates**: 21 December 2025 - 18 January 2026
+- **Player release**: 15 December 2025
+- **Affected gameweeks**: GW17-22
+- **Total players**: 19 Premier League players
+
+**High-Impact Players** (>5% ownership):
+- Mohamed Salah (Liverpool) - 17.1% owned
+- Bryan Mbeumo (Brentford) - 26.1% owned
+- Omar Marmoush (Man City) - 2.5% owned
+- Amad Diallo (Man Utd) - 1.6% owned
+
+**Usage in Marimo UI**:
+- Checkbox: "Exclude AFCON Players (GW17-22: Salah, Mbeumo, etc.)"
+- When enabled, automatically excludes all 19 AFCON players from optimization
+- Particularly important for GW16 (5 free transfers given for AFCON planning)
+
+**Data Source**: `data/afcon_2025_players.json` with player_id matching for exact identification
+
+**API**:
+```python
+from fpl_team_picker.domain.services.afcon_exclusion_service import AFCONExclusionService
+
+service = AFCONExclusionService()
+afcon_ids = service.get_afcon_player_ids()  # All 19 players
+high_impact = service.get_afcon_player_ids(impact_filter=["high"])  # Just high-impact
+```
 
 ## Configuration
 

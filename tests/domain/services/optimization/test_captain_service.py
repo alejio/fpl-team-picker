@@ -1450,11 +1450,15 @@ class TestHaulBonusCalculation:
         # haul_bonus = min((ceiling - 12) * 0.03, 0.25) if ceiling > 12 else 0
         test_cases = [
             # (xP, uncertainty, expected_haul_bonus)
-            (8.0, 1.0, 0.0),      # Ceiling = 8 + 2.33 = 10.33 < 12 → no bonus
-            (10.0, 1.0, 0.01),    # Ceiling = 10 + 2.33 = 12.33 → 0.33 * 0.03 = 0.0099
-            (10.0, 2.0, 0.08),    # Ceiling = 10 + 4.66 = 14.66 → 2.66 * 0.03 = 0.0798
-            (10.0, 4.0, 0.22),    # Ceiling = 10 + 9.32 = 19.32 → 7.32 * 0.03 = 0.2196
-            (12.0, 4.0, 0.25),    # Ceiling = 12 + 9.32 = 21.32 → 9.32 * 0.03 = 0.28 → capped at 0.25
+            (8.0, 1.0, 0.0),  # Ceiling = 8 + 2.33 = 10.33 < 12 → no bonus
+            (10.0, 1.0, 0.01),  # Ceiling = 10 + 2.33 = 12.33 → 0.33 * 0.03 = 0.0099
+            (10.0, 2.0, 0.08),  # Ceiling = 10 + 4.66 = 14.66 → 2.66 * 0.03 = 0.0798
+            (10.0, 4.0, 0.22),  # Ceiling = 10 + 9.32 = 19.32 → 7.32 * 0.03 = 0.2196
+            (
+                12.0,
+                4.0,
+                0.25,
+            ),  # Ceiling = 12 + 9.32 = 21.32 → 9.32 * 0.03 = 0.28 → capped at 0.25
         ]
 
         for xp, uncertainty, expected_bonus in test_cases:

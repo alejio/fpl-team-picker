@@ -50,9 +50,7 @@ class TestMLTrainerSelectFeatures:
         np.random.seed(42)
         n_samples = 100
 
-        X = pd.DataFrame({
-            f"feat_{i}": np.random.randn(n_samples) for i in range(10)
-        })
+        X = pd.DataFrame({f"feat_{i}": np.random.randn(n_samples) for i in range(10)})
         y = np.random.randn(n_samples)
         feature_names = list(X.columns)
 
@@ -151,16 +149,18 @@ class TestMLTrainerPositionFeatures:
     def test_feature_functions_callable(self, trainer):
         """Test that feature functions are callable on DataFrame."""
         # Create sample data with required columns
-        df = pd.DataFrame({
-            "rolling_5gw_saves": [5, 10, 15],
-            "opponent_rolling_5gw_xg": [1.5, 2.0, 1.0],
-            "clean_sheet_probability_enhanced": [0.3, 0.4, 0.5],
-            "rolling_5gw_minutes": [270, 360, 450],
-            "rolling_5gw_xg": [0.5, 1.0, 1.5],
-            "rolling_5gw_xa": [0.2, 0.3, 0.4],
-            "rolling_5gw_threat": [50, 60, 70],
-            "rolling_5gw_creativity": [40, 50, 60],
-        })
+        df = pd.DataFrame(
+            {
+                "rolling_5gw_saves": [5, 10, 15],
+                "opponent_rolling_5gw_xg": [1.5, 2.0, 1.0],
+                "clean_sheet_probability_enhanced": [0.3, 0.4, 0.5],
+                "rolling_5gw_minutes": [270, 360, 450],
+                "rolling_5gw_xg": [0.5, 1.0, 1.5],
+                "rolling_5gw_xa": [0.2, 0.3, 0.4],
+                "rolling_5gw_threat": [50, 60, 70],
+                "rolling_5gw_creativity": [40, 50, 60],
+            }
+        )
 
         for position in ["GKP", "DEF", "MID", "FWD"]:
             additions = trainer._get_position_feature_additions(position)
@@ -192,10 +192,12 @@ class TestMLTrainerSaveModel:
         from sklearn.preprocessing import StandardScaler
         from sklearn.linear_model import Ridge
 
-        pipeline = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", Ridge()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("regressor", Ridge()),
+            ]
+        )
 
         # Fit on dummy data
         X = np.random.randn(10, 2)
@@ -225,10 +227,12 @@ class TestMLTrainerSaveModel:
         from sklearn.preprocessing import StandardScaler
         from sklearn.linear_model import Ridge
 
-        pipeline = Pipeline([
-            ("scaler", StandardScaler()),
-            ("regressor", Ridge()),
-        ])
+        pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("regressor", Ridge()),
+            ]
+        )
 
         X = np.random.randn(10, 2)
         y = np.random.randn(10)
@@ -249,17 +253,21 @@ class TestMLTrainerIntegration:
         n_samples = 200
 
         # Create mock historical data
-        historical_df = pd.DataFrame({
-            "player_id": np.tile(np.arange(20), 10),
-            "gameweek": np.repeat(np.arange(6, 16), 20),
-            "position": np.tile(["GKP", "GKP"] + ["DEF"]*4 + ["MID"]*8 + ["FWD"]*6, 10),
-            "total_points": np.random.randint(0, 15, n_samples),
-            "minutes": np.random.randint(0, 91, n_samples),
-        })
+        historical_df = pd.DataFrame(
+            {
+                "player_id": np.tile(np.arange(20), 10),
+                "gameweek": np.repeat(np.arange(6, 16), 20),
+                "position": np.tile(
+                    ["GKP", "GKP"] + ["DEF"] * 4 + ["MID"] * 8 + ["FWD"] * 6, 10
+                ),
+                "total_points": np.random.randint(0, 15, n_samples),
+                "minutes": np.random.randint(0, 91, n_samples),
+            }
+        )
 
-        features_df = pd.DataFrame({
-            f"feat_{i}": np.random.randn(n_samples) for i in range(10)
-        })
+        features_df = pd.DataFrame(
+            {f"feat_{i}": np.random.randn(n_samples) for i in range(10)}
+        )
         features_df["gameweek"] = historical_df["gameweek"].values
         features_df["position"] = historical_df["position"].values
         features_df["player_id"] = historical_df["player_id"].values
@@ -271,9 +279,7 @@ class TestMLTrainerIntegration:
 
     @patch("fpl_team_picker.domain.services.ml_training.trainer.load_training_data")
     @patch("fpl_team_picker.domain.services.ml_training.trainer.engineer_features")
-    def test_train_unified_with_mocked_data(
-        self, mock_engineer, mock_load, mock_data
-    ):
+    def test_train_unified_with_mocked_data(self, mock_engineer, mock_load, mock_data):
         """Test train_unified with mocked data loading."""
         features_df, target, feature_names = mock_data
 

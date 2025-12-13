@@ -49,7 +49,7 @@ class TestXPCalibrationServiceInitialization:
     def test_loads_distributions_from_file(self):
         """Test service loads distributions from JSON file."""
         # Create temporary distributions file
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             test_distributions = {
                 "premium_easy": {
                     "mean": 9.2,
@@ -87,7 +87,7 @@ class TestXPCalibrationServiceInitialization:
 
     def test_handles_invalid_json_file(self):
         """Test service handles invalid JSON file gracefully."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write("invalid json content {")
             temp_path = f.name
 
@@ -209,7 +209,7 @@ class TestCalibrationLogic:
     @pytest.fixture
     def service_with_distributions(self, mock_distributions):
         """Create service with mock distributions."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(mock_distributions, f)
             temp_path = f.name
 
@@ -223,40 +223,42 @@ class TestCalibrationLogic:
     @pytest.fixture
     def sample_players(self):
         """Create sample players DataFrame."""
-        return pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Premium Easy",
-                "price": 10.0,
-                "xP": 8.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,  # Easy
-            },
-            {
-                "player_id": 2,
-                "web_name": "Premium Hard",
-                "price": 9.0,
-                "xP": 7.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 1.0,  # Hard
-            },
-            {
-                "player_id": 3,
-                "web_name": "Mid Easy",
-                "price": 7.0,
-                "xP": 6.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,  # Easy
-            },
-            {
-                "player_id": 4,
-                "web_name": "Budget Hard",
-                "price": 5.0,
-                "xP": 4.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 1.0,  # Hard
-            },
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Premium Easy",
+                    "price": 10.0,
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,  # Easy
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Premium Hard",
+                    "price": 9.0,
+                    "xP": 7.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 1.0,  # Hard
+                },
+                {
+                    "player_id": 3,
+                    "web_name": "Mid Easy",
+                    "price": 7.0,
+                    "xP": 6.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,  # Easy
+                },
+                {
+                    "player_id": 4,
+                    "web_name": "Budget Hard",
+                    "price": 5.0,
+                    "xP": 4.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 1.0,  # Hard
+                },
+            ]
+        )
 
     def test_calibration_applies_to_all_players(
         self, service_with_distributions, sample_players
@@ -366,17 +368,23 @@ class TestCalibrationLogic:
     def test_blend_weight_affects_calibration(self, mock_distributions, sample_players):
         """Test that different blend weights produce different fixture effect adjustments."""
         # Create services with different blend weights
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(mock_distributions, f)
             temp_path = f.name
 
         try:
             # Low blend weight (25% of fixture effect)
-            config_low = {"distributions_path": temp_path, "empirical_blend_weight": 0.25}
+            config_low = {
+                "distributions_path": temp_path,
+                "empirical_blend_weight": 0.25,
+            }
             service_low = XPCalibrationService(config=config_low)
 
             # High blend weight (100% of fixture effect)
-            config_high = {"distributions_path": temp_path, "empirical_blend_weight": 1.0}
+            config_high = {
+                "distributions_path": temp_path,
+                "empirical_blend_weight": 1.0,
+            }
             service_high = XPCalibrationService(config=config_high)
 
             result_low = service_low.calibrate_predictions(sample_players.copy())
@@ -384,8 +392,12 @@ class TestCalibrationLogic:
 
             # Results should be different - higher weight applies more fixture effect
             for idx in range(len(sample_players)):
-                low_adjustment = abs(result_low.iloc[idx]["xP"] - result_low.iloc[idx]["xP_raw"])
-                high_adjustment = abs(result_high.iloc[idx]["xP"] - result_high.iloc[idx]["xP_raw"])
+                low_adjustment = abs(
+                    result_low.iloc[idx]["xP"] - result_low.iloc[idx]["xP_raw"]
+                )
+                high_adjustment = abs(
+                    result_high.iloc[idx]["xP"] - result_high.iloc[idx]["xP_raw"]
+                )
                 # High weight should produce larger adjustments (or equal if fixture effect is 0)
                 assert high_adjustment >= low_adjustment - 0.001  # Small tolerance
 
@@ -412,7 +424,7 @@ class TestFallbackBehavior:
                 "sample_size": 20,  # Below minimum of 30
             },
         }
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(mock_distributions, f)
             temp_path = f.name
 
@@ -426,16 +438,18 @@ class TestFallbackBehavior:
     @pytest.fixture
     def sample_players(self):
         """Create sample players DataFrame."""
-        return pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Test Player",
-                "price": 10.0,
-                "xP": 8.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,
-            },
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Test Player",
+                    "price": 10.0,
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
     def test_fallback_to_prior_when_no_distributions(
         self, service_no_distributions, sample_players
@@ -485,9 +499,16 @@ class TestEdgeCases:
 
     def test_missing_price_column(self, service):
         """Test that missing price column raises error."""
-        players = pd.DataFrame([
-            {"player_id": 1, "xP": 5.0, "xP_uncertainty": 1.5, "fixture_difficulty": 2.0},
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "xP": 5.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         # Should raise ValueError indicating data problem
         with pytest.raises(ValueError, match="Missing required columns"):
@@ -495,9 +516,16 @@ class TestEdgeCases:
 
     def test_missing_xp_column(self, service):
         """Test that missing xP column raises error."""
-        players = pd.DataFrame([
-            {"player_id": 1, "price": 8.0, "xP_uncertainty": 1.5, "fixture_difficulty": 2.0},
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         # Should raise ValueError indicating data problem
         with pytest.raises(ValueError, match="Missing required columns"):
@@ -505,9 +533,11 @@ class TestEdgeCases:
 
     def test_missing_xp_uncertainty_column(self, service):
         """Test that missing xP_uncertainty column uses default value."""
-        players = pd.DataFrame([
-            {"player_id": 1, "price": 8.0, "xP": 5.0, "fixture_difficulty": 2.0},
-        ])
+        players = pd.DataFrame(
+            [
+                {"player_id": 1, "price": 8.0, "xP": 5.0, "fixture_difficulty": 2.0},
+            ]
+        )
 
         # Should work - xP_uncertainty is now optional (uses default 1.5)
         result = service.calibrate_predictions(players)
@@ -519,9 +549,11 @@ class TestEdgeCases:
 
     def test_missing_fixture_difficulty(self, service):
         """Test that missing fixture difficulty raises error."""
-        players = pd.DataFrame([
-            {"player_id": 1, "price": 8.0, "xP": 5.0, "xP_uncertainty": 1.5},
-        ])
+        players = pd.DataFrame(
+            [
+                {"player_id": 1, "price": 8.0, "xP": 5.0, "xP_uncertainty": 1.5},
+            ]
+        )
 
         # Should raise ValueError indicating data problem
         with pytest.raises(ValueError, match="Missing required columns"):
@@ -529,12 +561,22 @@ class TestEdgeCases:
 
     def test_fixture_difficulty_from_separate_df(self, service):
         """Test merging fixture difficulty from separate DataFrame."""
-        players = pd.DataFrame([
-            {"player_id": 1, "price": 8.0, "xP": 5.0, "xP_uncertainty": 1.5, "team_id": 1},
-        ])
-        fixture_df = pd.DataFrame([
-            {"team_id": 1, "fixture_difficulty": 2.0},
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "xP_uncertainty": 1.5,
+                    "team_id": 1,
+                },
+            ]
+        )
+        fixture_df = pd.DataFrame(
+            [
+                {"team_id": 1, "fixture_difficulty": 2.0},
+            ]
+        )
 
         result = service.calibrate_predictions(
             players, fixture_difficulty_df=fixture_df
@@ -544,12 +586,22 @@ class TestEdgeCases:
 
     def test_fixture_difficulty_from_separate_df_missing(self, service):
         """Test that missing fixture difficulty after merge raises error."""
-        players = pd.DataFrame([
-            {"player_id": 1, "price": 8.0, "xP": 5.0, "xP_uncertainty": 1.5, "team_id": 1},
-        ])
-        fixture_df = pd.DataFrame([
-            {"team_id": 999, "fixture_difficulty": 2.0},  # No match for team_id=1
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "xP_uncertainty": 1.5,
+                    "team_id": 1,
+                },
+            ]
+        )
+        fixture_df = pd.DataFrame(
+            [
+                {"team_id": 999, "fixture_difficulty": 2.0},  # No match for team_id=1
+            ]
+        )
 
         # Should raise error because fixture_difficulty will be NaN after merge
         with pytest.raises(ValueError, match="Missing fixture_difficulty"):
@@ -557,15 +609,17 @@ class TestEdgeCases:
 
     def test_nan_fixture_difficulty_in_dataframe(self, service):
         """Test that NaN fixture_difficulty values in DataFrame raise error."""
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "price": 8.0,
-                "xP": 5.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": np.nan,  # NaN value
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": np.nan,  # NaN value
+                },
+            ]
+        )
 
         # Should raise error when processing the NaN value
         with pytest.raises(ValueError, match="Missing fixture_difficulty"):
@@ -573,15 +627,17 @@ class TestEdgeCases:
 
     def test_zero_uncertainty_handled_gracefully(self, service):
         """Test that zero uncertainty is handled gracefully with default value."""
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "price": 8.0,
-                "xP": 5.0,
-                "xP_uncertainty": 0.0,
-                "fixture_difficulty": 2.0,
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "xP_uncertainty": 0.0,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         # Should handle gracefully - new implementation uses default 1.5 for missing/invalid
         result = service.calibrate_predictions(players)
@@ -591,15 +647,17 @@ class TestEdgeCases:
 
     def test_negative_uncertainty_handled_gracefully(self, service):
         """Test that negative uncertainty is handled gracefully with default value."""
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "price": 8.0,
-                "xP": 5.0,
-                "xP_uncertainty": -1.0,
-                "fixture_difficulty": 2.0,
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 5.0,
+                    "xP_uncertainty": -1.0,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         # Should handle gracefully - new implementation uses default 1.5 for missing/invalid
         result = service.calibrate_predictions(players)
@@ -617,15 +675,17 @@ class TestEdgeCases:
 
     def test_very_low_ml_xp(self, service):
         """Test calibration with very low ML prediction."""
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "price": 8.0,
-                "xP": 0.1,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 0.1,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         result = service.calibrate_predictions(players)
         # Should still be non-negative
@@ -633,15 +693,17 @@ class TestEdgeCases:
 
     def test_very_high_ml_xp(self, service):
         """Test calibration with very high ML prediction."""
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "price": 8.0,
-                "xP": 20.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "price": 8.0,
+                    "xP": 20.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,
+                },
+            ]
+        )
 
         result = service.calibrate_predictions(players)
         # Should handle gracefully
@@ -656,7 +718,9 @@ class TestIntegrationWithRealDistributions:
         # Use the actual distributions file path
         # tests/domain/services/test_xp_calibration_service.py -> project root
         project_root = Path(__file__).parent.parent.parent.parent
-        distributions_path = project_root / "data" / "calibration" / "distributions.json"
+        distributions_path = (
+            project_root / "data" / "calibration" / "distributions.json"
+        )
 
         if not distributions_path.exists():
             pytest.skip("Distributions file not found")
@@ -673,31 +737,35 @@ class TestIntegrationWithRealDistributions:
         """Test calibration using real distributions."""
         # tests/domain/services/test_xp_calibration_service.py -> project root
         project_root = Path(__file__).parent.parent.parent.parent
-        distributions_path = project_root / "data" / "calibration" / "distributions.json"
+        distributions_path = (
+            project_root / "data" / "calibration" / "distributions.json"
+        )
 
         if not distributions_path.exists():
             pytest.skip("Distributions file not found")
 
         service = XPCalibrationService()
 
-        players = pd.DataFrame([
-            {
-                "player_id": 1,
-                "web_name": "Test Premium",
-                "price": 10.0,
-                "xP": 8.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 2.0,  # Easy
-            },
-            {
-                "player_id": 2,
-                "web_name": "Test Budget",
-                "price": 5.0,
-                "xP": 3.0,
-                "xP_uncertainty": 1.5,
-                "fixture_difficulty": 1.0,  # Hard
-            },
-        ])
+        players = pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "Test Premium",
+                    "price": 10.0,
+                    "xP": 8.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 2.0,  # Easy
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "Test Budget",
+                    "price": 5.0,
+                    "xP": 3.0,
+                    "xP_uncertainty": 1.5,
+                    "fixture_difficulty": 1.0,  # Hard
+                },
+            ]
+        )
 
         result = service.calibrate_predictions(players, risk_profile="balanced")
 

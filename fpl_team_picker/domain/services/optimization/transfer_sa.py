@@ -38,6 +38,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         must_include_ids: Set[int] = None,
         must_exclude_ids: Set[int] = None,
         is_free_hit: bool = False,
+        is_bench_boost: bool = False,
     ) -> Tuple[pd.DataFrame, Dict, Dict]:
         """Transfer optimization using Simulated Annealing (exploration-based).
 
@@ -83,13 +84,17 @@ class TransferSAMixin(OptimizationBaseMixin):
             logger.debug(f"🚫 Must exclude {len(must_exclude_ids)} players")
 
         # Get optimization column based on configuration
-        # Free Hit always uses 1GW (squad reverts after deadline)
+        # Free Hit and Bench Boost always use 1GW (single-gameweek chips)
         if is_free_hit:
             xp_column = "xP"
             horizon_label = "1-GW"
             logger.info(
                 "🎯 Free Hit mode: Optimizing for 1GW only (squad reverts after)"
             )
+        elif is_bench_boost:
+            xp_column = "xP"
+            horizon_label = "1-GW (Bench Boost)"
+            logger.info("🪑 Bench Boost mode: Optimizing all 15 players for 1GW")
         else:
             xp_column = self.get_optimization_xp_column()
             if xp_column == "xP":
@@ -186,14 +191,23 @@ class TransferSAMixin(OptimizationBaseMixin):
         if must_exclude_ids:
             all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
 
-        # Get best starting 11 from current squad
-        current_best_11, current_formation, current_xp = self.find_optimal_starting_11(
-            current_squad_with_xp, xp_column
+        # Get best starting 11 from current squad (needed for formation display)
+        current_best_11, current_formation, starting_11_xp = (
+            self.find_optimal_starting_11(current_squad_with_xp, xp_column)
         )
 
-        logger.info(
-            f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
-        )
+        # Calculate current_xp based on mode:
+        # Bench Boost: ALL 15 players count, Normal: only starting 11 count
+        if is_bench_boost:
+            current_xp = current_squad_with_xp[xp_column].sum()
+            logger.info(
+                f"📊 Current squad (Bench Boost): {current_xp:.2f} {horizon_label}-xP (all 15 players) | Formation: {current_formation}"
+            )
+        else:
+            current_xp = starting_11_xp
+            logger.info(
+                f"📊 Current squad: {current_xp:.2f} {horizon_label}-xP | Formation: {current_formation}"
+            )
 
         # For wildcard/free hit (15 free transfers), use initial squad generation instead of transfer-based SA
         if is_wildcard:
@@ -287,6 +301,7 @@ class TransferSAMixin(OptimizationBaseMixin):
                     xp_column=xp_column,
                     current_xp=current_xp,
                     max_transfers=max_exhaustive,
+                    is_bench_boost=is_bench_boost,
                 )
                 if exhaustive_result:
                     sa_result = exhaustive_result
@@ -317,6 +332,7 @@ class TransferSAMixin(OptimizationBaseMixin):
                         must_exclude_ids=must_exclude_ids,
                         xp_column=xp_column,
                         current_xp=current_xp,
+                        is_bench_boost=is_bench_boost,
                     )
                     best_net_xp = sa_result["best_xp"]
                 else:
@@ -348,6 +364,7 @@ class TransferSAMixin(OptimizationBaseMixin):
                             xp_column=xp_column,
                             current_xp=current_xp,
                             iterations=config.optimization.sa_iterations,
+                            is_bench_boost=is_bench_boost,
                         )
 
                         # Calculate net XP for this restart (including penalty)
@@ -500,6 +517,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         xp_column: str,
         current_xp: float,
         iterations: int,
+        is_bench_boost: bool = False,
     ) -> Dict[str, Any]:
         """Run simulated annealing for transfer optimization.
 
@@ -512,23 +530,96 @@ class TransferSAMixin(OptimizationBaseMixin):
         original_squad = current_squad.to_dict("records")
         original_ids = {p["player_id"] for p in original_squad}
 
+        # Check if must_include players need to be bought
+        must_buy_ids = must_include_ids - original_ids
+        if must_buy_ids:
+            # Force-buy logic: Must-include players not in squad need to be added
+            logger.info(
+                f"🎯 Forcing purchase of {len(must_buy_ids)} must-include players..."
+            )
+
+            # Get must-buy players from all_players
+            must_buy_players = all_players[
+                all_players["player_id"].isin(must_buy_ids)
+            ].to_dict("records")
+
+            # Validate we can afford them and they fit in the squad
+            must_buy_cost = sum(p["price"] for p in must_buy_players)
+
+            # Find cheapest players to remove to make room
+            swappable_by_price = sorted(
+                [p for p in original_squad if p["player_id"] not in must_include_ids],
+                key=lambda x: x["price"],
+            )
+
+            if len(swappable_by_price) < len(must_buy_ids):
+                logger.warning(
+                    "⚠️ Cannot fit all must-include players - not enough squad slots"
+                )
+                raise ValueError(
+                    "Cannot fit all must-include players - not enough swappable players in squad"
+                )
+
+            # Remove cheapest N players (where N = number of must-buy players)
+            players_to_remove = swappable_by_price[: len(must_buy_ids)]
+            removed_value = sum(p["price"] for p in players_to_remove)
+
+            if must_buy_cost > (available_budget + removed_value):
+                logger.warning(
+                    f"⚠️ Cannot afford must-include players: need £{must_buy_cost:.1f}m, "
+                    f"have £{available_budget + removed_value:.1f}m"
+                )
+                raise ValueError(
+                    f"Cannot afford must-include players: need £{must_buy_cost:.1f}m, "
+                    f"have £{available_budget + removed_value:.1f}m"
+                )
+
+            # Build forced squad with must-buy players
+            forced_squad = [
+                p
+                for p in original_squad
+                if p["player_id"] not in {pl["player_id"] for pl in players_to_remove}
+            ] + must_buy_players
+
+            # Now use this forced squad as the baseline
+            original_squad = forced_squad
+            original_ids = {p["player_id"] for p in original_squad}
+            available_budget = available_budget + removed_value - must_buy_cost
+            logger.info(
+                f"   Forced {len(must_buy_ids)} transfers to meet must-include constraints, "
+                f"£{available_budget:.1f}m remaining"
+            )
+
         # Track the max number of transfers allowed
         max_transfers = config.optimization.max_transfers  # Typically 0-3
 
         # Calculate initial objective value (squad xP with no transfer penalty)
         # Use availability-adjusted xP
-        starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
-        starting_11_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
+        # Bench Boost: ALL 15 players count, Normal: only starting 11 count
+        if is_bench_boost:
+            # Bench Boost: ALL 15 players count
+            starting_11_xp = sum(
+                self.get_adjusted_xp(p, xp_column) for p in original_squad
+            )
+            initial_bench_penalty = 0.0  # No bench penalty - we WANT strong bench!
+        else:
+            # Normal: Only starting 11 count
+            starting_11 = self._get_best_starting_11_from_squad(
+                original_squad, xp_column
+            )
+            starting_11_xp = sum(
+                self.get_adjusted_xp(p, xp_column) for p in starting_11
+            )
 
-        # For 1GW optimization, penalize expensive bench in objective
-        initial_bench_penalty = 0.0
-        if xp_column == "xP":
-            starting_11_ids = {p["player_id"] for p in starting_11}
-            bench_players = [
-                p for p in original_squad if p["player_id"] not in starting_11_ids
-            ]
-            bench_cost = sum(p["price"] for p in bench_players)
-            initial_bench_penalty = bench_cost * 0.1  # Matches LP penalty
+            # For 1GW optimization, penalize expensive bench in objective
+            initial_bench_penalty = 0.0
+            if xp_column == "xP":
+                starting_11_ids = {p["player_id"] for p in starting_11}
+                bench_players = [
+                    p for p in original_squad if p["player_id"] not in starting_11_ids
+                ]
+                bench_cost = sum(p["price"] for p in bench_players)
+                initial_bench_penalty = bench_cost * 0.1  # Matches LP penalty
 
         current_objective = starting_11_xp - initial_bench_penalty
 
@@ -568,36 +659,59 @@ class TransferSAMixin(OptimizationBaseMixin):
 
             # Calculate new objective INCLUDING TRANSFER PENALTY
             # Use availability-adjusted xP
-            new_starting_11 = self._get_best_starting_11_from_squad(new_team, xp_column)
-            squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in new_starting_11)
+            # Bench Boost: ALL 15 players count, Normal: only starting 11 count
+            if is_bench_boost:
+                # Bench Boost: ALL 15 players count
+                squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in new_team)
+                bench_cost_penalty = 0.0  # No penalty - we WANT strong bench!
+                # Apply ceiling bonus to all 15 players for Bench Boost
+                ceiling_bonus = 0.0
+                if config.optimization.ceiling_bonus_enabled:
+                    for p in new_team:
+                        xp = p.get(xp_column, 0)
+                        uncertainty = p.get("xP_uncertainty", 0)
+                        if uncertainty > 0:
+                            ceiling = xp + 1.645 * uncertainty
+                            if ceiling > 10:
+                                ceiling_bonus += (
+                                    ceiling - 10
+                                ) * config.optimization.ceiling_bonus_factor
+            else:
+                # Normal: Only starting 11 count
+                new_starting_11 = self._get_best_starting_11_from_squad(
+                    new_team, xp_column
+                )
+                squad_xp = sum(
+                    self.get_adjusted_xp(p, xp_column) for p in new_starting_11
+                )
 
-            # CEILING BONUS: Prefer players with haul potential
-            # Based on top 1% manager analysis: they capture 3.0 haulers/GW vs 2.4 for average
-            # Add bonus for players with high ceiling (95th percentile > 10)
-            ceiling_bonus = 0.0
-            if config.optimization.ceiling_bonus_enabled:
-                for p in new_starting_11:
-                    xp = p.get(xp_column, 0)
-                    uncertainty = p.get("xP_uncertainty", 0)
-                    if uncertainty > 0:
-                        # Calculate ceiling (95th percentile: mean + 1.645 * std)
-                        ceiling = xp + 1.645 * uncertainty
-                        # Bonus for players with ceiling > 10 (haul potential)
-                        if ceiling > 10:
-                            # Up to 1.5 bonus per player with 20 ceiling
-                            ceiling_bonus += (
-                                ceiling - 10
-                            ) * config.optimization.ceiling_bonus_factor
+                # CEILING BONUS: Prefer players with haul potential
+                # Based on top 1% manager analysis: they capture 3.0 haulers/GW vs 2.4 for average
+                # Add bonus for players with high ceiling (95th percentile > 10)
+                ceiling_bonus = 0.0
+                if config.optimization.ceiling_bonus_enabled:
+                    for p in new_starting_11:
+                        xp = p.get(xp_column, 0)
+                        uncertainty = p.get("xP_uncertainty", 0)
+                        if uncertainty > 0:
+                            # Calculate ceiling (95th percentile: mean + 1.645 * std)
+                            ceiling = xp + 1.645 * uncertainty
+                            # Bonus for players with ceiling > 10 (haul potential)
+                            if ceiling > 10:
+                                # Up to 1.5 bonus per player with 20 ceiling
+                                ceiling_bonus += (
+                                    ceiling - 10
+                                ) * config.optimization.ceiling_bonus_factor
 
-            # For 1GW optimization, penalize expensive bench
-            bench_cost_penalty = 0.0
-            if xp_column == "xP":
-                starting_11_ids = {p["player_id"] for p in new_starting_11}
-                bench_players = [
-                    p for p in new_team if p["player_id"] not in starting_11_ids
-                ]
-                bench_cost = sum(p["price"] for p in bench_players)
-                bench_cost_penalty = bench_cost * 0.1  # Matches LP penalty
+                # For 1GW optimization, penalize expensive bench
+                bench_cost_penalty = 0.0
+                if xp_column == "xP":
+                    starting_11_ids = {p["player_id"] for p in new_starting_11}
+                    bench_players = [
+                        p for p in new_team if p["player_id"] not in starting_11_ids
+                    ]
+                    bench_cost = sum(p["price"] for p in bench_players)
+                    bench_cost_penalty = bench_cost * 0.1  # Matches LP penalty
 
             # Calculate penalty for this number of transfers
             transfer_penalty = (
@@ -821,6 +935,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         must_exclude_ids: Set[int],
         xp_column: str,
         current_xp: float,
+        is_bench_boost: bool = False,
     ) -> Dict[str, Any]:
         """Run optimization multiple times and find consensus optimal solution.
 
@@ -872,6 +987,7 @@ class TransferSAMixin(OptimizationBaseMixin):
                     xp_column=xp_column,
                     current_xp=current_xp,
                     iterations=iterations,
+                    is_bench_boost=is_bench_boost,
                 )
 
                 # Calculate net XP
@@ -941,6 +1057,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         xp_column: str,
         current_xp: float,
         max_transfers: int,
+        is_bench_boost: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Exhaustive search for guaranteed optimal solution (0-N transfers).
 
@@ -956,20 +1073,107 @@ class TransferSAMixin(OptimizationBaseMixin):
 
         original_squad = current_squad.to_dict("records")
         original_ids = {p["player_id"] for p in original_squad}
+
+        # Check if must_include players need to be bought
+        must_buy_ids = must_include_ids - original_ids
+        if must_buy_ids:
+            # Force-buy logic: Must-include players not in squad need to be added
+            logger.info(
+                f"🎯 Forcing purchase of {len(must_buy_ids)} must-include players..."
+            )
+
+            # Get must-buy players from all_players
+            must_buy_players = all_players[
+                all_players["player_id"].isin(must_buy_ids)
+            ].to_dict("records")
+
+            # Validate we can afford them and they fit in the squad
+            must_buy_cost = sum(p["price"] for p in must_buy_players)
+
+            # Find cheapest players to remove to make room
+            swappable_by_price = sorted(
+                [p for p in original_squad if p["player_id"] not in must_include_ids],
+                key=lambda x: x["price"],
+            )
+
+            if len(swappable_by_price) < len(must_buy_ids):
+                logger.warning(
+                    "⚠️ Cannot fit all must-include players - not enough squad slots"
+                )
+                return None
+
+            # Remove cheapest N players (where N = number of must-buy players)
+            players_to_remove = swappable_by_price[: len(must_buy_ids)]
+            removed_value = sum(p["price"] for p in players_to_remove)
+
+            if must_buy_cost > (available_budget + removed_value):
+                logger.warning(
+                    f"⚠️ Cannot afford must-include players: need £{must_buy_cost:.1f}m, "
+                    f"have £{available_budget + removed_value:.1f}m"
+                )
+                return None
+
+            # Build forced squad with must-buy players
+            forced_squad = [
+                p
+                for p in original_squad
+                if p["player_id"] not in {pl["player_id"] for pl in players_to_remove}
+            ] + must_buy_players
+
+            # Now use this forced squad as the baseline
+            original_squad = forced_squad
+            original_ids = {p["player_id"] for p in original_squad}
+            available_budget = available_budget + removed_value - must_buy_cost
+            logger.info(
+                f"   Forced {len(must_buy_ids)} transfers to meet must-include constraints, "
+                f"£{available_budget:.1f}m remaining"
+            )
+
         swappable_players = [
             p for p in original_squad if p["player_id"] not in must_include_ids
         ]
 
         if len(swappable_players) == 0:
-            return None
+            # All players are must-include, can't make any transfers
+            logger.info("ℹ️ All players are must-include, returning current squad")
+            starting_11 = self._get_best_starting_11_from_squad(
+                original_squad, xp_column
+            )
+            squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
+            return {
+                "optimal_squad": original_squad,
+                "best_xp": squad_xp,
+                "net_xp": squad_xp,
+                "transfers_out": must_buy_ids if must_buy_ids else set(),
+                "transfers_in": must_buy_ids if must_buy_ids else set(),
+                "iterations_improved": 0,
+                "total_iterations": 1,
+                "formation": "unknown",
+            }
 
         best_result = None
         best_net_xp = float("-inf")
         total_combinations = 0
 
         # Try 0 transfers first
-        starting_11 = self._get_best_starting_11_from_squad(original_squad, xp_column)
-        zero_transfer_xp = sum(p[xp_column] for p in starting_11)
+        # Use availability-adjusted xP for proper injury/doubtful handling
+        if is_bench_boost:
+            # Bench Boost: ALL 15 players count
+            zero_transfer_xp = sum(
+                self.get_adjusted_xp(p, xp_column) for p in original_squad
+            )
+            # Still need starting 11 for formation calculation
+            starting_11 = self._get_best_starting_11_from_squad(
+                original_squad, xp_column
+            )
+        else:
+            # Normal: Only starting 11 count
+            starting_11 = self._get_best_starting_11_from_squad(
+                original_squad, xp_column
+            )
+            zero_transfer_xp = sum(
+                self.get_adjusted_xp(p, xp_column) for p in starting_11
+            )
         if zero_transfer_xp > best_net_xp:
             best_net_xp = zero_transfer_xp
             best_result = {
@@ -1065,23 +1269,47 @@ class TransferSAMixin(OptimizationBaseMixin):
                             continue
 
                         # Calculate XP
+                        # Bench Boost: ALL 15 players count, Normal: only starting 11 count
+                        # Always get starting 11 for formation display
+                        # Use availability-adjusted xP for proper injury/doubtful handling
                         starting_11 = self._get_best_starting_11_from_squad(
                             new_squad, xp_column
                         )
-                        squad_xp = sum(p[xp_column] for p in starting_11)
+                        if is_bench_boost:
+                            # Bench Boost: ALL 15 players count
+                            squad_xp = sum(
+                                self.get_adjusted_xp(p, xp_column) for p in new_squad
+                            )
+                            # Apply ceiling bonus to all 15 players for Bench Boost
+                            ceiling_bonus = 0.0
+                            if config.optimization.ceiling_bonus_enabled:
+                                for p in new_squad:
+                                    xp = p.get(xp_column, 0)
+                                    uncertainty = p.get("xP_uncertainty", 0)
+                                    if uncertainty > 0:
+                                        ceiling = xp + 1.645 * uncertainty
+                                        if ceiling > 10:
+                                            ceiling_bonus += (
+                                                ceiling - 10
+                                            ) * config.optimization.ceiling_bonus_factor
+                        else:
+                            # Normal: Only starting 11 count
+                            squad_xp = sum(
+                                self.get_adjusted_xp(p, xp_column) for p in starting_11
+                            )
 
-                        # CEILING BONUS for exhaustive search
-                        ceiling_bonus = 0.0
-                        if config.optimization.ceiling_bonus_enabled:
-                            for p in starting_11:
-                                xp = p.get(xp_column, 0)
-                                uncertainty = p.get("xP_uncertainty", 0)
-                                if uncertainty > 0:
-                                    ceiling = xp + 1.645 * uncertainty
-                                    if ceiling > 10:
-                                        ceiling_bonus += (
-                                            ceiling - 10
-                                        ) * config.optimization.ceiling_bonus_factor
+                            # CEILING BONUS for exhaustive search
+                            ceiling_bonus = 0.0
+                            if config.optimization.ceiling_bonus_enabled:
+                                for p in starting_11:
+                                    xp = p.get(xp_column, 0)
+                                    uncertainty = p.get("xP_uncertainty", 0)
+                                    if uncertainty > 0:
+                                        ceiling = xp + 1.645 * uncertainty
+                                        if ceiling > 10:
+                                            ceiling_bonus += (
+                                                ceiling - 10
+                                            ) * config.optimization.ceiling_bonus_factor
 
                         transfer_penalty = (
                             max(0, num_transfers - free_transfers)
@@ -1171,23 +1399,51 @@ class TransferSAMixin(OptimizationBaseMixin):
                                     new_squad.append(player)
 
                             # Calculate XP
+                            # Bench Boost: ALL 15 players count, Normal: only starting 11 count
+                            # Always get starting 11 for formation display
+                            # Use availability-adjusted xP for proper injury/doubtful handling
                             starting_11 = self._get_best_starting_11_from_squad(
                                 new_squad, xp_column
                             )
-                            squad_xp = sum(p[xp_column] for p in starting_11)
+                            if is_bench_boost:
+                                # Bench Boost: ALL 15 players count
+                                squad_xp = sum(
+                                    self.get_adjusted_xp(p, xp_column)
+                                    for p in new_squad
+                                )
+                                # Apply ceiling bonus to all 15 players
+                                ceiling_bonus = 0.0
+                                if config.optimization.ceiling_bonus_enabled:
+                                    for p in new_squad:
+                                        xp = p.get(xp_column, 0)
+                                        uncertainty = p.get("xP_uncertainty", 0)
+                                        if uncertainty > 0:
+                                            ceiling = xp + 1.645 * uncertainty
+                                            if ceiling > 10:
+                                                ceiling_bonus += (
+                                                    (ceiling - 10)
+                                                    * config.optimization.ceiling_bonus_factor
+                                                )
+                            else:
+                                # Normal: Only starting 11 count
+                                squad_xp = sum(
+                                    self.get_adjusted_xp(p, xp_column)
+                                    for p in starting_11
+                                )
 
-                            # CEILING BONUS for exhaustive search (2+ transfers)
-                            ceiling_bonus = 0.0
-                            if config.optimization.ceiling_bonus_enabled:
-                                for p in starting_11:
-                                    xp = p.get(xp_column, 0)
-                                    uncertainty = p.get("xP_uncertainty", 0)
-                                    if uncertainty > 0:
-                                        ceiling = xp + 1.645 * uncertainty
-                                        if ceiling > 10:
-                                            ceiling_bonus += (
-                                                ceiling - 10
-                                            ) * config.optimization.ceiling_bonus_factor
+                                # CEILING BONUS for exhaustive search (2+ transfers)
+                                ceiling_bonus = 0.0
+                                if config.optimization.ceiling_bonus_enabled:
+                                    for p in starting_11:
+                                        xp = p.get(xp_column, 0)
+                                        uncertainty = p.get("xP_uncertainty", 0)
+                                        if uncertainty > 0:
+                                            ceiling = xp + 1.645 * uncertainty
+                                            if ceiling > 10:
+                                                ceiling_bonus += (
+                                                    (ceiling - 10)
+                                                    * config.optimization.ceiling_bonus_factor
+                                                )
 
                             transfer_penalty = (
                                 max(0, num_transfers - free_transfers)

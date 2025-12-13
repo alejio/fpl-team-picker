@@ -1279,7 +1279,7 @@ def _(mo):
     # TODO: I want to always show at the top the "ideal team" for the target gw
     # Free transfer selector and optimization horizon toggle
     free_transfer_selector = mo.ui.dropdown(
-        options=["1", "2", "15"],
+        options=["1", "2", "3", "5", "15"],
         value="1",
         label="Free Transfers:",
     )
@@ -1287,6 +1287,16 @@ def _(mo):
     free_hit_checkbox = mo.ui.checkbox(
         value=False,
         label="Free Hit (1GW only, squad reverts after deadline)",
+    )
+
+    bench_boost_checkbox = mo.ui.checkbox(
+        value=False,
+        label="Bench Boost (all 15 players score this GW)",
+    )
+
+    afcon_exclusion_checkbox = mo.ui.checkbox(
+        value=False,
+        label="Exclude AFCON Players (GW17-22: Salah, Mbeumo, etc.)",
     )
 
     optimization_horizon_toggle = mo.ui.radio(
@@ -1316,6 +1326,18 @@ def _(mo):
             mo.md(
                 "*When checked, uses 15 free transfers with £100m budget, optimizes for 1GW only*"
             ),
+            bench_boost_checkbox,
+            mo.md(
+                "*When checked, optimizes for all 15 players (bench players also score). "
+                "Use with conservative risk profile to avoid risky multi-transfers.*"
+            ),
+            mo.md(""),
+            mo.md("**AFCON Exclusions:**"),
+            afcon_exclusion_checkbox,
+            mo.md(
+                "*When checked, excludes 19 players going to AFCON 2025 (GW17-22): "
+                "Salah, Mbeumo, Marmoush, Amad, Iwobi, etc.*"
+            ),
             mo.md(""),
             mo.md("**Optimization Horizon:**"),
             optimization_horizon_toggle,
@@ -1342,6 +1364,8 @@ def _(mo):
         ]
     )
     return (
+        afcon_exclusion_checkbox,
+        bench_boost_checkbox,
         free_hit_checkbox,
         free_transfer_selector,
         optimization_horizon_toggle,
@@ -1732,6 +1756,8 @@ def _(
 
 @app.cell
 def _(
+    afcon_exclusion_checkbox,
+    bench_boost_checkbox,
     calibrated_players_with_xp,
     free_hit_checkbox,
     free_transfer_selector,
@@ -1860,16 +1886,53 @@ def _(
             _teams2 = gameweek_data.get("teams")
 
             if current_squad is not None and not current_squad.empty:
+                # Extract player IDs from dropdown values (which are dicts with 'label' and 'value' keys)
                 must_include_ids = (
-                    set(must_include_dropdown.value)
+                    {
+                        item["value"] if isinstance(item, dict) else item
+                        for item in must_include_dropdown.value
+                    }
                     if must_include_dropdown.value
                     else set()
                 )
                 must_exclude_ids = (
-                    set(must_exclude_dropdown.value)
+                    {
+                        item["value"] if isinstance(item, dict) else item
+                        for item in must_exclude_dropdown.value
+                    }
                     if must_exclude_dropdown.value
                     else set()
                 )
+
+                # Add AFCON exclusions if checkbox is enabled
+                if afcon_exclusion_checkbox.value:
+                    from fpl_team_picker.domain.services.afcon_exclusion_service import (
+                        AFCONExclusionService,
+                    )
+
+                    afcon_service = AFCONExclusionService()
+                    afcon_player_ids = afcon_service.get_afcon_player_ids()
+                    must_exclude_ids = must_exclude_ids.union(afcon_player_ids)
+                    print(
+                        f"🚫 AFCON exclusions enabled: {len(afcon_player_ids)} players excluded"
+                    )
+                    print(f"   {afcon_service.get_exclusion_summary(afcon_player_ids)}")
+
+                # Debug logging for must-include/exclude constraints
+                if must_include_ids:
+                    must_include_names = calibrated_players_with_xp[
+                        calibrated_players_with_xp["player_id"].isin(must_include_ids)
+                    ]["web_name"].tolist()
+                    print(
+                        f"🎯 Must-include players ({len(must_include_ids)}): {', '.join(must_include_names)}"
+                    )
+                if must_exclude_ids:
+                    must_exclude_names = calibrated_players_with_xp[
+                        calibrated_players_with_xp["player_id"].isin(must_exclude_ids)
+                    ]["web_name"].tolist()
+                    print(
+                        f"🚫 Must-exclude players ({len(must_exclude_ids)}): {', '.join(must_exclude_names)}"
+                    )
 
                 # Use domain service for optimization
                 # Update config based on UI toggles
@@ -1885,6 +1948,7 @@ def _(
                     # Get free transfer count from selector
                     _free_transfers_count = int(free_transfer_selector.value)
                     _is_free_hit = free_hit_checkbox.value
+                    _is_bench_boost = bench_boost_checkbox.value
 
                     # Free Hit forces 15 free transfers
                     if _is_free_hit:
@@ -1905,8 +1969,29 @@ def _(
                             must_exclude_ids=must_exclude_ids,
                             free_transfers_override=_free_transfers_override,
                             is_free_hit=_is_free_hit,
+                            is_bench_boost=_is_bench_boost,
                         )
                     )
+
+                    # Verify must-include constraints were enforced
+                    if (
+                        must_include_ids
+                        and optimal_squad_df is not None
+                        and not optimal_squad_df.empty
+                    ):
+                        optimal_player_ids = set(optimal_squad_df["player_id"].tolist())
+                        missing_must_include = must_include_ids - optimal_player_ids
+                        if missing_must_include:
+                            missing_names = calibrated_players_with_xp[
+                                calibrated_players_with_xp["player_id"].isin(
+                                    missing_must_include
+                                )
+                            ]["web_name"].tolist()
+                            print(
+                                f"⚠️ WARNING: Must-include players NOT in optimal squad: {', '.join(missing_names)}"
+                            )
+                        else:
+                            print("✅ All must-include players are in optimal squad")
 
                     # Create optimization display in presentation layer
                     optimization_display = _create_optimization_summary(

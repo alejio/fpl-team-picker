@@ -134,13 +134,15 @@ def sample_fixtures_unit():
 
     for gw in range(1, 20):
         for i in range(0, 20, 2):
-            fixtures.append({
-                "gameweek": gw,
-                "team_h": teams[i],
-                "team_a": teams[i + 1],
-                "team_h_difficulty": 3,
-                "team_a_difficulty": 3,
-            })
+            fixtures.append(
+                {
+                    "gameweek": gw,
+                    "team_h": teams[i],
+                    "team_a": teams[i + 1],
+                    "team_h_difficulty": 3,
+                    "team_a_difficulty": 3,
+                }
+            )
 
     return pd.DataFrame(fixtures)
 
@@ -153,38 +155,46 @@ def dgw_fixtures_unit():
 
     # Normal GW11
     for i in range(0, 20, 2):
-        fixtures.append({
-            "gameweek": 11,
-            "team_h": teams[i],
-            "team_a": teams[i + 1],
-            "team_h_difficulty": 3,
-            "team_a_difficulty": 3,
-        })
+        fixtures.append(
+            {
+                "gameweek": 11,
+                "team_h": teams[i],
+                "team_a": teams[i + 1],
+                "team_h_difficulty": 3,
+                "team_a_difficulty": 3,
+            }
+        )
 
     # DGW12 - teams 1-4 play twice
     for i in range(0, 20, 2):
-        fixtures.append({
-            "gameweek": 12,
-            "team_h": teams[i],
-            "team_a": teams[i + 1],
-            "team_h_difficulty": 3,
-            "team_a_difficulty": 3,
-        })
+        fixtures.append(
+            {
+                "gameweek": 12,
+                "team_h": teams[i],
+                "team_a": teams[i + 1],
+                "team_h_difficulty": 3,
+                "team_a_difficulty": 3,
+            }
+        )
     # Extra fixtures for DGW teams
-    fixtures.append({
-        "gameweek": 12,
-        "team_h": 1,
-        "team_a": 3,
-        "team_h_difficulty": 2,
-        "team_a_difficulty": 2,
-    })
-    fixtures.append({
-        "gameweek": 12,
-        "team_h": 2,
-        "team_a": 4,
-        "team_h_difficulty": 2,
-        "team_a_difficulty": 2,
-    })
+    fixtures.append(
+        {
+            "gameweek": 12,
+            "team_h": 1,
+            "team_a": 3,
+            "team_h_difficulty": 2,
+            "team_a_difficulty": 2,
+        }
+    )
+    fixtures.append(
+        {
+            "gameweek": 12,
+            "team_h": 2,
+            "team_a": 4,
+            "team_h_difficulty": 2,
+            "team_a_difficulty": 2,
+        }
+    )
 
     return pd.DataFrame(fixtures)
 
@@ -192,23 +202,145 @@ def dgw_fixtures_unit():
 @pytest.fixture
 def sample_squad_unit():
     """Create a sample 15-player squad for unit testing."""
-    return pd.DataFrame([
-        {"player_id": 1, "web_name": "GK1", "position": "GKP", "team": 1, "price": 5.0, "xP": 4.0, "status": "a"},
-        {"player_id": 2, "web_name": "GK2", "position": "GKP", "team": 2, "price": 4.0, "xP": 3.5, "status": "a"},
-        {"player_id": 3, "web_name": "DEF1", "position": "DEF", "team": 1, "price": 6.0, "xP": 5.0, "status": "a"},
-        {"player_id": 4, "web_name": "DEF2", "position": "DEF", "team": 3, "price": 5.5, "xP": 4.5, "status": "a"},
-        {"player_id": 5, "web_name": "DEF3", "position": "DEF", "team": 5, "price": 5.0, "xP": 4.0, "status": "a"},
-        {"player_id": 6, "web_name": "DEF4", "position": "DEF", "team": 7, "price": 4.5, "xP": 3.5, "status": "a"},
-        {"player_id": 7, "web_name": "DEF5", "position": "DEF", "team": 9, "price": 4.0, "xP": 3.0, "status": "a"},
-        {"player_id": 8, "web_name": "MID1", "position": "MID", "team": 1, "price": 10.0, "xP": 7.0, "status": "a"},
-        {"player_id": 9, "web_name": "MID2", "position": "MID", "team": 3, "price": 8.0, "xP": 6.0, "status": "a"},
-        {"player_id": 10, "web_name": "MID3", "position": "MID", "team": 5, "price": 7.0, "xP": 5.5, "status": "a"},
-        {"player_id": 11, "web_name": "MID4", "position": "MID", "team": 7, "price": 6.0, "xP": 4.5, "status": "a"},
-        {"player_id": 12, "web_name": "MID5", "position": "MID", "team": 9, "price": 5.0, "xP": 4.0, "status": "a"},
-        {"player_id": 13, "web_name": "FWD1", "position": "FWD", "team": 1, "price": 12.0, "xP": 8.0, "status": "a"},
-        {"player_id": 14, "web_name": "FWD2", "position": "FWD", "team": 3, "price": 8.0, "xP": 6.0, "status": "a"},
-        {"player_id": 15, "web_name": "FWD3", "position": "FWD", "team": 5, "price": 6.0, "xP": 4.5, "status": "a"},
-    ])
+    return pd.DataFrame(
+        [
+            {
+                "player_id": 1,
+                "web_name": "GK1",
+                "position": "GKP",
+                "team": 1,
+                "price": 5.0,
+                "xP": 4.0,
+                "status": "a",
+            },
+            {
+                "player_id": 2,
+                "web_name": "GK2",
+                "position": "GKP",
+                "team": 2,
+                "price": 4.0,
+                "xP": 3.5,
+                "status": "a",
+            },
+            {
+                "player_id": 3,
+                "web_name": "DEF1",
+                "position": "DEF",
+                "team": 1,
+                "price": 6.0,
+                "xP": 5.0,
+                "status": "a",
+            },
+            {
+                "player_id": 4,
+                "web_name": "DEF2",
+                "position": "DEF",
+                "team": 3,
+                "price": 5.5,
+                "xP": 4.5,
+                "status": "a",
+            },
+            {
+                "player_id": 5,
+                "web_name": "DEF3",
+                "position": "DEF",
+                "team": 5,
+                "price": 5.0,
+                "xP": 4.0,
+                "status": "a",
+            },
+            {
+                "player_id": 6,
+                "web_name": "DEF4",
+                "position": "DEF",
+                "team": 7,
+                "price": 4.5,
+                "xP": 3.5,
+                "status": "a",
+            },
+            {
+                "player_id": 7,
+                "web_name": "DEF5",
+                "position": "DEF",
+                "team": 9,
+                "price": 4.0,
+                "xP": 3.0,
+                "status": "a",
+            },
+            {
+                "player_id": 8,
+                "web_name": "MID1",
+                "position": "MID",
+                "team": 1,
+                "price": 10.0,
+                "xP": 7.0,
+                "status": "a",
+            },
+            {
+                "player_id": 9,
+                "web_name": "MID2",
+                "position": "MID",
+                "team": 3,
+                "price": 8.0,
+                "xP": 6.0,
+                "status": "a",
+            },
+            {
+                "player_id": 10,
+                "web_name": "MID3",
+                "position": "MID",
+                "team": 5,
+                "price": 7.0,
+                "xP": 5.5,
+                "status": "a",
+            },
+            {
+                "player_id": 11,
+                "web_name": "MID4",
+                "position": "MID",
+                "team": 7,
+                "price": 6.0,
+                "xP": 4.5,
+                "status": "a",
+            },
+            {
+                "player_id": 12,
+                "web_name": "MID5",
+                "position": "MID",
+                "team": 9,
+                "price": 5.0,
+                "xP": 4.0,
+                "status": "a",
+            },
+            {
+                "player_id": 13,
+                "web_name": "FWD1",
+                "position": "FWD",
+                "team": 1,
+                "price": 12.0,
+                "xP": 8.0,
+                "status": "a",
+            },
+            {
+                "player_id": 14,
+                "web_name": "FWD2",
+                "position": "FWD",
+                "team": 3,
+                "price": 8.0,
+                "xP": 6.0,
+                "status": "a",
+            },
+            {
+                "player_id": 15,
+                "web_name": "FWD3",
+                "position": "FWD",
+                "team": 5,
+                "price": 6.0,
+                "xP": 4.5,
+                "status": "a",
+            },
+        ]
+    )
 
 
 @pytest.fixture
@@ -218,15 +350,17 @@ def sample_players_unit():
     for i in range(1, 101):
         team = (i % 20) + 1
         position = ["GKP", "DEF", "DEF", "MID", "MID", "FWD"][i % 6]
-        players.append({
-            "player_id": i,
-            "web_name": f"Player{i}",
-            "position": position,
-            "team": team,
-            "price": 4.0 + (i % 10),
-            "xP": 3.0 + (i % 8),
-            "status": "a",
-        })
+        players.append(
+            {
+                "player_id": i,
+                "web_name": f"Player{i}",
+                "position": position,
+                "team": team,
+                "price": 4.0 + (i % 10),
+                "xP": 3.0 + (i % 8),
+                "status": "a",
+            }
+        )
     return pd.DataFrame(players)
 
 
@@ -264,13 +398,17 @@ class TestChipDeadlines:
 
     def test_warns_when_chips_expiring_soon(self, unit_chip_service):
         """Warning when 3 or fewer GWs remain for chips."""
-        warning = unit_chip_service.get_chip_deadline_warning(current_gw=17, chip_set="first")
+        warning = unit_chip_service.get_chip_deadline_warning(
+            current_gw=17, chip_set="first"
+        )
         assert warning is not None
         assert "expiring" in warning.lower() or "remaining" in warning.lower()
 
     def test_no_warning_when_chips_not_urgent(self, unit_chip_service):
         """No warning when plenty of GWs remain."""
-        warning = unit_chip_service.get_chip_deadline_warning(current_gw=5, chip_set="first")
+        warning = unit_chip_service.get_chip_deadline_warning(
+            current_gw=5, chip_set="first"
+        )
         assert warning is None
 
     def test_determine_chip_set_from_gameweek(self, unit_chip_service):
@@ -289,9 +427,13 @@ class TestChipDeadlines:
 class TestDGWDetection:
     """Tests for double/blank gameweek detection."""
 
-    def test_detects_teams_with_double_fixtures(self, unit_chip_service, dgw_fixtures_unit):
+    def test_detects_teams_with_double_fixtures(
+        self, unit_chip_service, dgw_fixtures_unit
+    ):
         """Detect teams playing twice in a gameweek."""
-        dgw_teams = unit_chip_service.detect_double_gameweek_teams(dgw_fixtures_unit, gameweek=12)
+        dgw_teams = unit_chip_service.detect_double_gameweek_teams(
+            dgw_fixtures_unit, gameweek=12
+        )
 
         assert len(dgw_teams) == 4
         assert 1 in dgw_teams
@@ -299,17 +441,23 @@ class TestDGWDetection:
         assert 3 in dgw_teams
         assert 4 in dgw_teams
 
-    def test_no_dgw_teams_in_normal_gameweek(self, unit_chip_service, sample_fixtures_unit):
+    def test_no_dgw_teams_in_normal_gameweek(
+        self, unit_chip_service, sample_fixtures_unit
+    ):
         """No DGW teams in normal gameweek."""
-        dgw_teams = unit_chip_service.detect_double_gameweek_teams(sample_fixtures_unit, gameweek=11)
+        dgw_teams = unit_chip_service.detect_double_gameweek_teams(
+            sample_fixtures_unit, gameweek=11
+        )
         assert len(dgw_teams) == 0
 
     def test_detect_blank_gameweek_teams(self, unit_chip_service):
         """Detect teams with no fixtures (blank gameweek)."""
-        fixtures = pd.DataFrame([
-            {"gameweek": 12, "team_h": 1, "team_a": 2},
-            {"gameweek": 12, "team_h": 3, "team_a": 4},
-        ])
+        fixtures = pd.DataFrame(
+            [
+                {"gameweek": 12, "team_h": 1, "team_a": 2},
+                {"gameweek": 12, "team_h": 3, "team_a": 4},
+            ]
+        )
 
         bgw_teams = unit_chip_service.detect_blank_gameweek_teams(
             fixtures, gameweek=12, all_team_ids=[1, 2, 3, 4, 19, 20]
@@ -348,7 +496,11 @@ class TestFreeHitScoring:
     """Tests for Free Hit chip optimal gameweek scoring."""
 
     def test_recommends_dgw_over_normal_gw(
-        self, unit_chip_service, dgw_fixtures_unit, sample_squad_unit, sample_players_unit
+        self,
+        unit_chip_service,
+        dgw_fixtures_unit,
+        sample_squad_unit,
+        sample_players_unit,
     ):
         """Free Hit should score DGW higher than normal GW."""
         score_gw11 = unit_chip_service.score_free_hit_for_gameweek(
@@ -368,7 +520,11 @@ class TestFreeHitScoring:
         assert score_gw12_dgw > score_gw11
 
     def test_find_optimal_free_hit_gameweek(
-        self, unit_chip_service, dgw_fixtures_unit, sample_squad_unit, sample_players_unit
+        self,
+        unit_chip_service,
+        dgw_fixtures_unit,
+        sample_squad_unit,
+        sample_players_unit,
     ):
         """Find the best gameweek to use Free Hit."""
         optimal_gw, score = unit_chip_service.find_optimal_chip_gameweek(
@@ -394,14 +550,31 @@ class TestBenchBoostScoring:
     def test_requires_minimum_bench_xp(self, unit_chip_service):
         """Bench Boost not recommended with weak bench."""
         # Create squad where bench players have very low xP (1.0 each = 4.0 total)
-        weak_bench_squad = pd.DataFrame([
-            {"player_id": i, "web_name": f"P{i}", "position": "MID", "team": i, "price": 4.0, "xP": 1.0}
-            for i in range(1, 16)
-        ])
+        weak_bench_squad = pd.DataFrame(
+            [
+                {
+                    "player_id": i,
+                    "web_name": f"P{i}",
+                    "position": "MID",
+                    "team": i,
+                    "price": 4.0,
+                    "xP": 1.0,
+                }
+                for i in range(1, 16)
+            ]
+        )
 
-        fixtures = pd.DataFrame([
-            {"gameweek": 11, "team_h": 1, "team_a": 2, "team_h_difficulty": 2, "team_a_difficulty": 2}
-        ])
+        fixtures = pd.DataFrame(
+            [
+                {
+                    "gameweek": 11,
+                    "team_h": 1,
+                    "team_a": 2,
+                    "team_h_difficulty": 2,
+                    "team_a_difficulty": 2,
+                }
+            ]
+        )
 
         score = unit_chip_service.score_bench_boost_for_gameweek(
             fixtures=fixtures,
@@ -421,12 +594,28 @@ class TestBenchBoostScoring:
 class TestTripleCaptainScoring:
     """Tests for Triple Captain chip optimal gameweek scoring."""
 
-    def test_recommends_premium_easy_fixture(self, unit_chip_service, sample_squad_unit):
+    def test_recommends_premium_easy_fixture(
+        self, unit_chip_service, sample_squad_unit
+    ):
         """Triple Captain should target premium player with easy fixture."""
-        fixtures = pd.DataFrame([
-            {"gameweek": 11, "team_h": 1, "team_a": 2, "team_h_difficulty": 5, "team_a_difficulty": 5},
-            {"gameweek": 12, "team_h": 1, "team_a": 20, "team_h_difficulty": 2, "team_a_difficulty": 2},
-        ])
+        fixtures = pd.DataFrame(
+            [
+                {
+                    "gameweek": 11,
+                    "team_h": 1,
+                    "team_a": 2,
+                    "team_h_difficulty": 5,
+                    "team_a_difficulty": 5,
+                },
+                {
+                    "gameweek": 12,
+                    "team_h": 1,
+                    "team_a": 20,
+                    "team_h_difficulty": 2,
+                    "team_a_difficulty": 2,
+                },
+            ]
+        )
 
         score_gw11 = unit_chip_service.score_triple_captain_for_gameweek(
             fixtures=fixtures,
@@ -452,7 +641,11 @@ class TestFindOptimalChipGameweek:
     """Integration tests for finding optimal chip usage gameweek."""
 
     def test_find_optimal_gameweek_returns_best_option(
-        self, unit_chip_service, dgw_fixtures_unit, sample_squad_unit, sample_players_unit
+        self,
+        unit_chip_service,
+        dgw_fixtures_unit,
+        sample_squad_unit,
+        sample_players_unit,
     ):
         """find_optimal_chip_gameweek returns GW with highest score."""
         optimal_gw, score = unit_chip_service.find_optimal_chip_gameweek(
@@ -469,7 +662,11 @@ class TestFindOptimalChipGameweek:
         assert 11 <= optimal_gw <= 15
 
     def test_respects_deadline_constraint(
-        self, unit_chip_service, dgw_fixtures_unit, sample_squad_unit, sample_players_unit
+        self,
+        unit_chip_service,
+        dgw_fixtures_unit,
+        sample_squad_unit,
+        sample_players_unit,
     ):
         """Optimal GW must be within deadline."""
         optimal_gw, _ = unit_chip_service.find_optimal_chip_gameweek(
@@ -483,7 +680,9 @@ class TestFindOptimalChipGameweek:
 
         assert optimal_gw <= 13
 
-    def test_returns_none_if_no_valid_gameweeks(self, unit_chip_service, sample_squad_unit, sample_players_unit):
+    def test_returns_none_if_no_valid_gameweeks(
+        self, unit_chip_service, sample_squad_unit, sample_players_unit
+    ):
         """Returns None if deadline already passed."""
         optimal_gw, score = unit_chip_service.find_optimal_chip_gameweek(
             chip_name="triple_captain",
@@ -510,16 +709,38 @@ class TestPromotedTeamBonus:
     def promoted_team_fixtures(self):
         """Fixtures where captain faces promoted teams."""
         # 2025-26 promoted teams: Leeds (10), Burnley (4), Sunderland (17)
-        return pd.DataFrame([
-            # GW11: Team 1 vs non-promoted (team 5)
-            {"gameweek": 11, "team_h": 1, "team_a": 5, "team_h_difficulty": 3, "team_a_difficulty": 3},
-            # GW12: Team 1 (home) vs Leeds (promoted)
-            {"gameweek": 12, "team_h": 1, "team_a": 10, "team_h_difficulty": 2, "team_a_difficulty": 4},
-            # GW13: Team 1 (away) vs Burnley (promoted)
-            {"gameweek": 13, "team_h": 4, "team_a": 1, "team_h_difficulty": 4, "team_a_difficulty": 2},
-        ])
+        return pd.DataFrame(
+            [
+                # GW11: Team 1 vs non-promoted (team 5)
+                {
+                    "gameweek": 11,
+                    "team_h": 1,
+                    "team_a": 5,
+                    "team_h_difficulty": 3,
+                    "team_a_difficulty": 3,
+                },
+                # GW12: Team 1 (home) vs Leeds (promoted)
+                {
+                    "gameweek": 12,
+                    "team_h": 1,
+                    "team_a": 10,
+                    "team_h_difficulty": 2,
+                    "team_a_difficulty": 4,
+                },
+                # GW13: Team 1 (away) vs Burnley (promoted)
+                {
+                    "gameweek": 13,
+                    "team_h": 4,
+                    "team_a": 1,
+                    "team_h_difficulty": 4,
+                    "team_a_difficulty": 2,
+                },
+            ]
+        )
 
-    def test_tc_scores_higher_vs_promoted_team(self, unit_chip_service, sample_squad_unit, promoted_team_fixtures):
+    def test_tc_scores_higher_vs_promoted_team(
+        self, unit_chip_service, sample_squad_unit, promoted_team_fixtures
+    ):
         """TC should score higher when captain faces promoted team."""
         score_vs_normal = unit_chip_service.score_triple_captain_for_gameweek(
             fixtures=promoted_team_fixtures,
@@ -535,7 +756,9 @@ class TestPromotedTeamBonus:
 
         assert score_vs_promoted > score_vs_normal
 
-    def test_tc_home_vs_promoted_best_scenario(self, unit_chip_service, sample_squad_unit, promoted_team_fixtures):
+    def test_tc_home_vs_promoted_best_scenario(
+        self, unit_chip_service, sample_squad_unit, promoted_team_fixtures
+    ):
         """Home fixture vs promoted team should be ideal TC scenario."""
         score_home_vs_promoted = unit_chip_service.score_triple_captain_for_gameweek(
             fixtures=promoted_team_fixtures,
@@ -564,38 +787,162 @@ class TestBGWFreeHitScoring:
     @pytest.fixture
     def bgw_fixtures(self):
         """Fixtures with a blank gameweek for several teams."""
-        return pd.DataFrame([
-            # GW11: All teams play
-            {"gameweek": 11, "team_h": 1, "team_a": 2},
-            {"gameweek": 11, "team_h": 3, "team_a": 4},
-            {"gameweek": 11, "team_h": 5, "team_a": 6},
-            {"gameweek": 11, "team_h": 7, "team_a": 8},
-            {"gameweek": 11, "team_h": 9, "team_a": 10},
-            # GW12: Only 4 teams play (big BGW)
-            {"gameweek": 12, "team_h": 1, "team_a": 2},
-            {"gameweek": 12, "team_h": 3, "team_a": 4},
-        ])
+        return pd.DataFrame(
+            [
+                # GW11: All teams play
+                {"gameweek": 11, "team_h": 1, "team_a": 2},
+                {"gameweek": 11, "team_h": 3, "team_a": 4},
+                {"gameweek": 11, "team_h": 5, "team_a": 6},
+                {"gameweek": 11, "team_h": 7, "team_a": 8},
+                {"gameweek": 11, "team_h": 9, "team_a": 10},
+                # GW12: Only 4 teams play (big BGW)
+                {"gameweek": 12, "team_h": 1, "team_a": 2},
+                {"gameweek": 12, "team_h": 3, "team_a": 4},
+            ]
+        )
 
     @pytest.fixture
     def bgw_affected_squad(self):
         """Squad with many players from teams with no fixtures in BGW."""
-        return pd.DataFrame([
-            {"player_id": 1, "web_name": "GK1", "position": "GKP", "team": 5, "price": 5.0, "xP": 4.0, "status": "a"},
-            {"player_id": 2, "web_name": "GK2", "position": "GKP", "team": 6, "price": 4.0, "xP": 3.5, "status": "a"},
-            {"player_id": 3, "web_name": "DEF1", "position": "DEF", "team": 5, "price": 6.0, "xP": 5.0, "status": "a"},
-            {"player_id": 4, "web_name": "DEF2", "position": "DEF", "team": 6, "price": 5.5, "xP": 4.5, "status": "a"},
-            {"player_id": 5, "web_name": "DEF3", "position": "DEF", "team": 7, "price": 5.0, "xP": 4.0, "status": "a"},
-            {"player_id": 6, "web_name": "DEF4", "position": "DEF", "team": 8, "price": 4.5, "xP": 3.5, "status": "a"},
-            {"player_id": 7, "web_name": "DEF5", "position": "DEF", "team": 9, "price": 4.0, "xP": 3.0, "status": "a"},
-            {"player_id": 8, "web_name": "MID1", "position": "MID", "team": 5, "price": 10.0, "xP": 7.0, "status": "a"},
-            {"player_id": 9, "web_name": "MID2", "position": "MID", "team": 6, "price": 8.0, "xP": 6.0, "status": "a"},
-            {"player_id": 10, "web_name": "MID3", "position": "MID", "team": 7, "price": 7.0, "xP": 5.5, "status": "a"},
-            {"player_id": 11, "web_name": "MID4", "position": "MID", "team": 8, "price": 6.0, "xP": 4.5, "status": "a"},
-            {"player_id": 12, "web_name": "MID5", "position": "MID", "team": 9, "price": 5.0, "xP": 4.0, "status": "a"},
-            {"player_id": 13, "web_name": "FWD1", "position": "FWD", "team": 5, "price": 12.0, "xP": 8.0, "status": "a"},
-            {"player_id": 14, "web_name": "FWD2", "position": "FWD", "team": 7, "price": 8.0, "xP": 6.0, "status": "a"},
-            {"player_id": 15, "web_name": "FWD3", "position": "FWD", "team": 9, "price": 6.0, "xP": 4.5, "status": "a"},
-        ])
+        return pd.DataFrame(
+            [
+                {
+                    "player_id": 1,
+                    "web_name": "GK1",
+                    "position": "GKP",
+                    "team": 5,
+                    "price": 5.0,
+                    "xP": 4.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 2,
+                    "web_name": "GK2",
+                    "position": "GKP",
+                    "team": 6,
+                    "price": 4.0,
+                    "xP": 3.5,
+                    "status": "a",
+                },
+                {
+                    "player_id": 3,
+                    "web_name": "DEF1",
+                    "position": "DEF",
+                    "team": 5,
+                    "price": 6.0,
+                    "xP": 5.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 4,
+                    "web_name": "DEF2",
+                    "position": "DEF",
+                    "team": 6,
+                    "price": 5.5,
+                    "xP": 4.5,
+                    "status": "a",
+                },
+                {
+                    "player_id": 5,
+                    "web_name": "DEF3",
+                    "position": "DEF",
+                    "team": 7,
+                    "price": 5.0,
+                    "xP": 4.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 6,
+                    "web_name": "DEF4",
+                    "position": "DEF",
+                    "team": 8,
+                    "price": 4.5,
+                    "xP": 3.5,
+                    "status": "a",
+                },
+                {
+                    "player_id": 7,
+                    "web_name": "DEF5",
+                    "position": "DEF",
+                    "team": 9,
+                    "price": 4.0,
+                    "xP": 3.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 8,
+                    "web_name": "MID1",
+                    "position": "MID",
+                    "team": 5,
+                    "price": 10.0,
+                    "xP": 7.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 9,
+                    "web_name": "MID2",
+                    "position": "MID",
+                    "team": 6,
+                    "price": 8.0,
+                    "xP": 6.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 10,
+                    "web_name": "MID3",
+                    "position": "MID",
+                    "team": 7,
+                    "price": 7.0,
+                    "xP": 5.5,
+                    "status": "a",
+                },
+                {
+                    "player_id": 11,
+                    "web_name": "MID4",
+                    "position": "MID",
+                    "team": 8,
+                    "price": 6.0,
+                    "xP": 4.5,
+                    "status": "a",
+                },
+                {
+                    "player_id": 12,
+                    "web_name": "MID5",
+                    "position": "MID",
+                    "team": 9,
+                    "price": 5.0,
+                    "xP": 4.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 13,
+                    "web_name": "FWD1",
+                    "position": "FWD",
+                    "team": 5,
+                    "price": 12.0,
+                    "xP": 8.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 14,
+                    "web_name": "FWD2",
+                    "position": "FWD",
+                    "team": 7,
+                    "price": 8.0,
+                    "xP": 6.0,
+                    "status": "a",
+                },
+                {
+                    "player_id": 15,
+                    "web_name": "FWD3",
+                    "position": "FWD",
+                    "team": 9,
+                    "price": 6.0,
+                    "xP": 4.5,
+                    "status": "a",
+                },
+            ]
+        )
 
     def test_fh_scores_high_when_squad_has_bgw_players(
         self, unit_chip_service, bgw_fixtures, bgw_affected_squad, sample_players_unit
@@ -660,14 +1007,30 @@ class TestHomeFixtureBonus:
     @pytest.fixture
     def home_away_fixtures(self):
         """Fixtures with same opponent but different venues (equal difficulty)."""
-        return pd.DataFrame([
-            # GW11: Team 1 plays away vs Team 20 (same difficulty as GW12)
-            {"gameweek": 11, "team_h": 20, "team_a": 1, "team_h_difficulty": 3, "team_a_difficulty": 3},
-            # GW12: Team 1 plays at home vs Team 20 (same difficulty as GW11)
-            {"gameweek": 12, "team_h": 1, "team_a": 20, "team_h_difficulty": 3, "team_a_difficulty": 3},
-        ])
+        return pd.DataFrame(
+            [
+                # GW11: Team 1 plays away vs Team 20 (same difficulty as GW12)
+                {
+                    "gameweek": 11,
+                    "team_h": 20,
+                    "team_a": 1,
+                    "team_h_difficulty": 3,
+                    "team_a_difficulty": 3,
+                },
+                # GW12: Team 1 plays at home vs Team 20 (same difficulty as GW11)
+                {
+                    "gameweek": 12,
+                    "team_h": 1,
+                    "team_a": 20,
+                    "team_h_difficulty": 3,
+                    "team_a_difficulty": 3,
+                },
+            ]
+        )
 
-    def test_tc_prefers_home_fixture(self, unit_chip_service, sample_squad_unit, home_away_fixtures):
+    def test_tc_prefers_home_fixture(
+        self, unit_chip_service, sample_squad_unit, home_away_fixtures
+    ):
         """TC should score higher for home fixtures vs same opponent."""
         score_away = unit_chip_service.score_triple_captain_for_gameweek(
             fixtures=home_away_fixtures,

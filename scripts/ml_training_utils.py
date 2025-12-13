@@ -741,7 +741,8 @@ def fpl_hauler_capture_scorer(y_true, y_pred, sample_weight=None):
     # What fraction of your top-15 were actual haulers?
     if n_haulers > 0:
         found_haulers = len(top_k_pred_set & hauler_indices)
-        hauler_precision = found_haulers / min(K, n_haulers)
+        # FIX: Always use K as denominator for consistent scoring across batches
+        hauler_precision = found_haulers / K
         hauler_recall = found_haulers / n_haulers
         # F0.5 (precision-weighted F-score, we care more about precision)
         if hauler_precision + hauler_recall > 0:
@@ -771,8 +772,15 @@ def fpl_hauler_capture_scorer(y_true, y_pred, sample_weight=None):
     captain_actual_rank = actual_ranks[captain_pred_idx]
     n_players = len(y_true)
 
-    # Normalize: rank 0 (worst) = 0, rank n-1 (best) = 1
-    captain_score = captain_actual_rank / (n_players - 1) if n_players > 1 else 0.0
+    # FIX: Exponential scoring for better top-rank discrimination
+    # Top-1 = 1.0, top-2 = ~0.90, top-3 = ~0.82, top-5 = ~0.67, top-10 = ~0.45
+    # Emphasizes getting the actual top picks right (better than linear)
+    if n_players > 1:
+        # Distance from best: 0 (best) to n-1 (worst)
+        distance_from_best = n_players - 1 - captain_actual_rank
+        captain_score = np.exp(-0.1 * distance_from_best)
+    else:
+        captain_score = 0.0
 
     # Combine (higher is better)
     combined = 0.40 * hauler_f05 + 0.40 * point_efficiency + 0.20 * captain_score
@@ -828,12 +836,14 @@ def fpl_hauler_ceiling_scorer(y_true, y_pred, sample_weight=None):
         # Under-variance is worse (missing haulers), so asymmetric penalty
         if variance_ratio < 1.0:
             # Under-variance: compression problem (common with MAE-trained models)
-            # Score drops quickly as variance decreases
+            # Score drops with sqrt - 0.25 ratio → 0.5 score
             variance_score = variance_ratio**0.5  # Sqrt makes it less punishing
         else:
-            # Over-variance: predictions too spread out
-            # Less severe penalty (better to predict some 15s than all 6s)
-            variance_score = min(1.0, 2.0 - variance_ratio)
+            # FIX: Over-variance should be penalized LESS than compression
+            # Use inverse power law: 1.5 ratio → 0.87 score, 2.0 ratio → 0.76 score
+            # This is more forgiving than compression at same magnitude
+            # (0.5 compression → 0.71 score vs 2.0 over-variance → 0.76 score)
+            variance_score = min(1.0, 1.0 / (variance_ratio**0.3))
     else:
         variance_score = 0.5  # Default if actual has no variance
 
