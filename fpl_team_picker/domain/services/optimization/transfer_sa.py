@@ -191,6 +191,16 @@ class TransferSAMixin(OptimizationBaseMixin):
         if must_exclude_ids:
             all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
 
+        # If must-exclude players are currently owned, we have forced sales.
+        # The legacy exhaustive search path assumes the starting squad is already feasible.
+        # Forced-sales introduce a feasibility/repair step; to keep behavior correct and
+        # deterministic we bypass exhaustive search in this specific scenario.
+        must_sell_ids_in_squad = set()
+        if must_exclude_ids:
+            must_sell_ids_in_squad = must_exclude_ids.intersection(
+                set(current_squad_with_xp["player_id"].tolist())
+            )
+
         # Get best starting 11 from current squad (needed for formation display)
         current_best_11, current_formation, starting_11_xp = (
             self.find_optimal_starting_11(current_squad_with_xp, xp_column)
@@ -287,7 +297,11 @@ class TransferSAMixin(OptimizationBaseMixin):
         else:
             # Check if we should use exhaustive search for small transfer counts
             max_exhaustive = config.optimization.sa_exhaustive_search_max_transfers
-            if max_exhaustive > 0 and free_transfers <= max_exhaustive:
+            if (
+                max_exhaustive > 0
+                and free_transfers <= max_exhaustive
+                and not must_sell_ids_in_squad
+            ):
                 logger.info(
                     f"🔍 Using exhaustive search for {free_transfers} free transfer(s) (guaranteed optimal)..."
                 )
@@ -313,6 +327,15 @@ class TransferSAMixin(OptimizationBaseMixin):
                     # Fallback to SA if exhaustive fails
                     logger.warning("⚠️ Exhaustive search failed, falling back to SA")
                     sa_result = None
+            elif (
+                must_sell_ids_in_squad
+                and max_exhaustive > 0
+                and free_transfers <= max_exhaustive
+            ):
+                logger.info(
+                    f"🔍 Skipping exhaustive search: {len(must_sell_ids_in_squad)} forced must-exclude sale(s) detected; using SA..."
+                )
+                sa_result = None
             else:
                 sa_result = None
 
@@ -528,6 +551,108 @@ class TransferSAMixin(OptimizationBaseMixin):
         """
         # Convert current squad to list of dicts for SA processing
         original_squad = current_squad.to_dict("records")
+        true_original_ids = {p["player_id"] for p in original_squad}
+
+        # ------------------------------------------------------------------
+        # Forced sale of must-exclude players (bug fix: suspended/excluded must go)
+        #
+        # Key invariants:
+        # - Keep squad at 15 players
+        # - Preserve 2/5/5/3 position counts by replacing 1-for-1 by position
+        # - Measure transfer count vs TRUE original squad (before repair)
+        # ------------------------------------------------------------------
+        must_sell_ids = must_exclude_ids.intersection(true_original_ids)
+        if must_sell_ids:
+            logger.info(
+                f"🚫 Forcing sale of {len(must_sell_ids)} must-exclude players..."
+            )
+
+            excluded_players = [
+                p for p in original_squad if p["player_id"] in must_sell_ids
+            ]
+            excluded_value = float(sum(p["price"] for p in excluded_players))
+
+            # Remove excluded players and add value to available budget
+            original_squad = [
+                p for p in original_squad if p["player_id"] not in must_sell_ids
+            ]
+            remaining_budget = float(available_budget) + excluded_value
+
+            # Team counts / IDs for constraints
+            team_player_ids: Set[int] = {p["player_id"] for p in original_squad}
+            team_counts: Dict[Any, int] = self._count_players_per_team(original_squad)
+
+            replacement_players: List[Dict] = []
+            for removed in excluded_players:
+                position = removed["position"]
+
+                # Affordable candidates first
+                candidates = all_players[
+                    (all_players["position"] == position)
+                    & (~all_players["player_id"].isin(team_player_ids))
+                    & (~all_players["player_id"].isin(must_exclude_ids))
+                    & (all_players["price"] <= remaining_budget)
+                ].copy()
+
+                # If we can't afford any (common in tests where all cheap options are already owned),
+                # pick the cheapest feasible anyway to enforce must-exclude (bank may go negative).
+                if candidates.empty:
+                    logger.warning(
+                        f"⚠️ No affordable replacement for excluded {removed.get('web_name', removed.get('player_id'))} "
+                        f"({position}) within £{remaining_budget:.1f}m. Selecting cheapest feasible replacement anyway."
+                    )
+                    candidates = all_players[
+                        (all_players["position"] == position)
+                        & (~all_players["player_id"].isin(team_player_ids))
+                        & (~all_players["player_id"].isin(must_exclude_ids))
+                    ].copy()
+
+                if candidates.empty:
+                    raise ValueError(
+                        f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
+                        f"({position}): no candidates available"
+                    )
+
+                # Enforce 3-per-team constraint
+                team_col = "team" if "team" in candidates.columns else "team_id"
+                if team_col in candidates.columns:
+                    candidates = candidates[
+                        candidates[team_col].map(lambda t: team_counts.get(t, 0) < 3)
+                    ]
+
+                if candidates.empty:
+                    raise ValueError(
+                        f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
+                        f"({position}): candidates exist but all violate 3-per-team constraint"
+                    )
+
+                # Cheapest-first to preserve feasibility; tie-break by xP
+                sort_cols = ["price"]
+                if xp_column in candidates.columns:
+                    sort_cols.append(xp_column)
+                    ascending = [True, False]
+                else:
+                    ascending = [True]
+                chosen = (
+                    candidates.sort_values(by=sort_cols, ascending=ascending)
+                    .iloc[0]
+                    .to_dict()
+                )
+
+                replacement_players.append(chosen)
+                team_player_ids.add(chosen["player_id"])
+                chosen_team = chosen.get("team", chosen.get("team_id"))
+                team_counts[chosen_team] = team_counts.get(chosen_team, 0) + 1
+                remaining_budget -= float(chosen["price"])
+
+            original_squad.extend(replacement_players)
+            available_budget = float(remaining_budget)
+
+            if len(original_squad) != 15:
+                raise ValueError(
+                    f"Forced must-exclude replacement produced invalid squad size: {len(original_squad)} (expected 15)"
+                )
+
         original_ids = {p["player_id"] for p in original_squad}
 
         # Check if must_include players need to be bought
@@ -651,7 +776,7 @@ class TransferSAMixin(OptimizationBaseMixin):
 
             # CRITICAL: Check if new_team exceeds max_transfers from ORIGINAL squad
             new_ids = {p["player_id"] for p in new_team}
-            num_transfers_from_original = len(original_ids - new_ids)
+            num_transfers_from_original = len(true_original_ids - new_ids)
 
             if num_transfers_from_original > max_transfers:
                 # Reject this move - too many transfers from original

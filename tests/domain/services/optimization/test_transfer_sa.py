@@ -1307,3 +1307,57 @@ class TestBenchBoost:
         finally:
             config.optimization.sa_exhaustive_search_max_transfers = original_exhaustive
             config.optimization.sa_use_consensus_mode = original_consensus
+
+
+class TestMustExclude:
+    """Test must-exclude constraint enforcement (e.g., suspended players)."""
+
+    def test_must_exclude_removes_suspended_player_from_squad(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
+        """Test that a suspended player in must_exclude is transferred OUT.
+
+        Scenario:
+        - Player is currently in squad
+        - Player is suspended (status = 's')
+        - Player is added to must_exclude_ids
+
+        Expected: Player should be removed from optimal squad.
+        Regression test for: Calafiori suspension bug (GW16).
+        """
+        # Select a defender from current squad to mark as suspended
+        defender_in_squad = current_squad[current_squad["position"] == "DEF"].iloc[0]
+        suspended_player_id = defender_in_squad["player_id"]
+
+        # Mark this player as suspended in sample_players
+        sample_players.loc[
+            sample_players["player_id"] == suspended_player_id, "status"
+        ] = "s"
+
+        # Verify player is currently in squad
+        assert suspended_player_id in current_squad["player_id"].values
+
+        # Run optimization with player in must_exclude
+        optimal_squad, result, metadata = optimization_service.optimize_transfers(
+            current_squad=current_squad,
+            team_data=team_data,
+            players_with_xp=sample_players,
+            must_exclude_ids={suspended_player_id},
+            free_transfers_override=1,
+        )
+
+        # CRITICAL: Verify suspended player was REMOVED
+        optimal_player_ids = set(optimal_squad["player_id"].tolist())
+        assert suspended_player_id not in optimal_player_ids, (
+            f"BUG: Suspended player (ID {suspended_player_id}) is still in squad "
+            f"despite being in must_exclude_ids! This causes 0-point players in lineups."
+        )
+
+        # Verify squad is still valid (15 players, correct formation)
+        assert len(optimal_squad) == 15
+        assert optimal_squad["position"].value_counts().to_dict() == {
+            "GKP": 2,
+            "DEF": 5,
+            "MID": 5,
+            "FWD": 3,
+        }
