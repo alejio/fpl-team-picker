@@ -103,10 +103,6 @@ def _(mo):
 def _(mo):
     mo.md(r"""
     # 🎯 FPL Gameweek Manager
-    ## Advanced Weekly Decision Making Tool with Form Analytics
-
-    Transform your FPL strategy with data-driven weekly optimization and comprehensive form analysis.
-
 
     ---
     """)
@@ -1705,7 +1701,7 @@ def _(
             )
 
     if save_message:
-        save_message
+        _ = save_message
     return
 
 
@@ -1990,6 +1986,10 @@ def _(
                                     "xP_uncertainty",
                                     "xP_3gw",
                                     "xP_5gw",
+                                    "next_opponent",
+                                    "status",
+                                    "availability_status",
+                                    "chance_of_playing_next_round",
                                     "fixture_outlook",
                                 ]
                                 if col in _starting_11_df.columns
@@ -2028,9 +2028,15 @@ def _(
                                         "name",
                                         "price",
                                         "xP",
+                                        "xP_raw",
                                         "xP_uncertainty",
                                         "xP_3gw",
                                         "xP_5gw",
+                                        "next_opponent",
+                                        "status",
+                                        "availability_status",
+                                        "chance_of_playing_next_round",
+                                        "news",
                                         "fixture_outlook",
                                     ]
                                     if col in bench_df.columns

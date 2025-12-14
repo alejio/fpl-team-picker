@@ -997,10 +997,181 @@ def create_fixture_difficulty_visualization(
         - 📊 **Difficulty Scale**: 0.7=Very Easy, 1.0=Average, 1.3=Very Hard
         """
 
+        # ========== Potential Hauler Games Analysis ==========
+        hauler_games = []
+        for _, fixture in relevant_fixtures.iterrows():
+            home_team_id = fixture["home_team_id"]
+            away_team_id = fixture["away_team_id"]
+            gw = fixture["event"]
+
+            # Get team names
+            home_team_row = teams[teams["team_id"] == home_team_id].iloc[0]
+            away_team_row = teams[teams["team_id"] == away_team_id].iloc[0]
+            home_team_name = home_team_row["name"]
+            away_team_name = away_team_row["name"]
+            home_team_short = home_team_row["short_name"]
+            away_team_short = away_team_row["short_name"]
+
+            # Get team strengths
+            home_strength = team_strength.get(home_team_name, 1.0)
+            away_strength = team_strength.get(away_team_name, 1.0)
+
+            # Adjust for home advantage (home teams get ~10% boost)
+            home_effective_strength = home_strength * 1.1
+            away_effective_strength = away_strength * 0.9
+
+            # Calculate strength difference (larger = more one-sided)
+            strength_diff = abs(home_effective_strength - away_effective_strength)
+
+            # Identify one-sided games (strength difference > 0.25 indicates heavy favorite)
+            if strength_diff > 0.25:
+                if home_effective_strength > away_effective_strength:
+                    # Home team is heavy favorite
+                    favorite = home_team_short
+                    underdog = away_team_short
+                    venue = "Home"
+                    favorite_strength = home_effective_strength
+                    underdog_strength = away_effective_strength
+                else:
+                    # Away team is heavy favorite
+                    favorite = away_team_short
+                    underdog = home_team_short
+                    venue = "Away"
+                    favorite_strength = away_effective_strength
+                    underdog_strength = home_effective_strength
+
+                hauler_games.append(
+                    {
+                        "gameweek": gw,
+                        "favorite": favorite,
+                        "underdog": underdog,
+                        "venue": venue,
+                        "strength_diff": strength_diff,
+                        "favorite_strength": favorite_strength,
+                        "underdog_strength": underdog_strength,
+                    }
+                )
+
+        # Sort by gameweek first, then by strength difference (most one-sided first within each GW)
+        hauler_games.sort(key=lambda x: (x["gameweek"], -x["strength_diff"]))
+
+        hauler_md = "### 🎯 Potential Hauler Games (Heavy Favorites)\n\n"
+        if hauler_games:
+            hauler_md += "**One-sided fixtures where favorites have excellent haul potential:**\n\n"
+
+            # Group by gameweek for better display
+            current_gw = None
+            for game in hauler_games:
+                if game["gameweek"] != current_gw:
+                    if current_gw is not None:
+                        hauler_md += "\n"
+                    hauler_md += f"**GW{game['gameweek']}:**\n"
+                    current_gw = game["gameweek"]
+
+                # Format venue indicator
+                venue_emoji = "🏠" if game["venue"] == "Home" else "✈️"
+                venue_text = f"{venue_emoji} {game['venue']}"
+
+                # Format strength difference with visual indicator
+                if game["strength_diff"] > 0.4:
+                    diff_indicator = "🔥🔥🔥"
+                elif game["strength_diff"] > 0.3:
+                    diff_indicator = "🔥🔥"
+                else:
+                    diff_indicator = "🔥"
+
+                hauler_md += (
+                    f"  • **{game['favorite']}** vs {game['underdog']} "
+                    f"{venue_text} {diff_indicator} (diff: {game['strength_diff']:.2f})\n"
+                )
+
+            hauler_md += (
+                "\n**💡 Strategy**: Target attacking players from the **favorite teams** "
+                "in these fixtures for maximum haul potential (goals, assists, clean sheets).\n"
+            )
+        else:
+            hauler_md += (
+                "No highly one-sided fixtures identified in the next 5 gameweeks.\n"
+            )
+
+        # ========== Double Gameweek / Blank Gameweek Check ==========
+        dgw_bgw_md = "### ⚠️ Double Gameweek & Blank Gameweek Check\n\n"
+
+        # Check for double gameweeks (teams playing twice in a gameweek)
+        dgw_teams = {}
+        bgw_teams = {}
+
+        for gw in gameweeks:
+            gw_fixtures = relevant_fixtures[relevant_fixtures["event"] == gw]
+
+            # Count fixtures per team
+            team_fixture_count = {}
+            for _, fixture in gw_fixtures.iterrows():
+                home_id = fixture["home_team_id"]
+                away_id = fixture["away_team_id"]
+
+                team_fixture_count[home_id] = team_fixture_count.get(home_id, 0) + 1
+                team_fixture_count[away_id] = team_fixture_count.get(away_id, 0) + 1
+
+            # Identify DGW teams (playing twice)
+            for team_id, count in team_fixture_count.items():
+                if count > 1:
+                    team_row = teams[teams["team_id"] == team_id].iloc[0]
+                    team_name = team_row["name"]
+                    if gw not in dgw_teams:
+                        dgw_teams[gw] = []
+                    dgw_teams[gw].append(team_name)
+
+            # Identify BGW teams (not playing)
+            all_team_ids = set(teams["team_id"].unique())
+            playing_team_ids = set(team_fixture_count.keys())
+            bgw_team_ids = all_team_ids - playing_team_ids
+
+            if bgw_team_ids:
+                bgw_team_names = [
+                    teams[teams["team_id"] == tid].iloc[0]["name"]
+                    for tid in bgw_team_ids
+                ]
+                bgw_teams[gw] = bgw_team_names
+
+        # Format DGW/BGW warnings
+        if dgw_teams:
+            dgw_bgw_md += "**🟢 DOUBLE GAMEWEEKS DETECTED:**\n\n"
+            for gw, team_list in sorted(dgw_teams.items()):
+                dgw_bgw_md += f"- **GW{gw}**: {', '.join(team_list)} play **TWICE**\n"
+            dgw_bgw_md += (
+                "\n**💡 Strategy**: Target players from DGW teams - they get 2 fixtures worth of points! "
+                "Consider using Triple Captain or Bench Boost chips.\n\n"
+            )
+        else:
+            dgw_bgw_md += (
+                "✅ **No double gameweeks** detected in the next 5 gameweeks.\n\n"
+            )
+
+        if bgw_teams:
+            dgw_bgw_md += "**🔴 BLANK GAMEWEEKS DETECTED:**\n\n"
+            for gw, team_list in sorted(bgw_teams.items()):
+                dgw_bgw_md += (
+                    f"- **GW{gw}**: {', '.join(team_list)} have **NO FIXTURE**\n"
+                )
+            dgw_bgw_md += (
+                "\n**⚠️ Warning**: Avoid players from BGW teams - they won't play! "
+                "Plan transfers to remove BGW players before the blank gameweek.\n\n"
+            )
+        else:
+            dgw_bgw_md += (
+                "✅ **No blank gameweeks** detected in the next 5 gameweeks.\n"
+            )
+
+        if not dgw_teams and not bgw_teams:
+            dgw_bgw_md += "\n**All teams have normal fixture schedules** - no special planning needed.\n"
+
         return (
             mo_ref.vstack(
                 [
                     mo_ref.md(analysis_md),
+                    mo_ref.md(hauler_md),
+                    mo_ref.md(dgw_bgw_md),
                     mo_ref.md("### 📊 Interactive Fixture Difficulty Heatmap"),
                     mo_ref.md(
                         "*🟢 Green = Easy, 🟡 Yellow = Average, 🔴 Red = Hard | Hover for opponent details*"
