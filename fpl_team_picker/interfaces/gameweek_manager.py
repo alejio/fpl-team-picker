@@ -1619,44 +1619,75 @@ def _(calibrated_players_with_xp, gameweek_data, gameweek_input, mo):
 
 
 @app.cell
+def _():
+    # Initialize processed flag for save button click deduplication
+    _save_processed_flag_init = False
+    return (_save_processed_flag_init,)
+
+
+@app.cell
+def _(save_predictions_button, _save_processed_flag_init, _save_handler_return_flag):
+    # Manage processed flag: reset when button is not clicked
+    # This cell receives the initial flag and handler's return flag (not its own return)
+    # In Marimo, cells can only receive values from OTHER cells' returns, not their own
+    _current_button_state = (
+        save_predictions_button.value if save_predictions_button else False
+    )
+
+    # Reset when button is not clicked (allows processing next click)
+    if not _current_button_state:
+        _save_processed_flag = False
+    else:
+        # Button is clicked: use handler's return flag
+        # Handler returns True if it processed a new click, False otherwise
+        # If handler returned True, we've processed; if False, we haven't processed yet
+        _save_processed_flag = (
+            _save_handler_return_flag
+            if _save_handler_return_flag is not None
+            else _save_processed_flag_init
+        )
+
+    return (_save_processed_flag,)
+
+
+@app.cell
 def _(
     calibrated_players_with_xp,
     gameweek_data,
     gameweek_input,
     mo,
     save_predictions_button,
-    _save_button_click_id=None,
+    _save_processed_flag,
 ):
-    # Handle save predictions action
+    # Handle save predictions action with click deduplication
     from fpl_team_picker.domain.services import PredictionStorageService
     from fpl_team_picker.config import config as _save_config
     from pathlib import Path as _PathSave
 
     save_message = None
 
-    # Track button clicks: In Marimo, button.value stays True after click
-    # We track the last processed gameweek to prevent duplicate saves
-    # When button is clicked, we check if we've already saved for this gameweek
-    _button_is_clicked = save_predictions_button.value
-    _current_gw = gameweek_input.value if gameweek_input.value else None
-    # Initialize last saved gameweek from parameter (handle first execution where param might not exist)
-    try:
-        _last_saved_gw = _save_button_click_id
-    except NameError:
-        _last_saved_gw = None
+    # Only process if button is clicked AND we haven't processed this click yet
+    # This prevents duplicate saves from rapid button clicks
+    _current_button_state = (
+        save_predictions_button.value if save_predictions_button else False
+    )
+    is_new_click = _current_button_state and not _save_processed_flag
 
-    # Process if button is clicked and we haven't saved for this gameweek yet
-    if _button_is_clicked and _current_gw is not None and _current_gw != _last_saved_gw:
+    # Return flag: True if we processed a click, otherwise maintain current state
+    if is_new_click:
+        # Mark as processed to prevent duplicate saves
+        _save_handler_return_flag = True
         try:
             storage_svc = PredictionStorageService()
+            _save_gw = gameweek_input.value
 
             # Check if predictions already exist
-            if storage_svc.prediction_exists(_current_gw):
-                existing_summary = storage_svc.get_prediction_summary(_current_gw)
+            if storage_svc.prediction_exists(_save_gw):
+                existing_summary = storage_svc.get_prediction_summary(_save_gw)
                 save_message = mo.callout(
                     mo.md(
                         f"""
-                        ⚠️ **Predictions already exist for GW{_current_gw}**
+                        ⚠️ **Predictions already exist for GW{_save_gw}**
 
                         Previously saved:
                         - **Date:** {existing_summary["saved_at"].strftime("%Y-%m-%d %H:%M")}
@@ -1664,13 +1695,11 @@ def _(
                         - **Captain:** {existing_summary["captain"]} ({existing_summary["captain_xp"]:.1f} xP)
 
                         *Overwriting not yet implemented - delete the file manually if needed:*
-                        `data/predictions/gw{_current_gw}_predictions.json`
+                        `data/predictions/gw{_save_gw}_predictions.json`
                         """
                     ),
                     kind="warn",
                 )
-                # Mark as processed even if already exists
-                _new_click_id = _current_gw
             else:
                 # Prepare model info for metadata
                 _save_model_info = {
@@ -1682,19 +1711,19 @@ def _(
 
                 # Save predictions
                 result_path = storage_svc.save_predictions(
-                    gameweek=_current_gw,
+                    gameweek=_save_gw,
                     predictions_df=calibrated_players_with_xp,
                     team_data=gameweek_data["manager_team"],
                     model_info=_save_model_info,
                 )
 
                 # Get summary for confirmation
-                summary = storage_svc.get_prediction_summary(_current_gw)
+                summary = storage_svc.get_prediction_summary(_save_gw)
 
                 save_message = mo.callout(
                     mo.md(
                         f"""
-                        ✅ **Predictions Saved for GW{_current_gw}**
+                        ✅ **Predictions Saved for GW{_save_gw}**
 
                         - **Total Squad xP:** {summary["total_xp"]:.1f}
                         - **Captain:** {summary["captain"]} ({summary["captain_xp"]:.1f} xP)
@@ -1707,22 +1736,19 @@ def _(
                     ),
                     kind="success",
                 )
-                # Mark this gameweek as saved
-                _new_click_id = _current_gw
+
         except Exception as e:
             save_message = mo.callout(
                 mo.md(f"❌ **Error saving predictions:** {str(e)}"),
                 kind="danger",
             )
-            # Don't update click_id on error, so user can retry
-            _new_click_id = _last_saved_gw
     else:
-        # No action needed, keep previous state
-        _new_click_id = _last_saved_gw
+        # Maintain current processed flag state (don't reset here, let reset cell handle it)
+        _save_handler_return_flag = _save_processed_flag
 
-    if save_message:
-        _ = save_message
-    return (_new_click_id,)
+    # Display save message if present (must be last expression for Marimo)
+    _display_message = save_message
+    return (_save_handler_return_flag, _display_message)
 
 
 @app.cell
@@ -2006,10 +2032,6 @@ def _(
                                     "xP_uncertainty",
                                     "xP_3gw",
                                     "xP_5gw",
-                                    "next_opponent",
-                                    "status",
-                                    "availability_status",
-                                    "chance_of_playing_next_round",
                                     "fixture_outlook",
                                 ]
                                 if col in _starting_11_df.columns
@@ -2048,15 +2070,9 @@ def _(
                                         "name",
                                         "price",
                                         "xP",
-                                        "xP_raw",
                                         "xP_uncertainty",
                                         "xP_3gw",
                                         "xP_5gw",
-                                        "next_opponent",
-                                        "status",
-                                        "availability_status",
-                                        "chance_of_playing_next_round",
-                                        "news",
                                         "fixture_outlook",
                                     ]
                                     if col in bench_df.columns
