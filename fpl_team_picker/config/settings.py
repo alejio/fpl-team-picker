@@ -431,6 +431,18 @@ class OptimizationConfig(BaseModel):
         le=10.0,
     )
 
+    # Forced constraint repairs (must-exclude/must-include)
+    allow_negative_bank_for_forced_repairs: bool = Field(
+        default=True,
+        description=(
+            "Allow forced constraint repairs (e.g., selling suspended must-exclude players) "
+            "to temporarily push bank negative if no affordable 1-for-1 replacement exists. "
+            "This preserves hard squad validity (15 players, correct positions) and ensures "
+            "must-exclude is always enforced. Set False to fail fast when repairs are infeasible "
+            "within budget."
+        ),
+    )
+
     # Optimization horizon
     optimization_horizon: str = Field(
         default="5gw",

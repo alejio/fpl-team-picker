@@ -74,6 +74,8 @@ class TransferSAMixin(OptimizationBaseMixin):
             f"🧠 Strategic Optimization: Simulated Annealing ({config.optimization.sa_iterations} iterations)..."
         )
 
+        used_exhaustive_search = False
+
         # Process constraints
         must_include_ids = must_include_ids or set()
         must_exclude_ids = must_exclude_ids or set()
@@ -191,19 +193,9 @@ class TransferSAMixin(OptimizationBaseMixin):
         if must_exclude_ids:
             all_players = all_players[~all_players["player_id"].isin(must_exclude_ids)]
 
-        # If must-exclude players are currently owned, we have forced sales.
-        # The legacy exhaustive search path assumes the starting squad is already feasible.
-        # Forced-sales introduce a feasibility/repair step; to keep behavior correct and
-        # deterministic we bypass exhaustive search in this specific scenario.
-        must_sell_ids_in_squad = set()
-        if must_exclude_ids:
-            must_sell_ids_in_squad = must_exclude_ids.intersection(
-                set(current_squad_with_xp["player_id"].tolist())
-            )
-
         # Get best starting 11 from current squad (needed for formation display)
-        current_best_11, current_formation, starting_11_xp = (
-            self.find_optimal_starting_11(current_squad_with_xp, xp_column)
+        _, current_formation, starting_11_xp = self.find_optimal_starting_11(
+            current_squad_with_xp, xp_column
         )
 
         # Calculate current_xp based on mode:
@@ -297,11 +289,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         else:
             # Check if we should use exhaustive search for small transfer counts
             max_exhaustive = config.optimization.sa_exhaustive_search_max_transfers
-            if (
-                max_exhaustive > 0
-                and free_transfers <= max_exhaustive
-                and not must_sell_ids_in_squad
-            ):
+            if max_exhaustive > 0 and free_transfers <= max_exhaustive:
                 logger.info(
                     f"🔍 Using exhaustive search for {free_transfers} free transfer(s) (guaranteed optimal)..."
                 )
@@ -313,12 +301,12 @@ class TransferSAMixin(OptimizationBaseMixin):
                     must_include_ids=must_include_ids,
                     must_exclude_ids=must_exclude_ids,
                     xp_column=xp_column,
-                    current_xp=current_xp,
                     max_transfers=max_exhaustive,
                     is_bench_boost=is_bench_boost,
                 )
                 if exhaustive_result:
                     sa_result = exhaustive_result
+                    used_exhaustive_search = True
                     best_net_xp = exhaustive_result["best_xp"]
                     logger.info(
                         f"✅ Exhaustive search complete: {best_net_xp:.2f} net xP"
@@ -327,15 +315,6 @@ class TransferSAMixin(OptimizationBaseMixin):
                     # Fallback to SA if exhaustive fails
                     logger.warning("⚠️ Exhaustive search failed, falling back to SA")
                     sa_result = None
-            elif (
-                must_sell_ids_in_squad
-                and max_exhaustive > 0
-                and free_transfers <= max_exhaustive
-            ):
-                logger.info(
-                    f"🔍 Skipping exhaustive search: {len(must_sell_ids_in_squad)} forced must-exclude sale(s) detected; using SA..."
-                )
-                sa_result = None
             else:
                 sa_result = None
 
@@ -354,7 +333,6 @@ class TransferSAMixin(OptimizationBaseMixin):
                         must_include_ids=must_include_ids,
                         must_exclude_ids=must_exclude_ids,
                         xp_column=xp_column,
-                        current_xp=current_xp,
                         is_bench_boost=is_bench_boost,
                     )
                     best_net_xp = sa_result["best_xp"]
@@ -385,7 +363,6 @@ class TransferSAMixin(OptimizationBaseMixin):
                             must_include_ids=must_include_ids,
                             must_exclude_ids=must_exclude_ids,
                             xp_column=xp_column,
-                            current_xp=current_xp,
                             iterations=config.optimization.sa_iterations,
                             is_bench_boost=is_bench_boost,
                         )
@@ -484,6 +461,7 @@ class TransferSAMixin(OptimizationBaseMixin):
         # Return data structures for presentation layer to display
         optimization_metadata = {
             "method": "simulated_annealing",
+            "used_exhaustive_search": used_exhaustive_search,
             "horizon_label": horizon_label,
             "xp_column": xp_column,
             "budget_pool_info": budget_pool_info,
@@ -538,7 +516,6 @@ class TransferSAMixin(OptimizationBaseMixin):
         must_include_ids: Set[int],
         must_exclude_ids: Set[int],
         xp_column: str,
-        current_xp: float,
         iterations: int,
         is_bench_boost: bool = False,
     ) -> Dict[str, Any]:
@@ -553,105 +530,17 @@ class TransferSAMixin(OptimizationBaseMixin):
         original_squad = current_squad.to_dict("records")
         true_original_ids = {p["player_id"] for p in original_squad}
 
-        # ------------------------------------------------------------------
-        # Forced sale of must-exclude players (bug fix: suspended/excluded must go)
-        #
-        # Key invariants:
-        # - Keep squad at 15 players
-        # - Preserve 2/5/5/3 position counts by replacing 1-for-1 by position
-        # - Measure transfer count vs TRUE original squad (before repair)
-        # ------------------------------------------------------------------
-        must_sell_ids = must_exclude_ids.intersection(true_original_ids)
-        if must_sell_ids:
-            logger.info(
-                f"🚫 Forcing sale of {len(must_sell_ids)} must-exclude players..."
+        # Forced-sell must-exclude players and repair back to a valid 15-player squad.
+        original_squad, available_budget, _forced_repairs = (
+            self._repair_squad_for_constraints(
+                squad=original_squad,
+                all_players=all_players,
+                available_budget=available_budget,
+                must_include_ids=set(),  # must-include handled below in legacy logic
+                must_exclude_ids=must_exclude_ids,
+                xp_column=xp_column,
             )
-
-            excluded_players = [
-                p for p in original_squad if p["player_id"] in must_sell_ids
-            ]
-            excluded_value = float(sum(p["price"] for p in excluded_players))
-
-            # Remove excluded players and add value to available budget
-            original_squad = [
-                p for p in original_squad if p["player_id"] not in must_sell_ids
-            ]
-            remaining_budget = float(available_budget) + excluded_value
-
-            # Team counts / IDs for constraints
-            team_player_ids: Set[int] = {p["player_id"] for p in original_squad}
-            team_counts: Dict[Any, int] = self._count_players_per_team(original_squad)
-
-            replacement_players: List[Dict] = []
-            for removed in excluded_players:
-                position = removed["position"]
-
-                # Affordable candidates first
-                candidates = all_players[
-                    (all_players["position"] == position)
-                    & (~all_players["player_id"].isin(team_player_ids))
-                    & (~all_players["player_id"].isin(must_exclude_ids))
-                    & (all_players["price"] <= remaining_budget)
-                ].copy()
-
-                # If we can't afford any (common in tests where all cheap options are already owned),
-                # pick the cheapest feasible anyway to enforce must-exclude (bank may go negative).
-                if candidates.empty:
-                    logger.warning(
-                        f"⚠️ No affordable replacement for excluded {removed.get('web_name', removed.get('player_id'))} "
-                        f"({position}) within £{remaining_budget:.1f}m. Selecting cheapest feasible replacement anyway."
-                    )
-                    candidates = all_players[
-                        (all_players["position"] == position)
-                        & (~all_players["player_id"].isin(team_player_ids))
-                        & (~all_players["player_id"].isin(must_exclude_ids))
-                    ].copy()
-
-                if candidates.empty:
-                    raise ValueError(
-                        f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
-                        f"({position}): no candidates available"
-                    )
-
-                # Enforce 3-per-team constraint
-                team_col = "team" if "team" in candidates.columns else "team_id"
-                if team_col in candidates.columns:
-                    candidates = candidates[
-                        candidates[team_col].map(lambda t: team_counts.get(t, 0) < 3)
-                    ]
-
-                if candidates.empty:
-                    raise ValueError(
-                        f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
-                        f"({position}): candidates exist but all violate 3-per-team constraint"
-                    )
-
-                # Cheapest-first to preserve feasibility; tie-break by xP
-                sort_cols = ["price"]
-                if xp_column in candidates.columns:
-                    sort_cols.append(xp_column)
-                    ascending = [True, False]
-                else:
-                    ascending = [True]
-                chosen = (
-                    candidates.sort_values(by=sort_cols, ascending=ascending)
-                    .iloc[0]
-                    .to_dict()
-                )
-
-                replacement_players.append(chosen)
-                team_player_ids.add(chosen["player_id"])
-                chosen_team = chosen.get("team", chosen.get("team_id"))
-                team_counts[chosen_team] = team_counts.get(chosen_team, 0) + 1
-                remaining_budget -= float(chosen["price"])
-
-            original_squad.extend(replacement_players)
-            available_budget = float(remaining_budget)
-
-            if len(original_squad) != 15:
-                raise ValueError(
-                    f"Forced must-exclude replacement produced invalid squad size: {len(original_squad)} (expected 15)"
-                )
+        )
 
         original_ids = {p["player_id"] for p in original_squad}
 
@@ -1059,7 +948,6 @@ class TransferSAMixin(OptimizationBaseMixin):
         must_include_ids: Set[int],
         must_exclude_ids: Set[int],
         xp_column: str,
-        current_xp: float,
         is_bench_boost: bool = False,
     ) -> Dict[str, Any]:
         """Run optimization multiple times and find consensus optimal solution.
@@ -1110,7 +998,6 @@ class TransferSAMixin(OptimizationBaseMixin):
                     must_include_ids=must_include_ids,
                     must_exclude_ids=must_exclude_ids,
                     xp_column=xp_column,
-                    current_xp=current_xp,
                     iterations=iterations,
                     is_bench_boost=is_bench_boost,
                 )
@@ -1180,7 +1067,6 @@ class TransferSAMixin(OptimizationBaseMixin):
         must_include_ids: Set[int],
         must_exclude_ids: Set[int],
         xp_column: str,
-        current_xp: float,
         max_transfers: int,
         is_bench_boost: bool = False,
     ) -> Optional[Dict[str, Any]]:
@@ -1197,7 +1083,30 @@ class TransferSAMixin(OptimizationBaseMixin):
         """
 
         original_squad = current_squad.to_dict("records")
+        true_original_ids = {p["player_id"] for p in original_squad}
+
+        # Enforce must-exclude immediately by repairing to a valid 15-player squad.
+        original_squad, available_budget, _forced_repairs = (
+            self._repair_squad_for_constraints(
+                squad=original_squad,
+                all_players=all_players,
+                available_budget=available_budget,
+                must_include_ids=set(),  # must-include handled below in legacy logic
+                must_exclude_ids=must_exclude_ids,
+                xp_column=xp_column,
+            )
+        )
+
         original_ids = {p["player_id"] for p in original_squad}
+        forced_transfer_count = len(true_original_ids - original_ids)
+        if forced_transfer_count > max_transfers:
+            logger.warning(
+                f"⚠️ Infeasible constraints: {forced_transfer_count} forced transfer(s) required "
+                f"but max_transfers={max_transfers}"
+            )
+            return None
+
+        max_optional_transfers = max_transfers - forced_transfer_count
 
         # Check if must_include players need to be bought
         must_buy_ids = must_include_ids - original_ids
@@ -1265,12 +1174,13 @@ class TransferSAMixin(OptimizationBaseMixin):
                 original_squad, xp_column
             )
             squad_xp = sum(self.get_adjusted_xp(p, xp_column) for p in starting_11)
+            final_ids = {p["player_id"] for p in original_squad}
             return {
                 "optimal_squad": original_squad,
                 "best_xp": squad_xp,
                 "net_xp": squad_xp,
-                "transfers_out": must_buy_ids if must_buy_ids else set(),
-                "transfers_in": must_buy_ids if must_buy_ids else set(),
+                "transfers_out": true_original_ids - final_ids,
+                "transfers_in": final_ids - true_original_ids,
                 "iterations_improved": 0,
                 "total_iterations": 1,
                 "formation": "unknown",
@@ -1299,14 +1209,22 @@ class TransferSAMixin(OptimizationBaseMixin):
             zero_transfer_xp = sum(
                 self.get_adjusted_xp(p, xp_column) for p in starting_11
             )
-        if zero_transfer_xp > best_net_xp:
-            best_net_xp = zero_transfer_xp
+        zero_ids = {p["player_id"] for p in original_squad}
+        zero_total_transfers = len(true_original_ids - zero_ids)
+        zero_transfer_penalty = (
+            max(0, zero_total_transfers - free_transfers)
+            * config.optimization.transfer_cost
+        )
+        zero_net_xp = zero_transfer_xp - zero_transfer_penalty
+
+        if zero_net_xp > best_net_xp:
+            best_net_xp = zero_net_xp
             best_result = {
                 "optimal_squad": original_squad,
                 "best_xp": zero_transfer_xp,
-                "net_xp": zero_transfer_xp,
-                "transfers_out": set(),
-                "transfers_in": set(),
+                "net_xp": zero_net_xp,
+                "transfers_out": true_original_ids - zero_ids,
+                "transfers_in": zero_ids - true_original_ids,
                 "iterations_improved": 0,
                 "total_iterations": 1,
                 "formation": self._enumerate_formations_for_players(
@@ -1316,7 +1234,7 @@ class TransferSAMixin(OptimizationBaseMixin):
 
         # Try 1 to max_transfers transfers
         for num_transfers in range(
-            1, min(max_transfers + 1, len(swappable_players) + 1)
+            1, min(max_optional_transfers + 1, len(swappable_players) + 1)
         ):
             # Generate all combinations of players to transfer out
             for out_players in combinations(swappable_players, num_transfers):
@@ -1436,21 +1354,22 @@ class TransferSAMixin(OptimizationBaseMixin):
                                                 ceiling - 10
                                             ) * config.optimization.ceiling_bonus_factor
 
+                        new_ids = {p["player_id"] for p in new_squad}
+                        total_transfers = len(true_original_ids - new_ids)
                         transfer_penalty = (
-                            max(0, num_transfers - free_transfers)
+                            max(0, total_transfers - free_transfers)
                             * config.optimization.transfer_cost
                         )
                         net_xp = squad_xp + ceiling_bonus - transfer_penalty
 
                         if net_xp > best_net_xp:
                             best_net_xp = net_xp
-                            in_ids = {candidate["player_id"]}
                             best_result = {
                                 "optimal_squad": new_squad,
                                 "best_xp": squad_xp,
                                 "net_xp": net_xp,
-                                "transfers_out": out_ids,
-                                "transfers_in": in_ids,
+                                "transfers_out": true_original_ids - new_ids,
+                                "transfers_in": new_ids - true_original_ids,
                                 "iterations_improved": 1,
                                 "total_iterations": total_combinations,
                                 "formation": self._enumerate_formations_for_players(
@@ -1570,21 +1489,22 @@ class TransferSAMixin(OptimizationBaseMixin):
                                                     * config.optimization.ceiling_bonus_factor
                                                 )
 
+                            new_ids = {p["player_id"] for p in new_squad}
+                            total_transfers = len(true_original_ids - new_ids)
                             transfer_penalty = (
-                                max(0, num_transfers - free_transfers)
+                                max(0, total_transfers - free_transfers)
                                 * config.optimization.transfer_cost
                             )
                             net_xp = squad_xp + ceiling_bonus - transfer_penalty
 
                             if net_xp > best_net_xp:
                                 best_net_xp = net_xp
-                                in_ids = {p["player_id"] for p in replacements}
                                 best_result = {
                                     "optimal_squad": new_squad,
                                     "best_xp": squad_xp,
                                     "net_xp": net_xp,
-                                    "transfers_out": out_ids,
-                                    "transfers_in": in_ids,
+                                    "transfers_out": true_original_ids - new_ids,
+                                    "transfers_in": new_ids - true_original_ids,
                                     "iterations_improved": 1,
                                     "total_iterations": total_combinations,
                                     "formation": self._enumerate_formations_for_players(
@@ -1598,3 +1518,129 @@ class TransferSAMixin(OptimizationBaseMixin):
                 f"best: {best_net_xp:.2f} net xP"
             )
         return best_result
+
+    def _repair_squad_for_constraints(
+        self,
+        squad: List[Dict],
+        all_players: pd.DataFrame,
+        available_budget: float,
+        must_include_ids: Set[int],
+        must_exclude_ids: Set[int],
+        xp_column: str,
+    ) -> Tuple[List[Dict], float, Dict[str, Any]]:
+        """Repair a 15-player squad to satisfy hard constraints.
+
+        This helper exists to keep constraint enforcement consistent across:
+        - Simulated annealing (_run_transfer_sa)
+        - Exhaustive search (_exhaustive_transfer_search)
+
+        Currently focuses on must-exclude enforcement (forced sales) while keeping:
+        - 15 players
+        - same position counts (1-for-1 replacement by position)
+        - <= 3 players per team
+
+        Budget policy is controlled by:
+        - config.optimization.allow_negative_bank_for_forced_repairs
+
+        Returns:
+            (repaired_squad, updated_available_budget, metadata)
+        """
+        forced_repairs: Dict[str, Any] = {"forced_out": set(), "forced_in": set()}
+
+        if not must_exclude_ids:
+            return squad, float(available_budget), forced_repairs
+
+        current_ids = {p["player_id"] for p in squad}
+        must_sell_ids = must_exclude_ids.intersection(current_ids)
+        if not must_sell_ids:
+            return squad, float(available_budget), forced_repairs
+
+        logger.info(f"🚫 Forcing sale of {len(must_sell_ids)} must-exclude players...")
+        excluded_players = [p for p in squad if p["player_id"] in must_sell_ids]
+        excluded_value = float(sum(p["price"] for p in excluded_players))
+
+        kept = [p for p in squad if p["player_id"] not in must_sell_ids]
+        remaining_budget = float(available_budget) + excluded_value
+
+        team_player_ids: Set[int] = {p["player_id"] for p in kept}
+        team_counts: Dict[Any, int] = self._count_players_per_team(kept)
+
+        replacement_players: List[Dict] = []
+        allow_negative = bool(
+            getattr(config.optimization, "allow_negative_bank_for_forced_repairs", True)
+        )
+
+        for removed in excluded_players:
+            position = removed["position"]
+
+            candidates = all_players[
+                (all_players["position"] == position)
+                & (~all_players["player_id"].isin(team_player_ids))
+                & (~all_players["player_id"].isin(must_exclude_ids))
+                & (all_players["price"] <= remaining_budget)
+            ].copy()
+
+            if candidates.empty:
+                if not allow_negative:
+                    raise ValueError(
+                        f"Cannot repair must-exclude: no affordable replacement for "
+                        f"{removed.get('web_name', removed.get('player_id'))} ({position}) "
+                        f"within £{remaining_budget:.1f}m"
+                    )
+                logger.warning(
+                    f"⚠️ No affordable replacement for excluded {removed.get('web_name', removed.get('player_id'))} "
+                    f"({position}) within £{remaining_budget:.1f}m. Selecting cheapest feasible replacement anyway "
+                    "(bank may go negative)."
+                )
+                candidates = all_players[
+                    (all_players["position"] == position)
+                    & (~all_players["player_id"].isin(team_player_ids))
+                    & (~all_players["player_id"].isin(must_exclude_ids))
+                ].copy()
+
+            if candidates.empty:
+                raise ValueError(
+                    f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
+                    f"({position}): no candidates available"
+                )
+
+            team_col = "team" if "team" in candidates.columns else "team_id"
+            if team_col in candidates.columns:
+                candidates = candidates[
+                    candidates[team_col].map(lambda t: team_counts.get(t, 0) < 3)
+                ]
+
+            if candidates.empty:
+                raise ValueError(
+                    f"Cannot replace excluded player {removed.get('web_name', removed.get('player_id'))} "
+                    f"({position}): candidates exist but all violate 3-per-team constraint"
+                )
+
+            sort_cols = ["price"]
+            if xp_column in candidates.columns:
+                sort_cols.append(xp_column)
+                ascending = [True, False]
+            else:
+                ascending = [True]
+            chosen = (
+                candidates.sort_values(by=sort_cols, ascending=ascending)
+                .iloc[0]
+                .to_dict()
+            )
+
+            replacement_players.append(chosen)
+            team_player_ids.add(chosen["player_id"])
+            chosen_team = chosen.get("team", chosen.get("team_id"))
+            team_counts[chosen_team] = team_counts.get(chosen_team, 0) + 1
+            remaining_budget -= float(chosen["price"])
+
+        repaired = kept + replacement_players
+        if len(repaired) != 15:
+            raise ValueError(
+                f"Forced must-exclude replacement produced invalid squad size: {len(repaired)} (expected 15)"
+            )
+
+        forced_repairs["forced_out"] = set(must_sell_ids)
+        forced_repairs["forced_in"] = {p["player_id"] for p in replacement_players}
+
+        return repaired, float(remaining_budget), forced_repairs

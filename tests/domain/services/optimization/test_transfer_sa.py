@@ -1361,3 +1361,55 @@ class TestMustExclude:
             "MID": 5,
             "FWD": 3,
         }
+
+    def test_must_exclude_forced_sale_works_with_exhaustive_enabled(
+        self, optimization_service, current_squad, team_data, sample_players
+    ):
+        """Regression: forced must-exclude sales still work even when exhaustive is enabled.
+
+        This ensures we don't need to skip exhaustive search in forced-sale scenarios.
+        """
+        # Select a defender from current squad to mark as suspended
+        defender_in_squad = current_squad[current_squad["position"] == "DEF"].iloc[0]
+        suspended_player_id = int(defender_in_squad["player_id"])
+
+        sample_players.loc[
+            sample_players["player_id"] == suspended_player_id, "status"
+        ] = "s"
+
+        original_max = config.optimization.sa_exhaustive_search_max_transfers
+        original_consensus = config.optimization.sa_use_consensus_mode
+        original_sa_iterations = config.optimization.sa_iterations
+
+        try:
+            # Allow exhaustive to explore at least one optional move after forced sale
+            config.optimization.sa_exhaustive_search_max_transfers = 2
+            config.optimization.sa_use_consensus_mode = False
+            # Make SA fallback obviously different from exhaustive
+            config.optimization.sa_iterations = 1
+
+            optimal_squad, result, metadata = optimization_service.optimize_transfers(
+                current_squad=current_squad,
+                team_data=team_data,
+                players_with_xp=sample_players,
+                must_exclude_ids={suspended_player_id},
+                free_transfers_override=1,
+            )
+
+            optimal_ids = set(optimal_squad["player_id"].tolist())
+            assert suspended_player_id not in optimal_ids
+            assert len(optimal_squad) == 15
+            assert optimal_squad["position"].value_counts().to_dict() == {
+                "GKP": 2,
+                "DEF": 5,
+                "MID": 5,
+                "FWD": 3,
+            }
+
+            # Ensure exhaustive path was actually used (not SA fallback)
+            assert metadata.get("used_exhaustive_search") is True
+
+        finally:
+            config.optimization.sa_exhaustive_search_max_transfers = original_max
+            config.optimization.sa_use_consensus_mode = original_consensus
+            config.optimization.sa_iterations = original_sa_iterations
