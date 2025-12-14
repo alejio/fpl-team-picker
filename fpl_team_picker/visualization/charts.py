@@ -1055,22 +1055,30 @@ def create_fixture_difficulty_visualization(
         # Sort by gameweek first, then by strength difference (most one-sided first within each GW)
         hauler_games.sort(key=lambda x: (x["gameweek"], -x["strength_diff"]))
 
-        hauler_md = "### 🎯 Potential Hauler Games (Heavy Favorites)\n\n"
+        # Create table data grouped by gameweek
+        hauler_table_data = []
         if hauler_games:
-            hauler_md += "**One-sided fixtures where favorites have excellent haul potential:**\n\n"
-
-            # Group by gameweek for better display
+            # Group by gameweek
             current_gw = None
+            gw_fixtures = []
+
             for game in hauler_games:
                 if game["gameweek"] != current_gw:
-                    if current_gw is not None:
-                        hauler_md += "\n"
-                    hauler_md += f"**GW{game['gameweek']}:**\n"
+                    # Save previous gameweek's fixtures
+                    if current_gw is not None and gw_fixtures:
+                        fixture_text = " | ".join(gw_fixtures)
+                        hauler_table_data.append(
+                            {
+                                "Gameweek": f"GW{current_gw}",
+                                "Fixture": fixture_text,
+                            }
+                        )
+                    # Start new gameweek
                     current_gw = game["gameweek"]
+                    gw_fixtures = []
 
                 # Format venue indicator
                 venue_emoji = "🏠" if game["venue"] == "Home" else "✈️"
-                venue_text = f"{venue_emoji} {game['venue']}"
 
                 # Format strength difference with visual indicator
                 if game["strength_diff"] > 0.4:
@@ -1080,18 +1088,44 @@ def create_fixture_difficulty_visualization(
                 else:
                     diff_indicator = "🔥"
 
-                hauler_md += (
-                    f"  • **{game['favorite']}** vs {game['underdog']} "
-                    f"{venue_text} {diff_indicator} (diff: {game['strength_diff']:.2f})\n"
+                fixture_str = (
+                    f"**{game['favorite']}** vs {game['underdog']} "
+                    f"{venue_emoji} {diff_indicator}"
+                )
+                gw_fixtures.append(fixture_str)
+
+            # Add last gameweek
+            if current_gw is not None and gw_fixtures:
+                fixture_text = " | ".join(gw_fixtures)
+                hauler_table_data.append(
+                    {
+                        "Gameweek": f"GW{current_gw}",
+                        "Fixture": fixture_text,
+                    }
                 )
 
-            hauler_md += (
-                "\n**💡 Strategy**: Target attacking players from the **favorite teams** "
-                "in these fixtures for maximum haul potential (goals, assists, clean sheets).\n"
+        # Create hauler display components
+        hauler_components = [
+            mo_ref.md("### 🎯 Potential Hauler Games (Heavy Favorites)"),
+            mo_ref.md(
+                "**One-sided fixtures where favorites have excellent haul potential:**"
+            ),
+        ]
+
+        if hauler_table_data:
+            hauler_df = pd.DataFrame(hauler_table_data)
+            hauler_components.append(mo_ref.ui.table(hauler_df, page_size=10))
+            hauler_components.append(
+                mo_ref.md(
+                    "**💡 Strategy**: Target attacking players from the **favorite teams** "
+                    "in these fixtures for maximum haul potential (goals, assists, clean sheets)."
+                )
             )
         else:
-            hauler_md += (
-                "No highly one-sided fixtures identified in the next 5 gameweeks.\n"
+            hauler_components.append(
+                mo_ref.md(
+                    "No highly one-sided fixtures identified in the next 5 gameweeks."
+                )
             )
 
         # ========== Double Gameweek / Blank Gameweek Check ==========
@@ -1170,7 +1204,7 @@ def create_fixture_difficulty_visualization(
             mo_ref.vstack(
                 [
                     mo_ref.md(analysis_md),
-                    mo_ref.md(hauler_md),
+                    *hauler_components,
                     mo_ref.md(dgw_bgw_md),
                     mo_ref.md("### 📊 Interactive Fixture Difficulty Heatmap"),
                     mo_ref.md(
