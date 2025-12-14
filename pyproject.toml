@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "marimo[mcp]>=0.17.0",
+    "marimo[mcp]>=0.18.4",
     "matplotlib>=3.10.5",
     "numpy>=2.3.2",
     "pandas>=2.3.1",
@@ -30,7 +30,6 @@ dependencies = [
     "shap>=0.49.1",
     "typer>=0.20.0",
     "loguru==0.7.3",
-    "pulp>=2.10.0",
 ]
 
 [dependency-groups]
