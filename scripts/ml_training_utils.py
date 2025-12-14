@@ -741,8 +741,11 @@ def fpl_hauler_capture_scorer(y_true, y_pred, sample_weight=None):
     # What fraction of your top-15 were actual haulers?
     if n_haulers > 0:
         found_haulers = len(top_k_pred_set & hauler_indices)
-        # FIX: Always use K as denominator for consistent scoring across batches
-        hauler_precision = found_haulers / K
+        # Use min(K, n_players) as denominator for fair scoring with small datasets
+        # For large datasets (n_players >> K), this equals K (consistent scoring)
+        # For small datasets (n_players < K), this equals n_players (fair scoring)
+        denominator = min(K, len(top_k_pred))
+        hauler_precision = found_haulers / denominator
         hauler_recall = found_haulers / n_haulers
         # F0.5 (precision-weighted F-score, we care more about precision)
         if hauler_precision + hauler_recall > 0:
