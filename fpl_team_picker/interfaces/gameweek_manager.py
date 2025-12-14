@@ -182,7 +182,9 @@ def _(mo):
 @app.cell
 def _(mo):
     # Gameweek Points Timeseries
-    from fpl_team_picker.visualization.charts import create_gameweek_points_timeseries
+    from fpl_team_picker.visualization.charts import (
+        create_gameweek_points_timeseries,
+    )
 
     # TODO: would be nice to overlay average points per week across FPL
     points_timeline = create_gameweek_points_timeseries(mo)
@@ -570,7 +572,10 @@ def _(gameweek_data, mo):
 
                 players_3gw_subset = players_3gw[merge_cols].copy()
                 players_3gw_subset = players_3gw_subset.rename(
-                    columns={"ml_xP": "xP_3gw", "xP_uncertainty": "xP_uncertainty_3gw"}
+                    columns={
+                        "ml_xP": "xP_3gw",
+                        "xP_uncertainty": "xP_uncertainty_3gw",
+                    }
                 )
                 players_with_xp = players_with_xp.merge(
                     players_3gw_subset,
@@ -596,7 +601,10 @@ def _(gameweek_data, mo):
 
                 players_5gw_subset = players_5gw[merge_cols].copy()
                 players_5gw_subset = players_5gw_subset.rename(
-                    columns={"ml_xP": "xP_5gw", "xP_uncertainty": "xP_uncertainty_5gw"}
+                    columns={
+                        "ml_xP": "xP_5gw",
+                        "xP_uncertainty": "xP_uncertainty_5gw",
+                    }
                 )
                 players_with_xp = players_with_xp.merge(
                     players_5gw_subset,
@@ -873,7 +881,9 @@ def _(mo, players_with_xp):
     # TODO: I don't understand this form multiplier. It doesn't seem useful from first
     # glance
     if not players_with_xp.empty:
-        from fpl_team_picker.visualization.charts import create_form_analytics_display
+        from fpl_team_picker.visualization.charts import (
+            create_form_analytics_display,
+        )
 
         form_analytics_display = create_form_analytics_display(players_with_xp, mo)
     else:
@@ -891,7 +901,9 @@ def _(gameweek_data, mo, players_with_xp):
     if gameweek_data and not players_with_xp.empty:
         _current_squad = gameweek_data.get("current_squad")
         if _current_squad is not None and not _current_squad.empty:
-            from fpl_team_picker.visualization.charts import create_squad_form_analysis
+            from fpl_team_picker.visualization.charts import (
+                create_squad_form_analysis,
+            )
 
             squad_form_content = create_squad_form_analysis(
                 _current_squad, players_with_xp, mo
@@ -912,61 +924,7 @@ def _(gameweek_data, mo, players_with_xp):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 4️⃣ Player Performance Trends
-    """)
-    return
-
-
-@app.cell
-def _(gameweek_data, mo, players_with_xp):
-    # TODO: this section should probably be merged with 4
-    # Player Performance Trends using visualization function
-    if not players_with_xp.empty and gameweek_data:
-        from fpl_team_picker.visualization.charts import (
-            create_player_trends_visualization,
-        )
-
-        player_opts, attr_opts, trends_data = create_player_trends_visualization(
-            players_with_xp
-        )
-
-        trends_display = mo.vstack(
-            [
-                mo.md("### 📈 Player Performance Trends"),
-                mo.md("*Track how players' attributes change over gameweeks*"),
-                mo.md("**🎯 Top Performers (by Expected Points):**"),
-                mo.ui.table(
-                    players_with_xp.nlargest(15, "xP")[
-                        [
-                            "web_name",
-                            "position",
-                            "xP",
-                            "xP_3gw",
-                            "xP_5gw",
-                            "xP_uncertainty",
-                            "price",
-                        ]
-                    ].round(2),
-                    page_size=10,
-                ),
-                mo.md(
-                    "*Use the performance analytics service for detailed historical trends*"
-                ),
-            ]
-        )
-    else:
-        trends_display = mo.md(
-            "### 📈 Player Performance Trends\n⚠️ **Calculate expected points first to enable trends analysis**"
-        )
-
-    trends_display
-    return
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""
-    ## 5️⃣ Team Strength Analysis
+    ## 4️⃣ Team Strength Analysis
     """)
     return
 
@@ -976,7 +934,9 @@ def _(gameweek_input, mo):
     # TODO: I think this section is out of place. It should be moved to the
     # fixture difficulty section
     # Team strength analysis using visualization service
-    from fpl_team_picker.visualization.charts import create_team_strength_visualization
+    from fpl_team_picker.visualization.charts import (
+        create_team_strength_visualization,
+    )
 
     # Initialize once
     team_strength_analysis = None
@@ -997,7 +957,7 @@ def _(gameweek_input, mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 6️⃣ Fixture Difficulty Analysis
+    ## 5️⃣ Fixture Difficulty Analysis
     """)
     return
 
@@ -1026,7 +986,7 @@ def _(gameweek_input, mo):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 7️⃣ Chip Assessment
+    ## 6️⃣ Chip Assessment
 
     **Analyze optimal timing for your chips based on fixture difficulty and DGW opportunities.**
 
@@ -1198,7 +1158,10 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
                             )
                     else:
                         # Fallback without optimal GW calculation
-                        for chip_name, recommendation in chip_recommendations.items():
+                        for (
+                            chip_name,
+                            recommendation,
+                        ) in chip_recommendations.items():
                             _status = recommendation.get("status", "❓")
                             chip_title = recommendation.get(
                                 "chip_name", chip_name.title()
@@ -1252,7 +1215,7 @@ def _(gameweek_data, gameweek_input, mo, players_with_xp):
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 8️⃣ Transfer & Chip Optimization
+    ## 7️⃣ Transfer & Chip Optimization
 
     **Unified optimization for normal gameweeks and chip usage.**
 
@@ -2170,7 +2133,7 @@ def _(
 @app.cell
 def _(mo):
     mo.md(r"""
-    ## 9️⃣ Captain Selection
+    ## 8️⃣ Captain Selection
 
     **Intelligent captain recommendations with situation-aware analysis.**
 
