@@ -46,8 +46,18 @@ class TestAFCONDataLoading:
             test_data = {
                 "tournament_name": "AFCON 2025",
                 "players": [
-                    {"player_id": 381, "web_name": "Salah", "country": "Egypt", "impact": "high"},
-                    {"player_id": 413, "web_name": "Marmoush", "country": "Egypt", "impact": "high"},
+                    {
+                        "player_id": 381,
+                        "web_name": "Salah",
+                        "country": "Egypt",
+                        "impact": "high",
+                    },
+                    {
+                        "player_id": 413,
+                        "web_name": "Marmoush",
+                        "country": "Egypt",
+                        "impact": "high",
+                    },
                 ],
                 "affected_gameweeks": [17, 18, 19],
             }
@@ -160,7 +170,9 @@ class TestGetAFCONPlayerIds:
 
     def test_filter_by_impact_multiple(self, sample_service):
         """Test filtering by multiple impact levels."""
-        player_ids = sample_service.get_afcon_player_ids(impact_filter=["high", "medium"])
+        player_ids = sample_service.get_afcon_player_ids(
+            impact_filter=["high", "medium"]
+        )
         assert player_ids == {381, 413, 587}
 
     def test_filter_by_country(self, sample_service):
@@ -170,7 +182,9 @@ class TestGetAFCONPlayerIds:
 
     def test_filter_by_country_multiple(self, sample_service):
         """Test filtering by multiple countries."""
-        player_ids = sample_service.get_afcon_player_ids(country_filter=["Egypt", "Mali"])
+        player_ids = sample_service.get_afcon_player_ids(
+            country_filter=["Egypt", "Mali"]
+        )
         assert player_ids == {381, 413, 587}
 
     def test_filter_by_impact_and_country(self, sample_service):

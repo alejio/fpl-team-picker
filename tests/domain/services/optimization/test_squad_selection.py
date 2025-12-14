@@ -18,24 +18,114 @@ def sample_squad():
     return pd.DataFrame(
         [
             # 2 GKP
-            {"player_id": 1, "web_name": "GKP1", "position": "GKP", "xP": 5.0, "status": "a"},
-            {"player_id": 2, "web_name": "GKP2", "position": "GKP", "xP": 4.5, "status": "a"},
+            {
+                "player_id": 1,
+                "web_name": "GKP1",
+                "position": "GKP",
+                "xP": 5.0,
+                "status": "a",
+            },
+            {
+                "player_id": 2,
+                "web_name": "GKP2",
+                "position": "GKP",
+                "xP": 4.5,
+                "status": "a",
+            },
             # 5 DEF
-            {"player_id": 3, "web_name": "DEF1", "position": "DEF", "xP": 6.5, "status": "a"},
-            {"player_id": 4, "web_name": "DEF2", "position": "DEF", "xP": 6.0, "status": "a"},
-            {"player_id": 5, "web_name": "DEF3", "position": "DEF", "xP": 5.5, "status": "a"},
-            {"player_id": 6, "web_name": "DEF4", "position": "DEF", "xP": 5.0, "status": "a"},
-            {"player_id": 7, "web_name": "DEF5", "position": "DEF", "xP": 4.5, "status": "a"},
+            {
+                "player_id": 3,
+                "web_name": "DEF1",
+                "position": "DEF",
+                "xP": 6.5,
+                "status": "a",
+            },
+            {
+                "player_id": 4,
+                "web_name": "DEF2",
+                "position": "DEF",
+                "xP": 6.0,
+                "status": "a",
+            },
+            {
+                "player_id": 5,
+                "web_name": "DEF3",
+                "position": "DEF",
+                "xP": 5.5,
+                "status": "a",
+            },
+            {
+                "player_id": 6,
+                "web_name": "DEF4",
+                "position": "DEF",
+                "xP": 5.0,
+                "status": "a",
+            },
+            {
+                "player_id": 7,
+                "web_name": "DEF5",
+                "position": "DEF",
+                "xP": 4.5,
+                "status": "a",
+            },
             # 5 MID
-            {"player_id": 8, "web_name": "MID1", "position": "MID", "xP": 8.0, "status": "a"},
-            {"player_id": 9, "web_name": "MID2", "position": "MID", "xP": 7.5, "status": "a"},
-            {"player_id": 10, "web_name": "MID3", "position": "MID", "xP": 7.0, "status": "a"},
-            {"player_id": 11, "web_name": "MID4", "position": "MID", "xP": 6.5, "status": "a"},
-            {"player_id": 12, "web_name": "MID5", "position": "MID", "xP": 6.0, "status": "a"},
+            {
+                "player_id": 8,
+                "web_name": "MID1",
+                "position": "MID",
+                "xP": 8.0,
+                "status": "a",
+            },
+            {
+                "player_id": 9,
+                "web_name": "MID2",
+                "position": "MID",
+                "xP": 7.5,
+                "status": "a",
+            },
+            {
+                "player_id": 10,
+                "web_name": "MID3",
+                "position": "MID",
+                "xP": 7.0,
+                "status": "a",
+            },
+            {
+                "player_id": 11,
+                "web_name": "MID4",
+                "position": "MID",
+                "xP": 6.5,
+                "status": "a",
+            },
+            {
+                "player_id": 12,
+                "web_name": "MID5",
+                "position": "MID",
+                "xP": 6.0,
+                "status": "a",
+            },
             # 3 FWD
-            {"player_id": 13, "web_name": "FWD1", "position": "FWD", "xP": 9.0, "status": "a"},
-            {"player_id": 14, "web_name": "FWD2", "position": "FWD", "xP": 8.5, "status": "a"},
-            {"player_id": 15, "web_name": "FWD3", "position": "FWD", "xP": 8.0, "status": "a"},
+            {
+                "player_id": 13,
+                "web_name": "FWD1",
+                "position": "FWD",
+                "xP": 9.0,
+                "status": "a",
+            },
+            {
+                "player_id": 14,
+                "web_name": "FWD2",
+                "position": "FWD",
+                "xP": 8.5,
+                "status": "a",
+            },
+            {
+                "player_id": 15,
+                "web_name": "FWD3",
+                "position": "FWD",
+                "xP": 8.0,
+                "status": "a",
+            },
         ]
     )
 
@@ -56,7 +146,15 @@ class TestFindOptimalStarting11:
         )
 
         assert len(starting_11) == 11
-        assert formation in ["3-4-3", "3-5-2", "4-3-3", "4-4-2", "4-5-1", "5-3-2", "5-4-1"]
+        assert formation in [
+            "3-4-3",
+            "3-5-2",
+            "4-3-3",
+            "4-4-2",
+            "4-5-1",
+            "5-3-2",
+            "5-4-1",
+        ]
         assert total_xp > 0
         # Should have exactly 1 GKP
         gkp_count = sum(1 for p in starting_11 if p["position"] == "GKP")
@@ -108,9 +206,7 @@ class TestFindOptimalStarting11:
             ]
         )
 
-        starting_11, formation, total_xp = service.find_optimal_starting_11(
-            small_squad
-        )
+        starting_11, formation, total_xp = service.find_optimal_starting_11(small_squad)
 
         assert starting_11 == []
         assert formation == ""
@@ -120,9 +216,7 @@ class TestFindOptimalStarting11:
         """Test handling of empty squad."""
         empty_squad = pd.DataFrame()
 
-        starting_11, formation, total_xp = service.find_optimal_starting_11(
-            empty_squad
-        )
+        starting_11, formation, total_xp = service.find_optimal_starting_11(empty_squad)
 
         assert starting_11 == []
         assert formation == ""
@@ -169,7 +263,9 @@ class TestFindBenchPlayers:
         """Test bench selection with custom xP column."""
         sample_squad["xP_3gw"] = sample_squad["xP"] * 1.1
         starting_11, _, _ = service.find_optimal_starting_11(sample_squad)
-        bench = service.find_bench_players(sample_squad, starting_11, xp_column="xP_3gw")
+        bench = service.find_bench_players(
+            sample_squad, starting_11, xp_column="xP_3gw"
+        )
 
         assert len(bench) <= 4
 
@@ -224,7 +320,10 @@ class TestCalculateBudgetPool:
 
         assert budget_pool["bank_balance"] == 1.0
         assert budget_pool["sellable_value"] > 0
-        assert budget_pool["total_budget"] == budget_pool["bank_balance"] + budget_pool["sellable_value"]
+        assert (
+            budget_pool["total_budget"]
+            == budget_pool["bank_balance"] + budget_pool["sellable_value"]
+        )
         assert budget_pool["sellable_players"] == 15
 
     def test_calculate_budget_pool_with_players_to_keep(self, service, sample_squad):

@@ -14,9 +14,7 @@ Tests for:
 import pytest
 import pandas as pd
 import numpy as np
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import Mock, patch
 import joblib
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -146,6 +144,7 @@ class TestModelLoading:
         # Create a pipeline with feature_engineer step
         # Use a simple transformer as feature_engineer
         from sklearn.preprocessing import FunctionTransformer
+
         pipeline = Pipeline(
             [
                 ("feature_engineer", FunctionTransformer()),

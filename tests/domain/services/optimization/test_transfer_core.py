@@ -198,9 +198,7 @@ class TestOptimizeTransfers:
         if len(squad_df) > 0:
             assert must_exclude_id not in squad_df["player_id"].values
 
-    def test_optimize_transfers_empty_squad(
-        self, service, sample_players, team_data
-    ):
+    def test_optimize_transfers_empty_squad(self, service, sample_players, team_data):
         """Test optimization with empty squad."""
         empty_squad = pd.DataFrame()
 
@@ -257,7 +255,8 @@ class TestPlanPremiumAcquisition:
     ):
         """Test when no premium targets available."""
         budget_pool = service.calculate_budget_pool(
-            current_squad=current_squad, bank_balance=50.0  # High bank
+            current_squad=current_squad,
+            bank_balance=50.0,  # High bank
         )
 
         scenarios = service.plan_premium_acquisition(
@@ -269,9 +268,7 @@ class TestPlanPremiumAcquisition:
 
         assert scenarios == []  # No premium targets if bank covers all
 
-    def test_plan_premium_acquisition_empty_squad(
-        self, service, sample_players
-    ):
+    def test_plan_premium_acquisition_empty_squad(self, service, sample_players):
         """Test premium acquisition with empty squad."""
         empty_squad = pd.DataFrame()
         budget_pool = {"bank_balance": 1.0, "total_budget": 1.0}
@@ -285,9 +282,7 @@ class TestPlanPremiumAcquisition:
 
         assert scenarios == []
 
-    def test_plan_premium_acquisition_empty_players(
-        self, service, current_squad
-    ):
+    def test_plan_premium_acquisition_empty_players(self, service, current_squad):
         """Test premium acquisition with no available players."""
         empty_players = pd.DataFrame()
         budget_pool = service.calculate_budget_pool(

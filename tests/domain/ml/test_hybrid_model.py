@@ -23,7 +23,6 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from fpl_team_picker.domain.ml.hybrid_model import (
     HybridPositionModel,
     add_position_features,
-    POSITION_FEATURE_ADDITIONS,
 )
 
 
@@ -231,9 +230,13 @@ class TestHybridPositionModelPredict:
 
         # Fit models with simple data
         unified.fit(sample_features[["xP", "price"]], [1.0] * len(sample_features))
-        gkp_data = sample_features[sample_features["position"] == "GKP"][["xP", "price"]]
+        gkp_data = sample_features[sample_features["position"] == "GKP"][
+            ["xP", "price"]
+        ]
         gkp_model.fit(gkp_data, [1.0] * len(gkp_data))
-        fwd_data = sample_features[sample_features["position"] == "FWD"][["xP", "price"]]
+        fwd_data = sample_features[sample_features["position"] == "FWD"][
+            ["xP", "price"]
+        ]
         fwd_model.fit(fwd_data, [1.0] * len(fwd_data))
 
         model = HybridPositionModel(
