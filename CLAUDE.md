@@ -26,7 +26,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **PredictionStorageService**: Save/load committed predictions for accurate performance tracking
 - **AFCONExclusionService**: Tournament-based player exclusions (AFCON 2025: GW17-22)
 
-**Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py, season_planner.py, ml_xp_experiment.py)
+**Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py)
 
 ## Data Loading
 
@@ -336,12 +336,11 @@ Or: `marimo run fpl_team_picker/interfaces/{notebook}.py`
 
 **Code Quality**:
 ```bash
-ruff check fpl_team_picker/ && ruff format fpl_team_picker/
-marimo check fpl_team_picker/interfaces/ --fix
+uv run ruff check fpl_team_picker/ && ruff format fpl_team_picker/
+uv run marimo check fpl_team_picker/interfaces/ --fix
 ```
 
-**Tests**: `pytest tests/domain/services/ -v`
-- Hauler scorers: `pytest tests/domain/services/ml_training/test_scorers.py -v`
+**Tests**: `uv run pytest -n auto --cov=fpl_team_picker/ --cov-report=html -v`
 
 ## Transfer Optimization
 
