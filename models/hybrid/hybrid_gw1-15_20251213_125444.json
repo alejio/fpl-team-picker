@@ -1,0 +1,71 @@
+{
+  "unified_model": "models/custom/gradient-boost_gw1-15_20251213_125350_pipeline.joblib",
+  "unified_regressor": "gradient-boost",
+  "unified_results": {
+    "gradient-boost": {
+      "mae": 1.0092443598679488
+    }
+  },
+  "position_models": {
+    "DEF": "models/position_specific/def_gw1-15*.joblib"
+  },
+  "use_specific_for": [
+    "DEF"
+  ],
+  "unified_positions": [
+    "GKP",
+    "MID",
+    "FWD"
+  ],
+  "comparison_results": {
+    "GKP": {
+      "unified_mae": 0.484815707284911,
+      "specific_mae": 0.5464805975896084,
+      "unified_metric": 0.3144383583079239,
+      "specific_metric": 0.29008487759402823,
+      "improvement": -0.024353480713895648,
+      "improvement_pct": -7.745073102705464,
+      "n_samples": 176,
+      "unified_scorer": 0.3144383583079239,
+      "specific_scorer": 0.29008487759402823
+    },
+    "DEF": {
+      "unified_mae": 1.1658128116994841,
+      "specific_mae": 1.1855769470736468,
+      "unified_metric": 0.29644452399836024,
+      "specific_metric": 0.33696353327250717,
+      "improvement": 0.04051900927414692,
+      "improvement_pct": 13.668327796256088,
+      "n_samples": 499,
+      "unified_scorer": 0.29644452399836024,
+      "specific_scorer": 0.33696353327250717
+    },
+    "MID": {
+      "unified_mae": 1.027438047083108,
+      "specific_mae": 1.0777128019387232,
+      "unified_metric": 0.563402003700682,
+      "specific_metric": 0.24523736830781911,
+      "improvement": -0.31816463539286294,
+      "improvement_pct": -56.472045413933934,
+      "n_samples": 676,
+      "unified_scorer": 0.563402003700682,
+      "specific_scorer": 0.24523736830781911
+    },
+    "FWD": {
+      "unified_mae": 1.0205266058512659,
+      "specific_mae": 1.1621729625503296,
+      "unified_metric": 0.30166566513462645,
+      "specific_metric": 0.23905284261162757,
+      "improvement": -0.06261282252299888,
+      "improvement_pct": -20.755700684417043,
+      "n_samples": 166,
+      "unified_scorer": 0.30166566513462645,
+      "specific_scorer": 0.23905284261162757
+    }
+  },
+  "improvement_threshold": 0.02,
+  "scorer": "fpl_hauler_ceiling",
+  "created_at": "2025-12-13T12:54:44.910606",
+  "end_gw": 15,
+  "holdout_gws": 2
+}

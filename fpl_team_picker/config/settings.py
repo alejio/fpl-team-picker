@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/hybrid/hybrid_gw1-15_20251209_195913.joblib",
+        default="models/hybrid/hybrid_gw1-15_20251213_123304.joblib",
         description="Trained using scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --scorer fpl_hauler_ceiling --n-trials 75",
     )
     ml_ensemble_rule_weight: float = Field(
