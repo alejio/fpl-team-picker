@@ -433,11 +433,6 @@ def _(gameweek_data, mo):
                     custom_path = Path("models/custom") / original_path
                     if custom_path.exists():
                         model_path = custom_path
-                    # Then try models/tpot (for TPOT models)
-                    elif not original_path.exists():
-                        tpot_path = Path("models/tpot") / original_path
-                        if tpot_path.exists():
-                            model_path = tpot_path
                     # Finally try current directory
                     elif original_path.exists():
                         model_path = original_path
@@ -452,15 +447,12 @@ def _(gameweek_data, mo):
                     f"   - Custom Pipeline Optimizer (recommended): "
                     f"uv run python scripts/custom_pipeline_optimizer.py train --end-gw <gw> --use-best-params-from <json>\n"
                     f"   - Or fresh search: uv run python scripts/custom_pipeline_optimizer.py train --regressor random-forest --end-gw <gw>\n"
-                    f"   - Or TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
                     f"   Then set config.xp_model.ml_model_path to the trained .joblib file (e.g., models/custom/random-forest_gw1-10_*.joblib)"
                 )
 
             # Determine model type from path for display
             # TODO: I don't like this if/elif/else but can live with it
-            if "tpot" in model_path.name.lower():
-                model_type_label = "ML Pipeline (TPOT Auto-Optimized)"
-            elif "lgbm" in model_path.name.lower():
+            if "lgbm" in model_path.name.lower():
                 model_type_label = "ML Pipeline (LightGBM)"
             elif "rf" in model_path.name.lower():
                 model_type_label = "ML Pipeline (RandomForest)"

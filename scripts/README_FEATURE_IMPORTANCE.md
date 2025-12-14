@@ -1,6 +1,6 @@
 # Feature Importance Analysis
 
-Comprehensive feature importance analysis script that replicates the TPOT optimizer's feature engineering and training pipeline.
+Comprehensive feature importance analysis script for FPL ML xP prediction model.
 
 ## Overview
 
@@ -130,17 +130,6 @@ Features with correlation |r| > 0.8 are redundant:
 
 5. **Remove redundancy**: Drop one feature from each highly correlated pair
 
-## Integration with TPOT Optimizer
-
-This script uses the **exact same** data loading and feature engineering pipeline as `scripts/tpot_pipeline_optimizer.py`:
-
-- ✅ Same 117 features (65 base + 15 enhanced + 4 set-piece + 15 betting + 18 new)
-- ✅ Same temporal CV splits (walk-forward validation)
-- ✅ Same leak-free feature engineering (only uses past data)
-- ✅ Same data sources (ownership trends, value analysis, betting odds)
-
-Results from this script can directly inform feature selection for TPOT optimization.
-
 ## Performance Notes
 
 - **Without SHAP**: ~2-5 minutes for GW1-9 (depends on CPU cores)
@@ -168,9 +157,8 @@ Results from this script can directly inform feature selection for TPOT optimiza
 After running this analysis:
 
 1. **Feature selection**: Create a reduced feature set using consensus features
-2. **TPOT optimization**: Run TPOT with reduced feature set for faster convergence
-3. **Model improvement**: Address underutilized features with feature engineering
-4. **Redundancy removal**: Drop highly correlated features to reduce overfitting
+2. **Model improvement**: Address underutilized features with feature engineering
+3. **Redundancy removal**: Drop highly correlated features to reduce overfitting
 
 ## References
 

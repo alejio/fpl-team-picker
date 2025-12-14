@@ -1,10 +1,10 @@
 # Custom Pipeline Optimizer
 
-Fully configurable ML pipeline optimizer for FPL expected points prediction. Alternative to TPOT with manual control over feature selection, regressors, preprocessing, and hyperparameter optimization.
+Fully configurable ML pipeline optimizer for FPL expected points prediction. Provides manual control over feature selection, regressors, preprocessing, and hyperparameter optimization.
 
 ## Key Features
 
-- **Manual feature selection** - Keeps penalty/set-piece features that TPOT's RFE drops
+- **Manual feature selection** - Keeps penalty/set-piece features with smart RFE
 - **Multiple regressors** - XGBoost, LightGBM, Random Forest, Gradient Boost, AdaBoost, Ridge, Lasso, ElasticNet
 - **Smart preprocessing** - Standard, grouped (feature-type specific), or robust scaling
 - **Position-aware scorers** - FPL-specific metrics that respect positional constraints

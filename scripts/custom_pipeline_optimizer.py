@@ -10,17 +10,17 @@ This script is deprecated in favor of the unified training CLI:
 
 Custom Pipeline Optimizer for FPL Expected Points Prediction
 
-Fully configurable alternative to TPOT with:
-- Manual control over feature selection (addresses RFE dropping penalty features)
+Fully configurable ML pipeline optimizer with:
+- Manual control over feature selection with smart RFE
 - Choice of regressors (XGBoost, LightGBM, RandomForest, etc.)
 - Hyperparameter optimization via RandomizedSearchCV
-- Identical evaluation to TPOT (temporal CV, same metrics)
+- Temporal CV evaluation with FPL-specific metrics
 - Dual modes: evaluate (fast testing on holdout) or train (full training for deployment)
 - Improved hyperparameter ranges to prevent underfitting
 
-Key Difference from TPOT:
-- TPOT uses RFE which dropped penalty features (perm importance rank 4-8, MDI rank 92-96)
-- This pipeline KEEPS all 117 features or uses smarter feature selection
+Key Features:
+- Smart RFE that preserves important penalty/set-piece features
+- Keeps all 117 features or uses intelligent feature selection
 
 Hyperparameter Improvements (2025-11-22):
 - XGBoost/LightGBM: Increased n_estimators to 200-1500 (was 100-500)

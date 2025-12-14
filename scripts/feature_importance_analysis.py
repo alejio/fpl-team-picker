@@ -2,8 +2,8 @@
 """
 Feature Importance Analysis for FPL ML Expected Points (xP) Prediction
 
-Replicates the feature engineering and training pipeline from TPOT optimizer to
-identify the most important features for FPL xP prediction.
+Analyzes the feature engineering and training pipeline to identify the most
+important features for FPL xP prediction.
 
 Methods used:
 1. Random Forest feature importance (MDI - Mean Decrease in Impurity)
@@ -71,7 +71,7 @@ def load_historical_data(start_gw: int, end_gw: int):
     """
     Load historical gameweek performance data and enhanced data sources.
 
-    Replicates TPOT optimizer data loading pipeline.
+    Uses standard FPL data loading pipeline for ML training.
     """
     client = FPLDataClient()
     historical_data = []
@@ -165,7 +165,7 @@ def engineer_features(
     """
     Engineer features using production FPLFeatureEngineer.
 
-    Replicates TPOT optimizer feature engineering pipeline.
+    Uses standard FPL feature engineering pipeline for ML training.
     """
     print(
         "\n🔧 Engineering features (production FPLFeatureEngineer with 156 features)..."
@@ -277,7 +277,7 @@ def create_temporal_cv_splits(
     """
     Create temporal walk-forward cross-validation splits.
 
-    Replicates TPOT optimizer CV strategy.
+    Uses temporal walk-forward validation strategy for ML training.
     """
     print("\n📊 Creating temporal CV splits (walk-forward validation)...")
 
@@ -767,7 +767,7 @@ def main(args: Any):
     print("=" * 80)
 
     try:
-        # Load data (replicates TPOT optimizer)
+        # Load data
         (
             historical_df,
             fixtures_df,
@@ -778,7 +778,7 @@ def main(args: Any):
             betting_features_df,
         ) = load_historical_data(args.start_gw, args.end_gw)
 
-        # Engineer features (replicates TPOT optimizer)
+        # Engineer features
         features_df, feature_cols = engineer_features(
             historical_df,
             fixtures_df,
@@ -789,7 +789,7 @@ def main(args: Any):
             betting_features_df,
         )
 
-        # Create temporal CV splits (replicates TPOT optimizer)
+        # Create temporal CV splits
         cv_splits, cv_data = create_temporal_cv_splits(features_df)
 
         # Prepare X and y
@@ -888,7 +888,7 @@ def run(
         help="Output directory for plots and CSVs",
     ),
 ):
-    """Run feature importance analysis replicating the TPOT pipeline."""
+    """Run comprehensive feature importance analysis for FPL xP prediction."""
     args = SimpleNamespace(
         start_gw=start_gw,
         end_gw=end_gw,

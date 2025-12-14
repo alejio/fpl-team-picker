@@ -9,12 +9,12 @@ Key Features:
 - Rich 80-feature set: 5GW rolling windows, team context, ownership trends, value analysis
 - Position-specific models (optional) for GKP/DEF/MID/FWD
 - Leak-free temporal features (all features use past data only)
-- Loads .joblib model artifacts trained via TPOT or ml_xp_experiment.py
+- Loads .joblib model artifacts trained via scripts/train_model.py
 - Drop-in replacement for old MLExpectedPointsService (same interface)
 
 Train models using:
-  - TPOT: scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8
-  - Manual: ml_xp_experiment.py interface
+  - scripts/train_model.py unified --end-gw 14 --regressor lightgbm
+  - scripts/train_model.py full-pipeline --end-gw 14
 """
 
 import pandas as pd
@@ -46,8 +46,8 @@ class MLExpectedPointsService:
 
     REQUIRES pre-trained model artifact (no on-the-fly training).
     Train models using:
-      - TPOT: scripts/tpot_pipeline_optimizer.py
-      - Or: ml_xp_experiment.py
+      - scripts/train_model.py unified --end-gw 14 --regressor lightgbm
+      - scripts/train_model.py full-pipeline --end-gw 14
 
     Uses comprehensive 84-feature set with:
     - Base features (65): 5GW rolling form windows, team context, fixtures, price bands
@@ -108,8 +108,8 @@ class MLExpectedPointsService:
         """
         Load a pre-trained pipeline from disk.
 
-        For TPOT models: Wraps the bare sklearn pipeline with FPLFeatureEngineer
-        since TPOT was trained on already-engineered features.
+        For legacy models: Wraps bare sklearn pipelines with FPLFeatureEngineer
+        since they were trained on already-engineered features.
 
         Note: The wrapper pipeline is NOT fitted yet - it will be fitted on
         historical data during the first call to calculate_expected_points().
@@ -138,9 +138,9 @@ class MLExpectedPointsService:
                 self.needs_feature_wrapper = False
                 self.is_hybrid_model = True
             elif not has_feature_engineer:
-                # TPOT model or bare sklearn pipeline - needs feature engineering wrapper
+                # Legacy bare sklearn pipeline - needs feature engineering wrapper
                 self._log_debug(
-                    "⚙️  Bare sklearn pipeline detected (likely TPOT) - will wrap with FPLFeatureEngineer"
+                    "⚙️  Bare sklearn pipeline detected (legacy model) - will wrap with FPLFeatureEngineer"
                 )
 
                 # Store the loaded model - we'll create the wrapper in calculate_expected_points
@@ -165,8 +165,8 @@ class MLExpectedPointsService:
                 f"Failed to load pre-trained model from {self.model_path}: {e}\n"
                 "MLExpectedPointsService requires a valid pre-trained model artifact.\n"
                 "Train a model using:\n"
-                "  - TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
-                "  - Or: Use ml_xp_experiment.py to train and export a model"
+                "  - scripts/train_model.py unified --end-gw 14 --regressor lightgbm\n"
+                "  - scripts/train_model.py full-pipeline --end-gw 14"
             )
 
     def _train_pipeline(
@@ -360,19 +360,19 @@ class MLExpectedPointsService:
                 raise ValueError(
                     "No pre-trained model loaded. MLExpectedPointsService requires a pre-trained model artifact.\n"
                     "Train a model using:\n"
-                    "  - TPOT: uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 8\n"
-                    "  - Or: Use ml_xp_experiment.py to train and export a model\n"
+                    "  - scripts/train_model.py unified --end-gw 14 --regressor lightgbm\n"
+                    "  - scripts/train_model.py full-pipeline --end-gw 14\n"
                     "Then set config.xp_model.ml_model_path to the trained model file."
                 )
             elif getattr(self, "needs_feature_wrapper", False):
-                # TPOT model needs feature engineering wrapper
-                # Create wrapper: [FPLFeatureEngineer -> TPOT Model] and fit on historical data
+                # Legacy model needs feature engineering wrapper
+                # Create wrapper: [FPLFeatureEngineer -> Trained Model] and fit on historical data
                 from sklearn.pipeline import Pipeline as SklearnPipeline
                 from .ml_feature_engineering import FPLFeatureEngineer
                 from .ml_pipeline_factory import get_team_strength_ratings
 
                 self._log_debug(
-                    "🔧 Creating feature engineering wrapper for TPOT model..."
+                    "🔧 Creating feature engineering wrapper for legacy model..."
                 )
 
                 # Use target_gameweek for dynamic team strength (important for fixture difficulty)
@@ -384,17 +384,17 @@ class MLExpectedPointsService:
                 # Validate enhanced data sources for 80-feature model
                 if ownership_trends_df is None or ownership_trends_df.empty:
                     raise ValueError(
-                        "Enhanced ownership trends data required for 80-feature TPOT model. "
+                        "Enhanced ownership trends data required for 80-feature model. "
                         "DataOrchestrationService should provide this in gameweek_data."
                     )
                 if value_analysis_df is None or value_analysis_df.empty:
                     raise ValueError(
-                        "Enhanced value analysis data required for 80-feature TPOT model. "
+                        "Enhanced value analysis data required for 80-feature model. "
                         "DataOrchestrationService should provide this in gameweek_data."
                     )
                 if fixture_difficulty_df is None or fixture_difficulty_df.empty:
                     raise ValueError(
-                        "Enhanced fixture difficulty data required for 80-feature TPOT model. "
+                        "Enhanced fixture difficulty data required for 80-feature model. "
                         "DataOrchestrationService should provide this in gameweek_data."
                     )
 
@@ -418,13 +418,13 @@ class MLExpectedPointsService:
                 )
 
                 # Create wrapper pipeline
-                tpot_model = self.pipeline  # Save reference to loaded TPOT model
+                trained_model = self.pipeline  # Save reference to loaded trained model
                 # Wrapper pipeline: feature engineering + trained model
                 wrapper_pipeline = SklearnPipeline(
-                    [("feature_engineer", feature_engineer), ("model", tpot_model)]
+                    [("feature_engineer", feature_engineer), ("model", trained_model)]
                 )
 
-                # Fit ONLY the feature_engineer step (TPOT model is already fitted)
+                # Fit ONLY the feature_engineer step (trained model is already fitted)
                 # We fit on historical data so rolling features are calculated correctly
                 self._log_debug(
                     f"   Fitting feature_engineer on {len(live_data)} historical samples..."

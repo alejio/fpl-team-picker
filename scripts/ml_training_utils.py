@@ -2,7 +2,7 @@
 Reusable ML training utilities for FPL expected points prediction.
 
 This module extracts common data loading, preprocessing, and evaluation logic
-used across different modeling approaches (TPOT, custom pipelines, experiments).
+used across different modeling approaches (custom pipelines, experiments).
 
 Ensures "apples to apples" comparison by standardizing:
 - Data loading (GW range, features, target)

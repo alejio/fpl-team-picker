@@ -149,18 +149,6 @@ uv run python scripts/train_model.py evaluate --model-path models/hybrid/model.j
 - Usage: `uv run python scripts/fetch_top_manager_ids.py [num_managers]`
 - Saves to `experiments/top_manager_ids.json` and `experiments/top_manager_ids.txt`
 
-**TPOT (Reference)** (`scripts/tpot_pipeline_optimizer.py`):
-- MAE=1.752, Spearman=0.794 (trained 8hrs with fpl_weighted_huber)
-- **Not recommended for production** - inferior accuracy, predicted Kudus > Haaland (incorrect)
-- Use for comparison/exploration only
-- Quick start: `uv run python scripts/tpot_pipeline_optimizer.py --start-gw 1 --end-gw 9 --scorer fpl_weighted_huber --max-time-mins 480`
-
-**GW10 Empirical Validation** (`experiments/GW10_MODEL_COMPARISON_REPORT.md`):
-- Custom RF vs TPOT tested on held-out GW10 data
-- Custom RF: 43.6% better MAE, correctly ranked Haaland > Kudus
-- TPOT: Systematically overestimated Kudus, leading to captain failure
-- Conclusion: Custom RF is production-ready, TPOT deprecated
-
 ## Expected Points Models
 
 **PRIMARY: ML-Based** (`MLExpectedPointsService`):
@@ -429,6 +417,6 @@ See `fpl_rules.md`. Key: 2 GKP, 5 DEF, 5 MID, 3 FWD; £100m budget; max 3 player
 
 ## Tech Stack
 
-uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, tpot, pytest, ruff, fpl-dataset-builder
+uv (don't forget to use uv), Python 3.13+, marimo, pandas, numpy, plotly, pydantic, xgboost, scikit-learn, lightgbm, pytest, ruff, fpl-dataset-builder
 
 **Architecture**: Clean Architecture, frontend-agnostic, boundary validation, domain services, type-safe Pydantic models, repository pattern, 48/48 tests passing
