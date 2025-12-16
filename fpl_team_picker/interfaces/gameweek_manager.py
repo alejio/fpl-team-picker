@@ -1671,7 +1671,19 @@ def _(
     _current_button_state = (
         save_predictions_button.value if save_predictions_button else False
     )
-    is_new_click = _current_button_state and not _save_processed_flag
+    # Ensure _save_processed_flag has a safe default value
+    # Handle case where it might not be defined due to circular dependency on first run
+    try:
+        _save_processed_flag_safe = (
+            _save_processed_flag if _save_processed_flag is not None else False
+        )
+    except NameError:
+        _save_processed_flag_safe = False
+    is_new_click = _current_button_state and not _save_processed_flag_safe
+
+    # Initialize return flag with current processed state
+    # Will be updated to True if we process a new click
+    _save_handler_return_flag = _save_processed_flag_safe
 
     # Return flag: True if we processed a click, otherwise maintain current state
     if is_new_click:
@@ -1744,7 +1756,7 @@ def _(
             )
     else:
         # Maintain current processed flag state (don't reset here, let reset cell handle it)
-        _save_handler_return_flag = _save_processed_flag
+        _save_handler_return_flag = _save_processed_flag_safe
 
     # Display save message if present (must be last expression for Marimo)
     _display_message = save_message
