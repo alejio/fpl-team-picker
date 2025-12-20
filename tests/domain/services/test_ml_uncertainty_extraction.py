@@ -23,6 +23,22 @@ except ImportError:
 from fpl_team_picker.domain.services.ml_expected_points_service import (
     MLExpectedPointsService,
 )
+from sklearn.base import BaseEstimator, TransformerMixin
+
+
+class DummyFeatureSelector(BaseEstimator, TransformerMixin):
+    """Dummy feature selector for testing."""
+
+    def __init__(self, feature_names):
+        self.feature_names = feature_names
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        if isinstance(X, pd.DataFrame):
+            return X[self.feature_names]
+        return X
 
 
 class TestUncertaintyExtraction:
@@ -501,6 +517,256 @@ class TestUncertaintyExtraction:
             "Uncertainty array length should match input"
         )
         assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+
+    def test_hybrid_model_uncertainty_extraction(self):
+        """Test that HybridPositionModel can extract uncertainty from underlying models"""
+        from fpl_team_picker.domain.ml.hybrid_model import HybridPositionModel
+        from sklearn.base import BaseEstimator, TransformerMixin
+
+        # Create a dummy feature engineer that preserves position
+        class DummyFeatureEngineer(BaseEstimator, TransformerMixin):
+            """Dummy feature engineer that just passes through data with position"""
+
+            def fit(self, X, y=None):
+                return self
+
+            def transform(self, X):
+                # Ensure position is preserved
+                result = X.copy()
+                if "position" not in result.columns and isinstance(X, pd.DataFrame):
+                    # If position is missing, add it from index or create dummy
+                    result["position"] = "GKP"  # Default, will be overridden
+                return result
+
+        # Create pipelines for unified and position-specific models
+        # Use Random Forest for all models to ensure uncertainty extraction works
+        unified_pipeline = Pipeline(
+            [
+                ("feature_selector", DummyFeatureSelector(["xP", "price"])),
+                ("regressor", RandomForestRegressor(n_estimators=50, random_state=42)),
+            ]
+        )
+
+        gkp_pipeline = Pipeline(
+            [
+                ("feature_selector", DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"])),
+                ("regressor", RandomForestRegressor(n_estimators=50, random_state=42)),
+            ]
+        )
+
+        fwd_pipeline = Pipeline(
+            [
+                ("feature_selector", DummyFeatureSelector(["xP", "price", "xg_x_minutes"])),
+                ("regressor", RandomForestRegressor(n_estimators=50, random_state=42)),
+            ]
+        )
+
+        # Create training data for each model
+        np.random.seed(42)
+        n_train = 100
+
+        # Unified model training data (DEF, MID)
+        unified_X_train = pd.DataFrame(
+            {
+                "xP": np.random.randn(n_train) * 2 + 5,
+                "price": np.random.randn(n_train) * 2 + 7,
+            }
+        )
+        unified_y_train = (
+            unified_X_train["xP"] * 0.8 + unified_X_train["price"] * 0.2 + np.random.randn(n_train) * 0.5
+        )
+        unified_pipeline.fit(unified_X_train, unified_y_train)
+
+        # GKP model training data
+        gkp_X_train = pd.DataFrame(
+            {
+                "xP": np.random.randn(n_train) * 2 + 4,
+                "price": np.random.randn(n_train) * 1 + 5,
+                "saves_x_opp_xg": np.random.randn(n_train) * 3 + 2,
+            }
+        )
+        gkp_y_train = (
+            gkp_X_train["xP"] * 0.7
+            + gkp_X_train["price"] * 0.1
+            + gkp_X_train["saves_x_opp_xg"] * 0.2
+            + np.random.randn(n_train) * 0.5
+        )
+        gkp_pipeline.fit(gkp_X_train, gkp_y_train)
+
+        # FWD model training data
+        fwd_X_train = pd.DataFrame(
+            {
+                "xP": np.random.randn(n_train) * 2 + 7,
+                "price": np.random.randn(n_train) * 3 + 10,
+                "xg_x_minutes": np.random.randn(n_train) * 2 + 1.5,
+            }
+        )
+        fwd_y_train = (
+            fwd_X_train["xP"] * 0.6
+            + fwd_X_train["price"] * 0.2
+            + fwd_X_train["xg_x_minutes"] * 0.2
+            + np.random.randn(n_train) * 0.5
+        )
+        fwd_pipeline.fit(fwd_X_train, fwd_y_train)
+
+        # Create hybrid model
+        hybrid_model = HybridPositionModel(
+            unified_model=unified_pipeline,
+            position_models={"GKP": gkp_pipeline, "FWD": fwd_pipeline},
+            use_specific_for=["GKP", "FWD"],
+        )
+
+        # Create service and set up hybrid model
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = hybrid_model
+        service.is_hybrid_model = True
+
+        # Create a dummy feature engineer for the service
+        service._hybrid_feature_engineer = DummyFeatureEngineer()
+
+        # Create test data with all positions
+        X_test = pd.DataFrame(
+            {
+                "player_id": [1, 2, 3, 4, 5, 6, 7, 8],
+                "position": ["GKP", "GKP", "DEF", "DEF", "MID", "MID", "FWD", "FWD"],
+                "xP": [4.5, 5.0, 6.0, 5.5, 7.0, 6.5, 8.0, 7.5],
+                "price": [5.0, 5.5, 6.0, 5.5, 8.0, 7.5, 11.0, 10.0],
+                "saves_x_opp_xg": [2.0, 2.5, 0, 0, 0, 0, 0, 0],
+                "xg_x_minutes": [0, 0, 0, 0, 0, 0, 1.8, 2.0],
+            }
+        )
+
+        # Extract uncertainty using the hybrid method
+        uncertainty = service._extract_uncertainty_hybrid(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test), (
+            "Uncertainty array length should match input"
+        )
+        assert all(uncertainty >= 0), "Uncertainty should be non-negative"
+
+        # At least some samples should have non-zero uncertainty
+        # (Random Forest should produce variance across trees)
+        assert any(uncertainty > 0), (
+            "At least some samples should have non-zero uncertainty from ensemble models"
+        )
+
+        # Check that different positions have uncertainty extracted
+        gkp_uncertainty = uncertainty[X_test["position"] == "GKP"]
+        def_uncertainty = uncertainty[X_test["position"] == "DEF"]
+        mid_uncertainty = uncertainty[X_test["position"] == "MID"]
+        fwd_uncertainty = uncertainty[X_test["position"] == "FWD"]
+
+        print(f"\nHybrid Model Uncertainty by Position:")
+        print(f"  GKP: mean={gkp_uncertainty.mean():.4f}, max={gkp_uncertainty.max():.4f}")
+        print(f"  DEF: mean={def_uncertainty.mean():.4f}, max={def_uncertainty.max():.4f}")
+        print(f"  MID: mean={mid_uncertainty.mean():.4f}, max={mid_uncertainty.max():.4f}")
+        print(f"  FWD: mean={fwd_uncertainty.mean():.4f}, max={fwd_uncertainty.max():.4f}")
+
+        # Position-specific models (GKP, FWD) should have uncertainty
+        assert any(gkp_uncertainty > 0), "GKP position should have non-zero uncertainty"
+        assert any(fwd_uncertainty > 0), "FWD position should have non-zero uncertainty"
+
+        # Unified model (DEF, MID) should also have uncertainty
+        assert any(def_uncertainty > 0), "DEF position should have non-zero uncertainty"
+        assert any(mid_uncertainty > 0), "MID position should have non-zero uncertainty"
+
+        # Overall mean uncertainty should be reasonable (not all zeros)
+        assert uncertainty.mean() > 0, (
+            f"Mean uncertainty should be positive, got {uncertainty.mean()}"
+        )
+
+    @pytest.mark.skipif(not XGBOOST_AVAILABLE, reason="XGBoost not installed")
+    def test_hybrid_model_with_xgboost_uncertainty(self):
+        """Test hybrid model uncertainty extraction with XGBoost models"""
+        from fpl_team_picker.domain.ml.hybrid_model import HybridPositionModel
+        from sklearn.base import BaseEstimator, TransformerMixin
+
+        # Create a dummy feature engineer
+        class DummyFeatureEngineer(BaseEstimator, TransformerMixin):
+            def fit(self, X, y=None):
+                return self
+
+            def transform(self, X):
+                return X.copy()
+
+        # Create XGBoost pipelines
+        unified_pipeline = Pipeline(
+            [
+                ("feature_selector", DummyFeatureSelector(["xP", "price"])),
+                ("regressor", XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42)),
+            ]
+        )
+
+        gkp_pipeline = Pipeline(
+            [
+                ("feature_selector", DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"])),
+                ("regressor", XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42)),
+            ]
+        )
+
+        # Train models
+        np.random.seed(42)
+        n_train = 100
+
+        unified_X_train = pd.DataFrame(
+            {
+                "xP": np.random.randn(n_train) * 2 + 5,
+                "price": np.random.randn(n_train) * 2 + 7,
+            }
+        )
+        unified_y_train = (
+            unified_X_train["xP"] * 0.8 + unified_X_train["price"] * 0.2 + np.random.randn(n_train) * 0.5
+        )
+        unified_pipeline.fit(unified_X_train, unified_y_train)
+
+        gkp_X_train = pd.DataFrame(
+            {
+                "xP": np.random.randn(n_train) * 2 + 4,
+                "price": np.random.randn(n_train) * 1 + 5,
+                "saves_x_opp_xg": np.random.randn(n_train) * 3 + 2,
+            }
+        )
+        gkp_y_train = (
+            gkp_X_train["xP"] * 0.7
+            + gkp_X_train["price"] * 0.1
+            + gkp_X_train["saves_x_opp_xg"] * 0.2
+            + np.random.randn(n_train) * 0.5
+        )
+        gkp_pipeline.fit(gkp_X_train, gkp_y_train)
+
+        # Create hybrid model
+        hybrid_model = HybridPositionModel(
+            unified_model=unified_pipeline,
+            position_models={"GKP": gkp_pipeline},
+            use_specific_for=["GKP"],
+        )
+
+        # Create service
+        service = MLExpectedPointsService(debug=True)
+        service.pipeline = hybrid_model
+        service.is_hybrid_model = True
+        service._hybrid_feature_engineer = DummyFeatureEngineer()
+
+        # Create test data
+        X_test = pd.DataFrame(
+            {
+                "position": ["GKP", "GKP", "DEF", "DEF", "MID", "MID"],
+                "xP": [4.5, 5.0, 6.0, 5.5, 7.0, 6.5],
+                "price": [5.0, 5.5, 6.0, 5.5, 8.0, 7.5],
+                "saves_x_opp_xg": [2.0, 2.5, 0, 0, 0, 0],
+            }
+        )
+
+        # Extract uncertainty
+        uncertainty = service._extract_uncertainty_hybrid(X_test)
+
+        # Assertions
+        assert len(uncertainty) == len(X_test)
+        assert all(uncertainty >= 0)
+        assert any(uncertainty > 0), "XGBoost models should produce non-zero uncertainty"
+
+        print(f"\nXGBoost Hybrid Uncertainty: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}")
 
 
 if __name__ == "__main__":

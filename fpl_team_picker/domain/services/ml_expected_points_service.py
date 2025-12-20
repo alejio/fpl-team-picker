@@ -1199,10 +1199,9 @@ class MLExpectedPointsService:
         if self.pipeline is None:
             return np.zeros(len(X))
 
-        # HybridPositionModel doesn't support uncertainty extraction (yet)
-        # Return zeros for now - could aggregate from underlying models in future
+        # Handle HybridPositionModel: extract uncertainty from underlying models per position
         if getattr(self, "is_hybrid_model", False):
-            return np.zeros(len(X))
+            return self._extract_uncertainty_hybrid(X)
 
         # Get the underlying model
         if not hasattr(self.pipeline, "named_steps"):
@@ -1759,6 +1758,467 @@ class MLExpectedPointsService:
         # No uncertainty available for non-ensemble models (Ridge, Lasso, ElasticNet)
         self._log_debug(
             f"Model type {type(actual_model).__name__} does not support uncertainty extraction - returning zeros"
+        )
+        return np.zeros(len(X))
+
+    def _extract_uncertainty_hybrid(self, X: pd.DataFrame) -> np.ndarray:
+        """
+        Extract uncertainty from HybridPositionModel by routing to appropriate underlying models.
+
+        For each position, extracts uncertainty from the model used for that position
+        (unified model or position-specific model).
+
+        Args:
+            X: Raw feature matrix (will be transformed through hybrid feature engineer)
+
+        Returns:
+            Array of standard deviations (one per sample), aligned with input order
+        """
+        if not hasattr(self, "_hybrid_feature_engineer"):
+            _service_logger.warning(
+                "Hybrid model detected but no feature engineer available - returning zeros"
+            )
+            return np.zeros(len(X))
+
+        # Transform features using hybrid feature engineer
+        engineered_features = self._hybrid_feature_engineer.transform(X)
+
+        # Ensure position column is preserved (required for routing)
+        if "position" not in engineered_features.columns:
+            if "position" in X.columns:
+                engineered_features["position"] = X["position"].values
+            else:
+                _service_logger.error(
+                    "Position column missing from engineered features and input data"
+                )
+                return np.zeros(len(X))
+
+        # Get the hybrid model
+        hybrid_model = self.pipeline
+
+        # Initialize uncertainty array
+        uncertainty = np.zeros(len(X))
+
+        # Process each position group
+        for position in ["GKP", "DEF", "MID", "FWD"]:
+            # Find rows for this position
+            pos_mask = engineered_features["position"] == position
+
+            if not pos_mask.any():
+                continue
+
+            # Get the appropriate model for this position
+            if position in hybrid_model.use_specific_for:
+                model_pipeline = hybrid_model.position_models[position]
+            else:
+                model_pipeline = hybrid_model.unified_model
+
+            # Get position-specific data
+            pos_data = engineered_features.loc[pos_mask].copy()
+
+            # Add position-specific features if needed (same as in HybridPositionModel.predict)
+            if position in hybrid_model.use_specific_for:
+                from fpl_team_picker.domain.ml.hybrid_model import add_position_features
+
+                pos_data = add_position_features(pos_data, position)
+
+            # Get the features this model expects
+            # The pipeline might have a feature_selector step, or we need to use all features
+            feature_selector = model_pipeline.named_steps.get("feature_selector")
+            if feature_selector is not None:
+                feature_names = feature_selector.feature_names
+                # Extract only the features the model needs (in correct order)
+                pos_data_features = pos_data[feature_names]
+            else:
+                # No feature selector - use all features except position
+                feature_names = [c for c in pos_data.columns if c != "position"]
+                pos_data_features = pos_data[feature_names]
+
+            # Log what we're about to extract uncertainty from
+            self._log_debug(
+                f"  Extracting uncertainty for {position}: {len(pos_data_features)} samples, "
+                f"{len(feature_names)} features, pipeline steps: {list(model_pipeline.named_steps.keys())}"
+            )
+
+            # Extract uncertainty from this model's pipeline
+            pos_uncertainty = self._extract_uncertainty_from_pipeline(
+                model_pipeline, pos_data_features
+            )
+
+            # Log per-position uncertainty for debugging
+            self._log_debug(
+                f"  {position}: {pos_uncertainty.sum()} players, "
+                f"mean uncertainty: {pos_uncertainty.mean():.3f}, "
+                f"range: {pos_uncertainty.min():.3f}-{pos_uncertainty.max():.3f}"
+            )
+
+            # Store in result array (maintaining original order)
+            uncertainty[pos_mask] = pos_uncertainty
+
+        self._log_debug(
+            f"✅ Extracted uncertainty from hybrid model. "
+            f"Mean uncertainty: {uncertainty.mean():.3f}, "
+            f"Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+        )
+
+        return uncertainty
+
+    def _extract_uncertainty_from_pipeline(
+        self, pipeline: Pipeline, X: pd.DataFrame
+    ) -> np.ndarray:
+        """
+        Extract uncertainty from a single sklearn Pipeline.
+
+        This is a helper method that extracts uncertainty from a pipeline
+        without relying on self.pipeline, allowing it to be used for
+        hybrid model's underlying pipelines.
+
+        Args:
+            pipeline: sklearn Pipeline to extract uncertainty from
+            X: Feature matrix (already transformed through feature engineering)
+
+        Returns:
+            Array of standard deviations (one per sample)
+        """
+        if pipeline is None:
+            return np.zeros(len(X))
+
+        # Get the underlying model
+        if not hasattr(pipeline, "named_steps"):
+            self._log_debug("Pipeline does not have named_steps - returning zeros")
+            return np.zeros(len(X))
+
+        # Try both "model" and "regressor" as step names (different pipelines use different names)
+        model = pipeline.named_steps.get("model") or pipeline.named_steps.get(
+            "regressor"
+        )
+        if model is None:
+            available_steps = list(pipeline.named_steps.keys())
+            self._log_debug(
+                f"Model step not found in pipeline. Available steps: {available_steps} - returning zeros"
+            )
+            return np.zeros(len(X))
+
+        # Debug: log what we got from the pipeline
+        self._log_debug(
+            f"Extracted model step type: {type(model).__name__}, "
+            f"is Pipeline: {isinstance(model, Pipeline) if hasattr(Pipeline, '__module__') else 'N/A'}"
+        )
+
+        # Import ensemble model types
+        from sklearn.ensemble import (
+            RandomForestRegressor,
+            GradientBoostingRegressor,
+            AdaBoostRegressor,
+        )
+
+        try:
+            from xgboost import XGBRegressor
+        except ImportError:
+            XGBRegressor = None
+
+        try:
+            from lightgbm import LGBMRegressor
+        except ImportError:
+            LGBMRegressor = None
+
+        # Transform through pipeline steps before the model
+        # Use the pipeline's transform method to apply all preprocessing steps
+        # This ensures we get the same transformation as during prediction
+        X_transformed = X.copy()
+        try:
+            # Get all steps except the final model/regressor step
+            pipeline_steps = list(pipeline.named_steps.items())
+            model_step_name = None
+            for step_name, step_obj in pipeline_steps:
+                if step_name in ["model", "regressor"]:
+                    model_step_name = step_name
+                    break
+
+            if model_step_name:
+                # Transform through all steps before the model
+                for step_name, step_transformer in pipeline_steps:
+                    if step_name == model_step_name:
+                        break
+                    try:
+                        X_transformed = step_transformer.transform(X_transformed)
+                    except Exception as e:
+                        self._log_debug(
+                            f"Warning: Failed to transform through step '{step_name}': {e}. "
+                            f"Using features from previous step."
+                        )
+                        # Continue with previous transformation
+                        break
+        except Exception as e:
+            self._log_debug(
+                f"Warning: Failed to transform through pipeline steps: {e}. Using original features."
+            )
+
+        # Now extract the actual model (which might be nested)
+        # The model step might be a pipeline itself, or a meta-estimator, or the actual model
+        actual_model = model
+
+        # Check if model is actually a Pipeline (not just has steps attribute)
+        from sklearn.pipeline import Pipeline as SklearnPipeline
+        from sklearn.feature_selection import RFE, RFECV
+
+        if isinstance(model, SklearnPipeline):
+            # It's a pipeline, extract the final estimator
+            if hasattr(model, "steps") and len(model.steps) > 0:
+                actual_model = model.steps[-1][1]
+                self._log_debug(
+                    f"Extracted from Pipeline.steps: {type(actual_model).__name__}"
+                )
+            elif hasattr(model, "named_steps") and len(model.named_steps) > 0:
+                # It's a pipeline with named steps, get the last one
+                last_step_name = list(model.named_steps.keys())[-1]
+                actual_model = model.named_steps[last_step_name]
+                self._log_debug(
+                    f"Extracted from Pipeline.named_steps: {type(actual_model).__name__}"
+                )
+        elif isinstance(model, (RFE, RFECV)) or (
+            hasattr(model, "estimator_")
+            and hasattr(model, "transform")
+            and not isinstance(
+                model,
+                (RandomForestRegressor, GradientBoostingRegressor, AdaBoostRegressor),
+            )
+        ):
+            # It's a meta-estimator (e.g., RFE) - but NOT an ensemble model
+            # Ensemble models like RandomForestRegressor also have estimator_ but we want the ensemble itself
+            actual_model = model.estimator_
+            self._log_debug(
+                f"Extracted from meta-estimator.estimator_: {type(actual_model).__name__}"
+            )
+
+            # If it's a meta-estimator, we need to transform through it
+            if hasattr(model, "transform"):
+                try:
+                    X_transformed = model.transform(X_transformed)
+                except Exception as e:
+                    self._log_debug(
+                        f"Warning: Failed to transform through meta-estimator {type(model).__name__}: {e}"
+                    )
+        else:
+            # Model is the actual estimator itself (could be ensemble or single estimator)
+            self._log_debug(
+                f"Model is already the estimator: {type(actual_model).__name__}"
+            )
+
+        # Log what we extracted for debugging
+        self._log_debug(
+            f"Final extracted model type: {type(actual_model).__name__} from pipeline step '{model_step_name}'"
+        )
+
+        # Special check: if we got a DecisionTreeRegressor but expected RandomForestRegressor,
+        # it means we accidentally extracted a single tree
+        if type(actual_model).__name__ == "DecisionTreeRegressor":
+            self._log_debug(
+                f"WARNING: Extracted DecisionTreeRegressor instead of ensemble. "
+                f"Model type: {type(model).__name__}, "
+                f"Has estimators_: {hasattr(model, 'estimators_')}"
+            )
+
+        # Extract tree predictions for Random Forest
+        if isinstance(actual_model, RandomForestRegressor):
+            try:
+                # Get predictions from each tree
+                tree_predictions = np.array(
+                    [tree.predict(X_transformed) for tree in actual_model.estimators_]
+                )
+
+                # Calculate standard deviation across trees
+                uncertainty = np.std(tree_predictions, axis=0)
+
+                self._log_debug(
+                    f"✅ Extracted RF uncertainty from {len(actual_model.estimators_)} trees. "
+                    f"Mean: {uncertainty.mean():.3f}, Range: {uncertainty.min():.3f}-{uncertainty.max():.3f}"
+                )
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract Random Forest uncertainty: {e}"
+                )
+                return np.zeros(len(X))
+
+        # Extract tree predictions for XGBoost
+        if XGBRegressor and isinstance(actual_model, XGBRegressor):
+            try:
+                import xgboost as xgb
+
+                # Ensure X_transformed is a DataFrame
+                if not isinstance(X_transformed, pd.DataFrame):
+                    X_transformed = pd.DataFrame(X_transformed)
+
+                dmatrix = xgb.DMatrix(X_transformed)
+
+                # Get the booster object
+                booster = actual_model.get_booster()
+
+                # Get number of trees
+                n_trees = len(booster.get_dump())
+
+                if n_trees == 0:
+                    return np.zeros(len(X))
+
+                # Get cumulative predictions at each iteration
+                cumulative_preds = []
+                for i in range(n_trees):
+                    pred = booster.predict(dmatrix, iteration_range=(0, i + 1))
+                    cumulative_preds.append(pred)
+
+                # Convert to array: shape (n_iterations, n_samples)
+                cumulative_preds = np.array(cumulative_preds)
+
+                # Calculate individual tree contributions
+                tree_contributions = np.zeros_like(cumulative_preds)
+                tree_contributions[0] = cumulative_preds[0]
+                for i in range(1, n_trees):
+                    tree_contributions[i] = (
+                        cumulative_preds[i] - cumulative_preds[i - 1]
+                    )
+
+                # Transpose to shape (n_samples, n_trees)
+                tree_contributions = tree_contributions.T
+
+                # Calculate standard deviation across tree contributions
+                uncertainty = np.std(tree_contributions, axis=1)
+
+                # Scale by learning rate
+                learning_rate = getattr(actual_model, "learning_rate", 0.3)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(f"Failed to extract XGBoost uncertainty: {e}")
+                return np.zeros(len(X))
+
+        # Extract tree predictions for LightGBM
+        if LGBMRegressor and isinstance(actual_model, LGBMRegressor):
+            try:
+                # Get number of trees
+                n_trees = actual_model.booster_.num_trees()
+
+                if n_trees == 0:
+                    return np.zeros(len(X))
+
+                # Get predictions from individual trees
+                tree_predictions = []
+                for i in range(n_trees):
+                    pred = actual_model.booster_.predict(
+                        X_transformed, num_iteration=i + 1
+                    )
+                    tree_predictions.append(pred)
+
+                # Convert to array: shape (n_trees, n_samples)
+                tree_predictions = np.array(tree_predictions)
+
+                # Calculate individual tree contributions
+                tree_contributions = np.zeros_like(tree_predictions)
+                tree_contributions[0] = tree_predictions[0]
+                for i in range(1, n_trees):
+                    tree_contributions[i] = (
+                        tree_predictions[i] - tree_predictions[i - 1]
+                    )
+
+                # Transpose to shape (n_samples, n_trees)
+                tree_contributions = tree_contributions.T
+
+                # Calculate standard deviation across tree contributions
+                uncertainty = np.std(tree_contributions, axis=1)
+
+                # Scale by learning rate
+                learning_rate = getattr(actual_model, "learning_rate", 0.3)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(f"Failed to extract LightGBM uncertainty: {e}")
+                return np.zeros(len(X))
+
+        # Extract staged predictions for GradientBoosting
+        if isinstance(actual_model, GradientBoostingRegressor):
+            try:
+                # Get number of estimators
+                n_estimators = len(actual_model.estimators_)
+
+                if n_estimators == 0:
+                    return np.zeros(len(X))
+
+                # Use staged_predict to get cumulative predictions at each stage
+                staged_preds = list(actual_model.staged_predict(X_transformed))
+
+                # Convert to array: shape (n_stages, n_samples)
+                staged_preds = np.array(staged_preds)
+
+                # Calculate individual tree contributions
+                tree_contributions = np.zeros_like(staged_preds)
+                tree_contributions[0] = staged_preds[0]
+                for i in range(1, len(staged_preds)):
+                    tree_contributions[i] = staged_preds[i] - staged_preds[i - 1]
+
+                # Transpose to shape (n_samples, n_stages)
+                tree_contributions = tree_contributions.T
+
+                # Calculate standard deviation across tree contributions
+                uncertainty = np.std(tree_contributions, axis=1)
+
+                # Scale by learning rate
+                learning_rate = getattr(actual_model, "learning_rate", 0.3)
+                if learning_rate > 0:
+                    uncertainty = uncertainty / learning_rate
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(
+                    f"Failed to extract GradientBoosting uncertainty: {e}"
+                )
+                return np.zeros(len(X))
+
+        # Extract staged predictions for AdaBoost
+        if isinstance(actual_model, AdaBoostRegressor):
+            try:
+                # Get number of estimators
+                n_estimators = len(actual_model.estimators_)
+
+                if n_estimators == 0:
+                    return np.zeros(len(X))
+
+                # Use staged_predict to get cumulative predictions at each stage
+                staged_preds = list(actual_model.staged_predict(X_transformed))
+
+                # Convert to array: shape (n_stages, n_samples)
+                staged_preds = np.array(staged_preds)
+
+                # Calculate individual estimator contributions
+                estimator_contributions = np.zeros_like(staged_preds)
+                estimator_contributions[0] = staged_preds[0]
+                for i in range(1, len(staged_preds)):
+                    estimator_contributions[i] = staged_preds[i] - staged_preds[i - 1]
+
+                # Transpose to shape (n_samples, n_stages)
+                estimator_contributions = estimator_contributions.T
+
+                # Calculate standard deviation across estimator contributions
+                uncertainty = np.std(estimator_contributions, axis=1)
+
+                return uncertainty
+
+            except Exception as e:
+                _service_logger.error(f"Failed to extract AdaBoost uncertainty: {e}")
+                return np.zeros(len(X))
+
+        # No uncertainty available for non-ensemble models
+        model_type = type(actual_model).__name__
+        self._log_debug(
+            f"Model type {model_type} does not support uncertainty extraction - returning zeros"
         )
         return np.zeros(len(X))
 
