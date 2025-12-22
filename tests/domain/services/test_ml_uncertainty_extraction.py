@@ -549,14 +549,20 @@ class TestUncertaintyExtraction:
 
         gkp_pipeline = Pipeline(
             [
-                ("feature_selector", DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"])),
+                (
+                    "feature_selector",
+                    DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"]),
+                ),
                 ("regressor", RandomForestRegressor(n_estimators=50, random_state=42)),
             ]
         )
 
         fwd_pipeline = Pipeline(
             [
-                ("feature_selector", DummyFeatureSelector(["xP", "price", "xg_x_minutes"])),
+                (
+                    "feature_selector",
+                    DummyFeatureSelector(["xP", "price", "xg_x_minutes"]),
+                ),
                 ("regressor", RandomForestRegressor(n_estimators=50, random_state=42)),
             ]
         )
@@ -573,7 +579,9 @@ class TestUncertaintyExtraction:
             }
         )
         unified_y_train = (
-            unified_X_train["xP"] * 0.8 + unified_X_train["price"] * 0.2 + np.random.randn(n_train) * 0.5
+            unified_X_train["xP"] * 0.8
+            + unified_X_train["price"] * 0.2
+            + np.random.randn(n_train) * 0.5
         )
         unified_pipeline.fit(unified_X_train, unified_y_train)
 
@@ -658,10 +666,18 @@ class TestUncertaintyExtraction:
         fwd_uncertainty = uncertainty[X_test["position"] == "FWD"]
 
         print(f"\nHybrid Model Uncertainty by Position:")
-        print(f"  GKP: mean={gkp_uncertainty.mean():.4f}, max={gkp_uncertainty.max():.4f}")
-        print(f"  DEF: mean={def_uncertainty.mean():.4f}, max={def_uncertainty.max():.4f}")
-        print(f"  MID: mean={mid_uncertainty.mean():.4f}, max={mid_uncertainty.max():.4f}")
-        print(f"  FWD: mean={fwd_uncertainty.mean():.4f}, max={fwd_uncertainty.max():.4f}")
+        print(
+            f"  GKP: mean={gkp_uncertainty.mean():.4f}, max={gkp_uncertainty.max():.4f}"
+        )
+        print(
+            f"  DEF: mean={def_uncertainty.mean():.4f}, max={def_uncertainty.max():.4f}"
+        )
+        print(
+            f"  MID: mean={mid_uncertainty.mean():.4f}, max={mid_uncertainty.max():.4f}"
+        )
+        print(
+            f"  FWD: mean={fwd_uncertainty.mean():.4f}, max={fwd_uncertainty.max():.4f}"
+        )
 
         # Position-specific models (GKP, FWD) should have uncertainty
         assert any(gkp_uncertainty > 0), "GKP position should have non-zero uncertainty"
@@ -694,14 +710,23 @@ class TestUncertaintyExtraction:
         unified_pipeline = Pipeline(
             [
                 ("feature_selector", DummyFeatureSelector(["xP", "price"])),
-                ("regressor", XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42)),
+                (
+                    "regressor",
+                    XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42),
+                ),
             ]
         )
 
         gkp_pipeline = Pipeline(
             [
-                ("feature_selector", DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"])),
-                ("regressor", XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42)),
+                (
+                    "feature_selector",
+                    DummyFeatureSelector(["xP", "price", "saves_x_opp_xg"]),
+                ),
+                (
+                    "regressor",
+                    XGBRegressor(n_estimators=50, learning_rate=0.1, random_state=42),
+                ),
             ]
         )
 
@@ -716,7 +741,9 @@ class TestUncertaintyExtraction:
             }
         )
         unified_y_train = (
-            unified_X_train["xP"] * 0.8 + unified_X_train["price"] * 0.2 + np.random.randn(n_train) * 0.5
+            unified_X_train["xP"] * 0.8
+            + unified_X_train["price"] * 0.2
+            + np.random.randn(n_train) * 0.5
         )
         unified_pipeline.fit(unified_X_train, unified_y_train)
 
@@ -764,9 +791,13 @@ class TestUncertaintyExtraction:
         # Assertions
         assert len(uncertainty) == len(X_test)
         assert all(uncertainty >= 0)
-        assert any(uncertainty > 0), "XGBoost models should produce non-zero uncertainty"
+        assert any(uncertainty > 0), (
+            "XGBoost models should produce non-zero uncertainty"
+        )
 
-        print(f"\nXGBoost Hybrid Uncertainty: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}")
+        print(
+            f"\nXGBoost Hybrid Uncertainty: mean={uncertainty.mean():.4f}, max={uncertainty.max():.4f}"
+        )
 
 
 if __name__ == "__main__":

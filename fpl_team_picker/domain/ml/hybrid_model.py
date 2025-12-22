@@ -284,10 +284,32 @@ class HybridPositionModel:
 
         # Validate all rows were predicted
         if not predicted_mask.all():
-            unpredicted_positions = X.loc[~predicted_mask, "position"].unique()
-            raise ValueError(
-                f"Some rows were not predicted. Unknown positions: {unpredicted_positions}"
-            )
+            unpredicted_rows = X.loc[~predicted_mask]
+            unpredicted_positions = unpredicted_rows["position"].unique()
+
+            # Provide detailed error message
+            error_msg = f"Some rows were not predicted. Unknown positions: {unpredicted_positions}"
+
+            # If we have player_id, include it in the error
+            if "player_id" in unpredicted_rows.columns:
+                null_pos_mask = unpredicted_rows["position"].isna()
+                if null_pos_mask.any():
+                    null_player_ids = unpredicted_rows[null_pos_mask][
+                        "player_id"
+                    ].unique()
+                    error_msg += (
+                        f"\nPlayer IDs with NaN positions: {list(null_player_ids)[:20]}"
+                    )
+
+                # Also show any non-null but unrecognized positions
+                non_null_unpredicted = unpredicted_rows[
+                    ~unpredicted_rows["position"].isna()
+                ]
+                if not non_null_unpredicted.empty:
+                    unrecognized_positions = non_null_unpredicted["position"].unique()
+                    error_msg += f"\nUnrecognized position values: {list(unrecognized_positions)}"
+
+            raise ValueError(error_msg)
 
         return predictions
 
