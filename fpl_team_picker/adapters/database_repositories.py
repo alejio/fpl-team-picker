@@ -27,7 +27,7 @@ class RawPlayerData(BaseModel):
     team_id: int = Field(..., ge=1, le=20, description="Team ID must be 1-20")
     price_gbp: Optional[float] = Field(None, ge=0.0, description="Price in GBP")
     now_cost: Optional[int] = Field(
-        None, ge=39, le=150, description="Price in 0.1m units"
+        None, ge=39, le=200, description="Price in 0.1m units"
     )
     selected_by_percent: Optional[str] = Field(
         None, description="Selection percentage as string"
@@ -41,8 +41,8 @@ class RawPlayerData(BaseModel):
     @classmethod
     def validate_price_gbp(cls, v: Optional[float]) -> Optional[float]:
         """Validate GBP price if provided."""
-        if v is not None and (v < 3.9 or v > 15.0):
-            raise ValueError(f"Price must be between £3.9m and £15.0m, got {v}")
+        if v is not None and (v < 3.9 or v > 20.0):
+            raise ValueError(f"Price must be between £3.9m and £20.0m, got {v}")
         return v
 
     @field_validator("selected_by_percent")
@@ -73,7 +73,7 @@ class RawEnrichedPlayerData(BaseModel):
     second_name: Optional[str] = Field(None)
     team_id: int = Field(..., ge=1, le=20)
     position_id: int = Field(..., ge=1, le=4, description="Position ID 1-4")
-    now_cost: int = Field(..., ge=38, le=150, description="Price in 0.1m units")
+    now_cost: int = Field(..., ge=38, le=200, description="Price in 0.1m units")
     selected_by_percent: str = Field(..., description="Selection percentage")
     status: str = Field(default="a", description="Availability status")
     as_of_utc: datetime = Field(..., description="Data timestamp")
