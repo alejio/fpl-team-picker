@@ -146,7 +146,7 @@ class TransferPlanningAgentService:
 
         Args:
             start_gameweek: Starting gameweek number
-            planning_horizon: Number of gameweeks to plan (2-5)
+            planning_horizon: Number of gameweeks to plan (1, 3, or 5)
             current_squad: DataFrame with current 15-player squad
             gameweek_data: Dict containing all required data (players, teams, fixtures, etc.)
             strategy_mode: Planning strategy to use

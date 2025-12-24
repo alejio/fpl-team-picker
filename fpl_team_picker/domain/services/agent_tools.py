@@ -62,7 +62,7 @@ def get_multi_gw_xp_predictions(
     Args:
         ctx: Agent context with data dependencies
         start_gameweek: Starting gameweek number
-        num_gameweeks: Number of gameweeks to predict (2-5)
+        num_gameweeks: Number of gameweeks to predict (1, 3, or 5)
 
     Returns:
         Dictionary with:
@@ -83,7 +83,30 @@ def get_multi_gw_xp_predictions(
         )
 
         # Calculate multi-GW predictions
-        if num_gameweeks == 3:
+        if num_gameweeks == 1:
+            predictions_df = ml_service.calculate_expected_points(
+                players_data=deps.players_data,
+                teams_data=deps.teams_data,
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
+                fixtures_data=deps.fixtures_data,
+                target_gameweek=start_gameweek,
+                live_data=deps.live_data,
+                gameweeks_ahead=1,
+                ownership_trends_df=deps.ownership_trends,
+                value_analysis_df=deps.value_analysis,
+                fixture_difficulty_df=deps.fixture_difficulty,
+                betting_features_df=deps.betting_features,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
+                players_enhanced_df=deps.players_enhanced,
+            )
+            # Rename ml_xP to match expected format and add xP_gw1 column
+            if "ml_xP" in predictions_df.columns:
+                predictions_df["xP_gw1"] = predictions_df["ml_xP"]
+        elif num_gameweeks == 3:
             predictions_df = ml_service.calculate_3gw_expected_points(
                 players_data=deps.players_data,
                 teams_data=deps.teams_data,
@@ -122,7 +145,9 @@ def get_multi_gw_xp_predictions(
                 players_enhanced_df=deps.players_enhanced,
             )
         else:
-            raise ValueError(f"Unsupported horizon: {num_gameweeks} (must be 3 or 5)")
+            raise ValueError(
+                f"Unsupported horizon: {num_gameweeks} (must be 1, 3, or 5)"
+            )
 
         # Format for agent consumption - select relevant columns
         relevant_cols = [
@@ -193,10 +218,11 @@ def get_multi_gw_xp_predictions(
 get_multi_gw_xp_predictions.__doc__ = """
 Get expected points predictions for multiple future gameweeks.
 
-Use this tool to see how players are projected to perform over the next 2-5 gameweeks.
+Use this tool to see how players are projected to perform over the next 1, 3, or 5 gameweeks.
 Returns per-gameweek breakdowns (xP_gw1, xP_gw2, etc.) and total xP across the horizon.
 
 Example usage:
+- To see 1-gameweek projections: get_multi_gw_xp_predictions(start_gameweek=17, num_gameweeks=1)
 - To see 3-gameweek projections: get_multi_gw_xp_predictions(start_gameweek=17, num_gameweeks=3)
 - To see 5-gameweek projections: get_multi_gw_xp_predictions(start_gameweek=17, num_gameweeks=5)
 

@@ -4,6 +4,7 @@
 Test script for the LLM-based multi-gameweek transfer planning agent.
 
 Usage:
+    python scripts/multi_gw_agent.py --gameweek 18 --horizon 1 --strategy balanced
     python scripts/multi_gw_agent.py --gameweek 18 --horizon 3 --strategy balanced
 
 Dependencies:
@@ -40,7 +41,7 @@ app = typer.Typer(
 @app.command()
 def main(
     gameweek: int = typer.Option(18, help="Gameweek to plan for"),
-    horizon: int = typer.Option(3, help="Planning horizon"),
+    horizon: int = typer.Option(3, help="Planning horizon (1, 3, or 5 gameweeks)"),
     strategy: str = typer.Option("balanced", help="Planning strategy"),
 ):
     logger.info("🤖 Multi-GW Transfer Planning Agent\n")
