@@ -11,6 +11,7 @@ try:
     from .team_analytics_service import TeamAnalyticsService
     from .xp_calibration_service import XPCalibrationService
     from .prediction_storage_service import PredictionStorageService
+    from .transfer_planning_agent_service import TransferPlanningAgentService
 
     __all__ = [
         "DataOrchestrationService",
@@ -23,6 +24,7 @@ try:
         "TeamAnalyticsService",
         "XPCalibrationService",
         "PredictionStorageService",
+        "TransferPlanningAgentService",
     ]
 except ImportError:
     # Handle import errors gracefully during development

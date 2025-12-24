@@ -25,6 +25,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
 - **PredictionStorageService**: Save/load committed predictions for accurate performance tracking
 - **AFCONExclusionService**: Tournament-based player exclusions (AFCON 2025: GW17-22)
+- **TransferPlanningAgentService**: LLM-based multi-GW transfer planning using Claude Agent SDK
 
 **Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py)
 
@@ -349,6 +350,47 @@ uv run marimo check fpl_team_picker/interfaces/ --fix
 - **Ceiling bonus**: Adds bonus for high-upside players (ceiling > 10) when `ceiling_bonus_enabled=True`
 - Used for weekly transfers (1-3 players), wildcards, and initial squad generation
 - Typical runtime: ~10-45 seconds depending on iterations
+
+## Multi-Gameweek Transfer Planning Agent
+
+**TransferPlanningAgentService** - LLM-based reasoning agent for strategic multi-GW transfer planning using Claude Agent SDK and pydantic-ai.
+
+**Capabilities:**
+- **Multi-GW Horizon**: Plan 2-5 gameweeks ahead (default: 3 GW)
+- **Strategic Modes**: balanced, conservative, aggressive, dgw_stacker
+- **Transfer Banking**: Recommends when to hold FTs vs execute transfers
+- **Hit Analysis**: Configurable ROI threshold for taking hits (default: +5 xP for -4 hit)
+- **Week-by-week Planning**: Sequential transfer recommendations with reasoning
+
+**Usage:**
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+uv run python scripts/multi_gw_agent.py --gameweek 18 --horizon 3 --strategy balanced
+```
+
+**Agent Tools:**
+- `get_multi_gw_xp_predictions`: Wraps MLExpectedPointsService for 3/5 GW xP forecasting
+- More tools coming in Phase 2-4 (DGW detection, fixture swings, SA optimizer integration)
+
+**Configuration** (`TransferPlanningAgentConfig`):
+- `model`: Claude model (default: "claude-sonnet-4-5", can use "claude-haiku-3-7" for speed)
+- `default_horizon`: Planning horizon in gameweeks (default: 3)
+- `default_strategy`: "balanced", "conservative", "aggressive", "dgw_stacker"
+- `default_hit_roi_threshold`: Minimum xP gain for -4 hit (default: 5.0)
+- `max_iterations`: Max agent iterations (default: 10)
+- `timeout_seconds`: Max execution time (default: 120s)
+
+**Output** (`MultiGWPlan` Pydantic model):
+- Week-by-week transfer plans with reasoning
+- Expected xP vs baseline for each week
+- Hit costs and net ROI
+- Opportunities identified (fixture runs, hauls)
+- Risk analysis (best/worst case scenarios)
+- Template comparison
+
+**Status**: Phase 1 complete (core backend). Phase 2-4 pending (additional tools, validation, UI).
+
+See: `scripts/README_MULTI_GW_AGENT.md` for detailed usage.
 
 ## AFCON Player Exclusions (GW16-22, 2025-26 Season)
 

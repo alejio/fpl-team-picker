@@ -3,6 +3,13 @@
 from .fixture import FixtureDomain
 from .player import AvailabilityStatus, LiveDataDomain, PlayerDomain, Position
 from .team import TeamDomain
+from .transfer_plan import (
+    AgentState,
+    MultiGWPlan,
+    StrategyMode,
+    Transfer,
+    WeeklyTransferPlan,
+)
 
 __all__ = [
     "FixtureDomain",
@@ -11,4 +18,9 @@ __all__ = [
     "Position",
     "AvailabilityStatus",
     "TeamDomain",
+    "Transfer",
+    "WeeklyTransferPlan",
+    "MultiGWPlan",
+    "AgentState",
+    "StrategyMode",
 ]

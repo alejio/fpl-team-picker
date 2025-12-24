@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/hybrid/hybrid_gw1-15_20251213_123304.joblib",
+        default="models/hybrid/hybrid_gw1-16_20251220_012735.joblib",
         description="Trained using scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --scorer fpl_hauler_ceiling --n-trials 75",
     )
     ml_ensemble_rule_weight: float = Field(
@@ -584,6 +584,80 @@ class OptimizationConfig(BaseModel):
     )
 
 
+class TransferPlanningAgentConfig(BaseModel):
+    """Multi-Gameweek Transfer Planning Agent Configuration"""
+
+    # Agent model settings
+    api_key: str | None = Field(
+        default=None,
+        description="Anthropic API key (reads from ANTHROPIC_API_KEY env var if not set)",
+    )
+    model: str = Field(
+        default="claude-sonnet-4-5",
+        description="Anthropic model for transfer planning agent. Use sonnet for quality, haiku for speed.",
+    )
+    max_iterations: int = Field(
+        default=10,
+        description="Maximum agent iterations to prevent infinite loops",
+        ge=1,
+        le=20,
+    )
+    temperature: float = Field(
+        default=0.7,
+        description="Model temperature - some creativity for strategic planning",
+        ge=0.0,
+        le=2.0,
+    )
+
+    # Planning defaults
+    default_horizon: int = Field(
+        default=3,
+        description="Default planning horizon in gameweeks",
+        ge=2,
+        le=5,
+    )
+    default_strategy: str = Field(
+        default="balanced",
+        description="Default strategy mode: balanced, conservative, aggressive, dgw_stacker",
+    )
+    default_hit_roi_threshold: float = Field(
+        default=5.0,
+        description="Default minimum xP gain required for -4 hit",
+        ge=3.0,
+        le=10.0,
+    )
+
+    # Performance settings
+    cache_enabled: bool = Field(
+        default=True,
+        description="Cache tool results within agent session for performance",
+    )
+    timeout_seconds: int = Field(
+        default=120,
+        description="Maximum time for agent execution in seconds",
+        ge=30,
+        le=600,
+    )
+
+    # Safety constraints
+    validate_all_plans: bool = Field(
+        default=True,
+        description="Always validate plans before returning to user",
+    )
+    max_hits_per_week: int = Field(
+        default=2,
+        description="Never recommend more than N hits in a single week",
+        ge=0,
+        le=5,
+    )
+
+    # Debug settings
+    debug: bool = Field(
+        default=False,
+        description="Enable verbose agent logging for debugging",
+    )
+
+
 class VisualizationConfig(BaseModel):
     """Visualization and Display Configuration"""
 
@@ -803,6 +877,10 @@ class FPLConfig(BaseModel):
     captain_selection: CaptainSelectionConfig = Field(
         default_factory=CaptainSelectionConfig,
         description="Intelligent Captain Selection Configuration",
+    )
+    transfer_planning_agent: TransferPlanningAgentConfig = Field(
+        default_factory=TransferPlanningAgentConfig,
+        description="Multi-GW Transfer Planning Agent Configuration",
     )
 
     @model_validator(mode="after")
