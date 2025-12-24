@@ -87,7 +87,9 @@ def get_multi_gw_xp_predictions(
             predictions_df = ml_service.calculate_3gw_expected_points(
                 players_data=deps.players_data,
                 teams_data=deps.teams_data,
-                xg_rates_data=deps.xg_rates or pd.DataFrame(),
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
                 fixtures_data=deps.fixtures_data,
                 target_gameweek=start_gameweek,
                 live_data=deps.live_data,
@@ -95,16 +97,18 @@ def get_multi_gw_xp_predictions(
                 value_analysis_df=deps.value_analysis,
                 fixture_difficulty_df=deps.fixture_difficulty,
                 betting_features_df=deps.betting_features,
-                player_metrics_df=deps.player_metrics,
-                player_availability_df=deps.player_availability,
-                team_form_df=deps.team_form,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
                 players_enhanced_df=deps.players_enhanced,
             )
         elif num_gameweeks == 5:
             predictions_df = ml_service.calculate_5gw_expected_points(
                 players_data=deps.players_data,
                 teams_data=deps.teams_data,
-                xg_rates_data=deps.xg_rates or pd.DataFrame(),
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
                 fixtures_data=deps.fixtures_data,
                 target_gameweek=start_gameweek,
                 live_data=deps.live_data,
@@ -112,9 +116,9 @@ def get_multi_gw_xp_predictions(
                 value_analysis_df=deps.value_analysis,
                 fixture_difficulty_df=deps.fixture_difficulty,
                 betting_features_df=deps.betting_features,
-                player_metrics_df=deps.player_metrics,
-                player_availability_df=deps.player_availability,
-                team_form_df=deps.team_form,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
                 players_enhanced_df=deps.players_enhanced,
             )
         else:

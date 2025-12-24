@@ -237,10 +237,10 @@ Think step-by-step and explain your reasoning clearly.
         result = agent.run_sync(user_prompt, deps=deps, output_type=MultiGWPlan)
 
         logger.info(
-            f"✅ Plan generated: {result.data.total_transfers} transfers, ROI={result.data.net_roi:.1f}"
+            f"✅ Plan generated: {result.output.total_transfers} transfers, ROI={result.output.net_roi:.1f}"
         )
 
-        return result.data
+        return result.output
 
     def _format_squad(self, squad_df: pd.DataFrame) -> str:
         """Format current squad for display in prompt."""
