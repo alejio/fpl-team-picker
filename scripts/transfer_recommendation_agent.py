@@ -82,13 +82,13 @@ def main(
     try:
         # Validate inputs
         if not (1 <= gameweek <= 38):
-            console.print(
+            logger.error(
                 f"[red]Error: gameweek must be 1-38, got {gameweek}[/red]", style="bold"
             )
             raise typer.Exit(1)
 
         if not (3 <= num_options <= 5):
-            console.print(
+            logger.error(
                 f"[red]Error: num-options must be 3-5, got {num_options}[/red]",
                 style="bold",
             )
@@ -98,7 +98,7 @@ def main(
             strategy_mode = StrategyMode(strategy.lower())
         except ValueError:
             valid_strategies = [s.value for s in StrategyMode]
-            console.print(
+            logger.error(
                 f"[red]Error: strategy must be one of {valid_strategies}, got '{strategy}'[/red]",
                 style="bold",
             )
@@ -112,33 +112,33 @@ def main(
             logger.remove()
             logger.add(sys.stderr, level="INFO")
 
-        console.print(
+        logger.info(
             "\n[bold cyan]🤖 Transfer Recommendation Agent[/bold cyan]", style="bold"
         )
-        console.print(
+        logger.info(
             f"[cyan]Target: GW{gameweek} | Strategy: {strategy_mode.value} | Options: {num_options} | ROI Threshold: +{roi_threshold} xP[/cyan]\n"
         )
 
         # Load gameweek data
-        console.print("[yellow]📊 Loading gameweek data...[/yellow]")
+        logger.info("[yellow]📊 Loading gameweek data...[/yellow]")
         data_service = DataOrchestrationService()
         gw_data = data_service.load_gameweek_data(gameweek)
 
         # Get current squad (15 players)
         current_squad = gw_data["current_squad"]
         if len(current_squad) != 15:
-            console.print(
+            logger.error(
                 f"[red]Error: Expected 15-player squad, got {len(current_squad)}[/red]",
                 style="bold",
             )
             raise typer.Exit(1)
 
         # Initialize agent service
-        console.print("[yellow]🧠 Initializing agent service...[/yellow]")
+        logger.info("[yellow]🧠 Initializing agent service...[/yellow]")
         agent_service = TransferPlanningAgentService(model=model, debug=debug)
 
         # Generate recommendations
-        console.print(
+        logger.info(
             "[yellow]🔍 Agent analyzing transfer options (this may take 30-60 seconds)...[/yellow]\n"
         )
         recommendations = agent_service.generate_single_gw_recommendations(
@@ -151,33 +151,33 @@ def main(
         )
 
         # Print formatted output
-        print_recommendations(recommendations, console)
+        print_recommendations(recommendations, logger)
 
-        console.print("\n[green]✅ Recommendations generated successfully![/green]\n")
+        logger.info("\n[green]✅ Recommendations generated successfully![/green]\n")
 
     except KeyboardInterrupt:
-        console.print("\n[yellow]⚠️  Interrupted by user[/yellow]")
+        logger.info("\n[yellow]⚠️  Interrupted by user[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        console.print(f"\n[red]❌ Error: {e}[/red]", style="bold")
+        logger.error(f"\n[red]❌ Error: {e}[/red]", style="bold")
         if debug:
             logger.exception("Full traceback:")
         raise typer.Exit(1)
 
 
-def print_recommendations(rec: SingleGWRecommendation, console: Console):
+def print_recommendations(rec: SingleGWRecommendation):
     """Print recommendations in rich formatted output."""
 
     # Header
-    console.print(
+    logger.info(
         f"\n[bold cyan]📊 Transfer Recommendations for GW{rec.target_gameweek}[/bold cyan]\n"
     )
-    console.print(
+    logger.info(
         f"[cyan]Budget: £{rec.budget_available:.1f}m | Free Transfers: {rec.current_free_transfers}[/cyan]\n"
     )
 
     # Hold option
-    console.print("[bold yellow]🛑 HOLD OPTION (Baseline)[/bold yellow]")
+    logger.info("[bold yellow]🛑 HOLD OPTION (Baseline)[/bold yellow]")
     hold_table = Table(show_header=False, box=None, padding=(0, 2))
     hold_table.add_row("GW1 xP:", f"[green]{rec.hold_option.xp_gw1:.1f}[/green] points")
     hold_table.add_row("3GW xP:", f"[green]{rec.hold_option.xp_3gw:.1f}[/green] points")
@@ -185,8 +185,8 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
         "Next Week FTs:", f"[cyan]{rec.hold_option.free_transfers_next_week}[/cyan]"
     )
     hold_table.add_row("Reasoning:", f"[white]{rec.hold_option.reasoning}[/white]")
-    console.print(hold_table)
-    console.print()
+    logger.info(hold_table)
+    logger.info()
 
     # Transfer scenarios
     for i, scenario in enumerate(rec.recommended_scenarios, 1):
@@ -194,7 +194,7 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
         star = "⭐" if is_top else "📍"
         style = "bold green" if is_top else "bold white"
 
-        console.print(
+        logger.info(
             f"[{style}]{star} OPTION {i}: {scenario.scenario_id.upper()}[/{style}]"
         )
 
@@ -216,7 +216,7 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
                     f"[{cost_style}]{cost_str}[/{cost_style}]",
                 )
 
-            console.print(transfer_table)
+            logger.info(transfer_table)
 
         # Metrics table
         metrics_table = Table(show_header=False, box=None, padding=(0, 2))
@@ -256,7 +256,7 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
                 f"[{deviation_color}]{scenario.sa_deviation:+.1f}[/{deviation_color}] xP vs optimizer",
             )
 
-        console.print(metrics_table)
+        logger.info(metrics_table)
 
         # Context flags
         flags = []
@@ -268,24 +268,24 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
             flags.append("[magenta]Chip Prep[/magenta]")
 
         if flags:
-            console.print(f"  Flags: {' | '.join(flags)}")
+            logger.info(f"  Flags: {' | '.join(flags)}")
 
         # Reasoning
-        console.print(f"  [white italic]{scenario.reasoning}[/white italic]")
-        console.print()
+        logger.info(f"  [white italic]{scenario.reasoning}[/white italic]")
+        logger.info()
 
     # Final recommendation
-    console.print("[bold green]🏆 TOP RECOMMENDATION[/bold green]")
+    logger.info("[bold green]🏆 TOP RECOMMENDATION[/bold green]")
     top_rec_table = Table(show_header=False, box=None, padding=(0, 2))
     top_rec_table.add_row(
         "Choice:", f"[bold cyan]{rec.top_recommendation_id}[/bold cyan]"
     )
     top_rec_table.add_row("Reasoning:", f"[white]{rec.final_reasoning}[/white]")
-    console.print(top_rec_table)
+    logger.info(top_rec_table)
 
     # Context analysis summary
     if rec.context_analysis:
-        console.print("\n[bold]📋 Context Analysis[/bold]")
+        logger.info("\n[bold]📋 Context Analysis[/bold]")
         context_table = Table(show_header=False, box=None, padding=(0, 2))
 
         if "dgw_opportunities" in rec.context_analysis:
@@ -310,7 +310,7 @@ def print_recommendations(rec: SingleGWRecommendation, console: Console):
                 f"[magenta]{rec.context_analysis['chip_timing']}[/magenta]",
             )
 
-        console.print(context_table)
+        logger.info(context_table)
 
 
 if __name__ == "__main__":
