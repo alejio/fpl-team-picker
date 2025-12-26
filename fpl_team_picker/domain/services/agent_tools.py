@@ -239,6 +239,17 @@ def get_multi_gw_xp_predictions(
                 f"Unsupported horizon: {num_gameweeks} (must be 1, 3, or 5)"
             )
 
+        # Add team_name by merging with teams data (critical for LLM accuracy)
+        # Prevents hallucinations where LLM uses outdated training data for player-team associations
+        if "team_name" not in predictions_df.columns:
+            # Merge on team_id to get current team name
+            teams_for_merge = deps.teams_data[["team_id", "name"]].rename(
+                columns={"name": "team_name"}
+            )
+            predictions_df = predictions_df.merge(
+                teams_for_merge, on="team_id", how="left"
+            )
+
         # Format for agent consumption - select relevant columns
         relevant_cols = [
             "player_id",
