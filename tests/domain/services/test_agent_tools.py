@@ -476,7 +476,7 @@ class TestRunSAOptimizer:
             )
 
         # Test invalid num_transfers
-        with pytest.raises(ValueError, match="num_transfers must be 1-15"):
+        with pytest.raises(ValueError, match="num_transfers must be 0-15"):
             run_sa_optimizer(
                 ctx=mock_context_for_sa,
                 current_squad_ids=list(range(1, 16)),
@@ -501,6 +501,38 @@ class TestRunSAOptimizer:
                 num_transfers=1,
                 target_gameweek=18,
                 horizon=7,  # Invalid
+            )
+
+    def test_run_sa_optimizer_missing_players_hold_error(self, mock_context_for_sa):
+        """Test that holding with missing players raises an error."""
+        # Squad has player ID 999 which doesn't exist in players_data
+        # (mock_context_for_sa only has players 1-20)
+        with pytest.raises(
+            ValueError,
+            match="Cannot hold squad with .* missing player.*Minimum transfers required",
+        ):
+            run_sa_optimizer(
+                ctx=mock_context_for_sa,
+                current_squad_ids=list(range(1, 15)) + [999],  # 14 valid + 1 missing
+                num_transfers=0,  # Hold option
+                target_gameweek=18,
+            )
+
+    def test_run_sa_optimizer_missing_players_insufficient_transfers(
+        self, mock_context_for_sa
+    ):
+        """Test that insufficient transfers with missing players raises an error."""
+        # Squad has 2 missing players (998, 999) but only 1 transfer planned
+        with pytest.raises(
+            ValueError,
+            match="Cannot complete 1 transfer.*when 2 player.*are missing",
+        ):
+            run_sa_optimizer(
+                ctx=mock_context_for_sa,
+                current_squad_ids=list(range(1, 14))
+                + [998, 999],  # 13 valid + 2 missing
+                num_transfers=1,  # Not enough transfers
+                target_gameweek=18,
             )
 
     @patch("fpl_team_picker.domain.services.agent_tools.OptimizationService")
@@ -597,8 +629,18 @@ class TestRunSAOptimizer:
                 {"player_id": 6, "web_name": "Player6", "price": 6.0},
             ],
             "transfers_in": [
-                {"player_id": 42, "web_name": "NewPlayer1", "price": 5.5, "position": "MID"},
-                {"player_id": 43, "web_name": "NewPlayer2", "price": 6.5, "position": "FWD"},
+                {
+                    "player_id": 42,
+                    "web_name": "NewPlayer1",
+                    "price": 5.5,
+                    "position": "MID",
+                },
+                {
+                    "player_id": 43,
+                    "web_name": "NewPlayer2",
+                    "price": 6.5,
+                    "position": "FWD",
+                },
             ],
         }
         mock_opt_service.optimize_transfers.return_value = (
@@ -712,6 +754,37 @@ class TestAnalyzeSquadWeaknesses:
         assert len(result["low_xp_players"]) == 3
         assert all(p["xp_gw1"] < 3.0 for p in result["low_xp_players"])
         assert result["summary"]["total_weaknesses"] >= 3
+
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
+    def test_analyze_squad_weaknesses_with_missing_players(
+        self, mock_ml_service_class, mock_context_with_squad
+    ):
+        """Test that missing players are flagged as critical weaknesses."""
+        mock_service = Mock()
+        # ML service only returns 14 players (ID 999 is missing)
+        mock_service.calculate_expected_points.return_value = pd.DataFrame(
+            {
+                "player_id": list(range(1, 15)),  # Only 14 players
+                "web_name": [f"Player{i}" for i in range(1, 15)],
+                "position": ["GKP", "GKP"] + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 2,
+                "team_id": [1] * 14,
+                "ml_xP": [5.0] * 14,
+            }
+        )
+        mock_ml_service_class.return_value = mock_service
+
+        # Call with 15 squad IDs, but only 14 exist in players_data
+        result = analyze_squad_weaknesses(
+            ctx=mock_context_with_squad,
+            current_squad_ids=list(range(1, 15)) + [999],  # ID 999 doesn't exist
+            target_gameweek=18,
+        )
+
+        # Check that missing player is flagged
+        assert len(result["missing_players"]) == 1
+        assert result["missing_players"][0]["player_id"] == 999
+        assert "not available" in result["missing_players"][0]["reason"]
+        assert result["summary"]["total_weaknesses"] >= 1
 
 
 class TestGetTemplatePlayers:

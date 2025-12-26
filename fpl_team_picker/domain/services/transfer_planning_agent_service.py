@@ -26,6 +26,9 @@ from fpl_team_picker.domain.models.transfer_recommendation import (
     SingleGWRecommendation,
 )
 from fpl_team_picker.domain.services.agent_tools import AGENT_TOOLS, AgentDeps
+from fpl_team_picker.domain.services.data_orchestration_service import (
+    DataOrchestrationService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -202,10 +205,11 @@ class TransferPlanningAgentService:
             )
 
         # Extract free transfers and budget from manager data
+        # Use DataOrchestrationService to properly handle both flat and nested structures
+        orchestration_service = DataOrchestrationService()
+        team_data = gameweek_data.get("manager_team")
+        free_transfers = orchestration_service.get_free_transfers(team_data)
         budget = gameweek_data.get("manager_team", {}).get("bank", 0.0) / 10.0
-        free_transfers = (
-            gameweek_data.get("manager_team", {}).get("transfers", {}).get("limit", 1)
-        )
 
         # 1. Prepare agent dependencies (includes free_transfers and budget)
         deps = AgentDeps(
@@ -261,9 +265,10 @@ Free Transfers: {free_transfers}
 Instructions:
 1. Think through your approach before calling tools
 2. Use tools in logical order (weaknesses → xP → context → templates → SA)
-3. Generate 5-7 candidate scenarios (hold + various transfers)
-4. Validate top 3 scenarios with run_sa_optimizer
-5. Rank by 3GW net ROI and return top {num_recommendations}
+3. When calling tools that need current_squad_ids, use the "Squad Player IDs" list shown above
+4. Generate 5-7 candidate scenarios (hold + various transfers)
+5. Validate top 3 scenarios with run_sa_optimizer using the squad IDs
+6. Rank by 3GW net ROI and return top {num_recommendations}
 
 Remember: Think step-by-step, use tools strategically, validate with SA.
 """
@@ -289,7 +294,7 @@ Remember: Think step-by-step, use tools strategically, validate with SA.
         return result.output
 
     def _format_squad(self, squad_df: pd.DataFrame) -> str:
-        """Format current squad for display in prompt."""
+        """Format current squad for display in prompt with player IDs."""
         if squad_df.empty:
             return "No current squad data available"
 
@@ -298,9 +303,13 @@ Remember: Think step-by-step, use tools strategically, validate with SA.
             pos_players = squad_df[squad_df["position"] == pos]
             if not pos_players.empty:
                 players_str = ", ".join(
-                    f"{row['web_name']} ({row['name']}, £{row['price']:.1f}m)"
+                    f"{row['web_name']} (ID: {row['player_id']}, {row.get('name', 'Unknown')}, £{row['price']:.1f}m)"
                     for _, row in pos_players.iterrows()
                 )
                 lines.append(f"{pos}: {players_str}")
+
+        # Add squad IDs list at the end for easy reference
+        all_ids = sorted(squad_df["player_id"].tolist())
+        lines.append(f"\nSquad Player IDs: {all_ids}")
 
         return "\n".join(lines)

@@ -665,7 +665,7 @@ class TestUncertaintyExtraction:
         mid_uncertainty = uncertainty[X_test["position"] == "MID"]
         fwd_uncertainty = uncertainty[X_test["position"] == "FWD"]
 
-        print(f"\nHybrid Model Uncertainty by Position:")
+        print("\nHybrid Model Uncertainty by Position:")
         print(
             f"  GKP: mean={gkp_uncertainty.mean():.4f}, max={gkp_uncertainty.max():.4f}"
         )

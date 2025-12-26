@@ -180,6 +180,32 @@ class DataOrchestrationService:
 
         return True
 
+    def get_free_transfers(self, team_data: Optional[Dict[str, Any]]) -> int:
+        """
+        Extract the number of free transfers from team data.
+
+        Args:
+            team_data: Team data dictionary from load_gameweek_data()["manager_team"]
+
+        Returns:
+            Number of free transfers available (defaults to 1 if not found)
+
+        Example:
+            >>> gameweek_data = orchestration_service.load_gameweek_data(18)
+            >>> team_data = gameweek_data.get("manager_team")
+            >>> free_transfers = orchestration_service.get_free_transfers(team_data)
+        """
+        if not team_data:
+            return 1
+
+        # Support both flat structure (current) and FPL API structure (nested)
+        if "transfers" in team_data and isinstance(team_data["transfers"], dict):
+            # FPL API format: {"transfers": {"limit": 2}}
+            return team_data["transfers"].get("limit", 1)
+        else:
+            # Flat format: {"free_transfers": 2}
+            return team_data.get("free_transfers", 1)
+
     def _convert_players_to_dataframe(self, players: List[Any]) -> pd.DataFrame:
         """Convert player domain models to DataFrame for compatibility."""
         data = []
@@ -1254,16 +1280,50 @@ class DataOrchestrationService:
                 client, previous_gameweek
             )
 
+            # Get available free transfers from API data (stored in database)
+            # This is the actual FT count from FPL API, not calculated
+            free_transfers = manager_info.get("free_transfers_available")
+
+            if free_transfers is None or pd.isna(free_transfers):
+                # Fallback to calculation if not available in database
+                logger.warning(
+                    "⚠️  free_transfers_available not in database, calculating from transfer history"
+                )
+                try:
+                    from client import calculate_available_free_transfers
+
+                    free_transfers = calculate_available_free_transfers(
+                        previous_gameweek + 1
+                    )
+                    logger.info(
+                        f"📊 Calculated {free_transfers} free transfer(s) available for GW{previous_gameweek + 1}"
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not calculate free transfers: {e}")
+                    free_transfers = 1  # Final fallback to 1 FT
+            else:
+                logger.info(
+                    f"📊 Free transfers from API: {free_transfers} for GW{previous_gameweek + 1}"
+                )
+
             team_info = {
                 "manager_id": manager_info.get("manager_id", 0),
                 "entry_name": manager_info.get("entry_name", "My Team"),
                 "total_points": manager_info.get("summary_overall_points", 0),
+                "entry": {
+                    "value": manager_info.get("team_value", 1000)
+                    / 10.0,  # Convert from 0.1M units to millions
+                    "bank": manager_info.get("bank", 0)
+                    / 10.0,  # Convert from 0.1M units to millions
+                },
                 "bank": manager_info.get("bank", 0)
-                / 10.0,  # Convert from 0.1M units to millions
+                / 10.0,  # Keep for backward compatibility
                 "team_value": manager_info.get("team_value", 1000)
-                / 10.0,  # Convert from 0.1M units to millions
+                / 10.0,  # Keep for backward compatibility
                 "picks": picks,
-                "free_transfers": 1,  # Default to 1 free transfer
+                "transfers": {
+                    "limit": free_transfers,  # Now calculated from historical transfer data!
+                },
                 "chips_available": chips_available,
                 "chips_used": chips_used,
             }
@@ -1339,6 +1399,24 @@ class DataOrchestrationService:
         # Get player details and merge with current data
         player_ids = [pick["element"] for pick in team_data["picks"]]
         current_squad = players[players["player_id"].isin(player_ids)].copy()
+
+        # Check for missing players (e.g., long-term injury, left club)
+        found_ids = set(current_squad["player_id"].tolist())
+        missing_ids = [pid for pid in player_ids if pid not in found_ids]
+
+        if missing_ids:
+            # Get player names for missing IDs from previous gameweek data if available
+            missing_info = []
+            for pid in missing_ids:
+                # Try to get player info from the picks data
+                next((p for p in team_data["picks"] if p["element"] == pid), None)
+                missing_info.append(f"ID {pid}")
+
+            logger.warning(
+                f"⚠️ {len(missing_ids)} player(s) from previous squad not found in current gameweek: {', '.join(missing_info)}. "
+                f"This typically happens when a player has a long-term injury or left the club. "
+                f"You will need to transfer out these players."
+            )
 
         # Ensure standardized team column naming
         if "team_id" not in current_squad.columns:

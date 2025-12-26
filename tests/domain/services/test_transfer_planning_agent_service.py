@@ -13,7 +13,6 @@ from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
-from pydantic_ai import RunContext
 
 from fpl_team_picker.domain.models.transfer_plan import StrategyMode
 from fpl_team_picker.domain.models.transfer_recommendation import (
@@ -504,7 +503,7 @@ class TestFreTransfersHandling:
             "transfers": {"limit": 1},
         }
 
-        service = TransferPlanningAgentService(api_key="test-key")
+        TransferPlanningAgentService(api_key="test-key")
 
         # We can't easily test the agent call without mocking, but we can verify
         # the data extraction works correctly
@@ -526,16 +525,16 @@ class TestFreTransfersHandling:
         }
 
         budget = sample_gameweek_data.get("manager_team", {}).get("bank", 0.0) / 10.0
-        free_transfers = (
+        (
             sample_gameweek_data.get("manager_team", {})
             .get("transfers", {})
             .get("limit", 1)
         )
 
         # With the limit=2 in manager_team
-        free_transfers_actual = (
-            sample_gameweek_data["manager_team"]["transfers"]["limit"]
-        )
+        free_transfers_actual = sample_gameweek_data["manager_team"]["transfers"][
+            "limit"
+        ]
         assert free_transfers_actual == 2
         assert budget == 2.5
 
@@ -546,9 +545,7 @@ class TestFreTransfersHandling:
             "transfers": {"limit": 0},
         }
 
-        free_transfers = (
-            sample_gameweek_data["manager_team"]["transfers"]["limit"]
-        )
+        free_transfers = sample_gameweek_data["manager_team"]["transfers"]["limit"]
         assert free_transfers == 0
 
 

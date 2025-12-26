@@ -632,10 +632,13 @@ def run_sa_optimizer(
     IMPORTANT: Call this tool AFTER generating your candidate scenarios to validate them,
     not BEFORE. The agent should reason first, then validate.
 
+    NOTE: If num_transfers=0 (hold option), this returns the current squad's xP without
+    running any optimization. Use this to get baseline xP for the hold scenario.
+
     Args:
         ctx: Agent context with data dependencies (includes free_transfers)
         current_squad_ids: List of 15 player IDs in current squad
-        num_transfers: Number of transfers to make (1-15)
+        num_transfers: Number of transfers to make (0-15, where 0 = hold/no transfers)
         target_gameweek: Gameweek to optimize for (1-38)
         horizon: Gameweeks ahead to optimize (1, 3, or 5; default: 3 for agent context)
         must_include_ids: Player IDs that must stay in squad (optional)
@@ -644,7 +647,7 @@ def run_sa_optimizer(
     Returns:
         {
             "optimal_squad_ids": [1, 2, 3, ...],  # 15 player IDs
-            "transfers": [  # Transfers to reach optimal squad
+            "transfers": [  # Transfers to reach optimal squad (empty if num_transfers=0)
                 {
                     "out_id": 5,
                     "in_id": 42,
@@ -655,15 +658,24 @@ def run_sa_optimizer(
                 }
             ],
             "expected_xp": 65.3,  # Total squad xP
-            "xp_gain": 4.2,  # Improvement vs current
-            "hit_cost": -4,  # Points deduction (calculated from free_transfers)
-            "net_gain": 0.2,  # xP gain minus hit cost
-            "free_transfers_used": 1,  # How many FTs were used
+            "xp_gain": 4.2,  # Improvement vs current (0.0 if num_transfers=0)
+            "hit_cost": -4,  # Points deduction (0 if num_transfers=0)
+            "net_gain": 0.2,  # xP gain minus hit cost (0.0 if num_transfers=0)
+            "free_transfers_used": 1,  # How many FTs were used (0 if num_transfers=0)
             "runtime_seconds": 12.4,
             "formation": "4-4-2"
         }
 
     Example usage:
+        # Validate hold option (0 transfers)
+        hold_result = run_sa_optimizer(
+            current_squad_ids=[1,2,3,...,15],
+            num_transfers=0,
+            target_gameweek=18,
+            horizon=3
+        )
+        # Returns current squad's xP without optimization
+
         # Validate a 1-transfer scenario (free if you have 1 FT)
         sa_result = run_sa_optimizer(
             current_squad_ids=[1,2,3,...,15],
@@ -689,11 +701,11 @@ def run_sa_optimizer(
 
     Edge cases:
         - Fails if current_squad_ids length != 15 (validation enforced)
-        - num_transfers must be 1-15 (validated)
+        - num_transfers must be 0-15 (0 = hold, 1+ = optimize transfers)
         - target_gameweek must be 1-38 (validated)
         - horizon must be 1, 3, or 5 (validated)
-        - Runtime increases with num_transfers (1: ~10s, 2: ~30s, 3: ~60s)
-        - Returns empty transfers list if no improvement found
+        - Runtime increases with num_transfers (0: instant, 1: ~10s, 2: ~30s, 3: ~60s)
+        - Returns empty transfers list if num_transfers=0 or no improvement found
         - Hit cost automatically calculated based on free_transfers in context
 
     Poka-yoke (error prevention):
@@ -703,6 +715,7 @@ def run_sa_optimizer(
         - Free transfers from context used for hit cost calculation
 
     Performance:
+        - 0 transfers (hold): ~1-2s (xP calculation only)
         - 1 transfer: ~10-15s (exhaustive search if enabled)
         - 2 transfers: ~30-45s
         - 3+ transfers: ~60-120s (SA iterations)
@@ -718,8 +731,8 @@ def run_sa_optimizer(
         raise ValueError(
             f"current_squad_ids must have exactly 15 players, got {len(current_squad_ids)}"
         )
-    if not (1 <= num_transfers <= 15):
-        raise ValueError(f"num_transfers must be 1-15, got {num_transfers}")
+    if not (0 <= num_transfers <= 15):
+        raise ValueError(f"num_transfers must be 0-15, got {num_transfers}")
     if not (1 <= target_gameweek <= 38):
         raise ValueError(f"target_gameweek must be 1-38, got {target_gameweek}")
 
@@ -729,10 +742,36 @@ def run_sa_optimizer(
             deps.players_data["player_id"].isin(current_squad_ids)
         ].copy()
 
-        if len(current_squad_df) != 15:
-            raise ValueError(
-                f"Could not find all squad players in players_data. "
-                f"Found {len(current_squad_df)}/15"
+        # Check for missing players (e.g., long-term injury, left club)
+        num_missing = 15 - len(current_squad_df)
+        if num_missing > 0:
+            found_ids = set(current_squad_df["player_id"].tolist())
+            missing_ids = [pid for pid in current_squad_ids if pid not in found_ids]
+
+            logger.warning(
+                f"⚠️ {num_missing} player(s) from squad not available in current gameweek: {missing_ids}. "
+                f"These players must be transferred out (likely long-term injury or left club)."
+            )
+
+            # If hold option (0 transfers), this is an error - can't hold with missing players
+            if num_transfers == 0:
+                raise ValueError(
+                    f"Cannot hold squad with {num_missing} missing player(s) (IDs: {missing_ids}). "
+                    f"These players must be transferred out. Minimum transfers required: {num_missing}"
+                )
+
+            # If num_transfers < num_missing, this is also an error
+            if num_transfers < num_missing:
+                raise ValueError(
+                    f"Cannot complete {num_transfers} transfer(s) when {num_missing} player(s) are missing (IDs: {missing_ids}). "
+                    f"Minimum transfers required: {num_missing}"
+                )
+
+            # For optimization, we'll work with the available squad (14 or fewer players)
+            # and the optimizer will need to fill the missing slots
+            logger.info(
+                f"📊 Optimizing with {len(current_squad_df)} available players, "
+                f"need to add {num_missing} players to reach 15-player squad"
             )
 
         # Validate horizon parameter
@@ -822,13 +861,45 @@ def run_sa_optimizer(
                 players_with_xp["xP_5gw"] = players_with_xp["ml_xP"]
         # For horizon==5, xP_5gw already exists, no alias needed
 
-        # Initialize optimization service
-        opt_service = OptimizationService()
-
-        # Run optimization
+        # Handle hold option (0 transfers) - just calculate current squad xP
         import time
 
         start_time = time.time()
+
+        if num_transfers == 0:
+            # Get xP for current squad without optimization
+            current_squad_with_xp = players_with_xp[
+                players_with_xp["player_id"].isin(current_squad_ids)
+            ].copy()
+
+            total_xp = current_squad_with_xp["xP_5gw"].sum()
+
+            # Determine formation (simple heuristic: count positions)
+            pos_counts = current_squad_with_xp["position"].value_counts().to_dict()
+            formation = f"{pos_counts.get('DEF', 0)}-{pos_counts.get('MID', 0)}-{pos_counts.get('FWD', 0)}"
+
+            runtime = time.time() - start_time
+
+            result = {
+                "optimal_squad_ids": current_squad_ids,
+                "transfers": [],
+                "expected_xp": float(total_xp),
+                "xp_gain": 0.0,
+                "hit_cost": 0,
+                "net_gain": 0.0,
+                "free_transfers_used": 0,
+                "runtime_seconds": round(runtime, 1),
+                "formation": formation,
+            }
+
+            logger.info(
+                f"✅ Hold option calculated: xP={result['expected_xp']:.1f}, runtime={result['runtime_seconds']}s"
+            )
+
+            return result
+
+        # Initialize optimization service
+        opt_service = OptimizationService()
 
         # IMPORTANT: Pass the actual number of free transfers to the optimizer
         # num_transfers parameter is how many transfers the agent wants to test,
@@ -912,6 +983,15 @@ def analyze_squad_weaknesses(
 
     Returns:
         {
+            "missing_players": [  # Players not available in current GW (MUST transfer out)
+                {
+                    "player_id": 123,
+                    "web_name": "Unknown (ID 123)",
+                    "xp_gw1": 0.0,
+                    "position": "UNKNOWN",
+                    "reason": "Player not available (likely long-term injury or left club)"
+                }
+            ],
             "low_xp_players": [  # Bottom 5 by xP
                 {
                     "player_id": 5,
@@ -969,6 +1049,30 @@ def analyze_squad_weaknesses(
         squad_df = deps.players_data[
             deps.players_data["player_id"].isin(current_squad_ids)
         ].copy()
+
+        # Check for missing players
+        num_missing = 15 - len(squad_df)
+        missing_players_list = []
+        if num_missing > 0:
+            found_ids = set(squad_df["player_id"].tolist())
+            missing_ids = [pid for pid in current_squad_ids if pid not in found_ids]
+
+            logger.warning(
+                f"⚠️ {num_missing} player(s) from squad not available: {missing_ids}. "
+                f"These will be automatically flagged as weaknesses."
+            )
+
+            # Add missing players to weaknesses list
+            for pid in missing_ids:
+                missing_players_list.append(
+                    {
+                        "player_id": pid,
+                        "web_name": f"Unknown (ID {pid})",
+                        "xp_gw1": 0.0,
+                        "position": "UNKNOWN",
+                        "reason": "Player not available (likely long-term injury or left club)",
+                    }
+                )
 
         # Get xP predictions
         ml_service = MLExpectedPointsService(model_path=config.xp_model.ml_model_path)
@@ -1094,7 +1198,11 @@ def analyze_squad_weaknesses(
 
         # Build summary
         all_weaknesses = (
-            low_xp_players + rotation_risks + injury_concerns + poor_fixtures
+            missing_players_list
+            + low_xp_players
+            + rotation_risks
+            + injury_concerns
+            + poor_fixtures
         )
         by_position = {}
         for weakness in all_weaknesses:
@@ -1107,6 +1215,7 @@ def analyze_squad_weaknesses(
             summary_message += f": {', '.join(summary_parts)}"
 
         result = {
+            "missing_players": missing_players_list,
             "low_xp_players": low_xp_players,
             "rotation_risks": rotation_risks,
             "injury_concerns": injury_concerns,

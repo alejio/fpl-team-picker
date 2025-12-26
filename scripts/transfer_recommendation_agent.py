@@ -61,6 +61,12 @@ def main(
     roi_threshold: float = typer.Option(
         5.0, "--roi-threshold", "-r", help="Minimum 3GW xP gain required for -4 hit"
     ),
+    free_transfers_override: int | None = typer.Option(
+        None,
+        "--free-transfers",
+        "-ft",
+        help="Override calculated free transfers (use if calculation is wrong)",
+    ),
     model: str = typer.Option(
         "claude-sonnet-4-5",
         "--model",
@@ -129,6 +135,23 @@ def main(
                 f"[red]Error: Expected 15-player squad, got {len(current_squad)}[/red]"
             )
             raise typer.Exit(1)
+
+        # Get free transfers using the new DataOrchestrationService method
+        team_data = gw_data.get("manager_team")
+        calculated_fts = data_service.get_free_transfers(team_data)
+
+        # Allow manual override if calculation is wrong (e.g., AFCON special grants)
+        if free_transfers_override is not None:
+            free_transfers = free_transfers_override
+            console.print(
+                f"[yellow]⚠️  Free Transfers (Overridden): {free_transfers} (calculated: {calculated_fts})[/yellow]"
+            )
+            # Update the gameweek_data with overridden value
+            if team_data:
+                team_data["transfers"]["limit"] = free_transfers
+        else:
+            free_transfers = calculated_fts
+            console.print(f"[cyan]Free Transfers Available: {free_transfers}[/cyan]")
 
         # Initialize agent service
         console.print("[yellow]🧠 Initializing agent service...[/yellow]")
