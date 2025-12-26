@@ -37,7 +37,7 @@ class TestAgentDeps:
                 "position": ["FWD", "MID"],
             }
         )
-        teams_df = pd.DataFrame({"id": [1, 2], "name": ["Arsenal", "Liverpool"]})
+        teams_df = pd.DataFrame({"team_id": [1, 2], "name": ["Arsenal", "Liverpool"]})
         fixtures_df = pd.DataFrame(
             {"id": [1], "event": [18], "team_h": [1], "team_a": [2]}
         )
@@ -58,13 +58,13 @@ class TestAgentDeps:
     def test_agent_deps_with_optional_data(self):
         """Test AgentDeps with optional enriched data."""
         players_df = pd.DataFrame({"player_id": [1]})
-        teams_df = pd.DataFrame({"id": [1]})
+        teams_df = pd.DataFrame({"team_id": [1]})
         fixtures_df = pd.DataFrame({"id": [1]})
         live_df = pd.DataFrame()
 
         ownership_df = pd.DataFrame({"player_id": [1], "ownership_delta": [0.5]})
         fixture_difficulty_df = pd.DataFrame(
-            {"player_id": [1], "gameweek": [18], "fixture_difficulty": [2.5]}
+            {"team_id": [1], "opponent_id": [2], "gameweek": [18], "overall_difficulty": [2.5]}
         )
 
         deps = AgentDeps(
@@ -98,7 +98,7 @@ class TestGetMultiGWXPPredictions:
 
         deps = AgentDeps(
             players_data=players_df,
-            teams_data=pd.DataFrame({"id": [1]}),
+            teams_data=pd.DataFrame({"team_id": [1]}),
             fixtures_data=pd.DataFrame({"id": [1], "event": [18]}),
             live_data=pd.DataFrame(),
             xg_rates=pd.DataFrame(),
@@ -250,7 +250,7 @@ class TestAnalyzeFixtureContext:
         """Create mock context with fixture data."""
         teams_df = pd.DataFrame(
             {
-                "id": [1, 2, 3, 4],
+                "team_id": [1, 2, 3, 4],
                 "name": ["Arsenal", "Liverpool", "Chelsea", "Man City"],
             }
         )
@@ -265,11 +265,13 @@ class TestAnalyzeFixtureContext:
             }
         )
 
+        # Fixture difficulty is team-level, not player-level
         fixture_difficulty_df = pd.DataFrame(
             {
-                "player_id": [1, 2, 3],
+                "team_id": [1, 2, 3],
+                "opponent_id": [2, 3, 1],
                 "gameweek": [18, 18, 18],
-                "fixture_difficulty": [2.0, 4.5, 3.0],
+                "overall_difficulty": [2.0, 4.5, 3.0],
             }
         )
 
@@ -309,7 +311,7 @@ class TestAnalyzeFixtureContext:
 
     def test_analyze_fixture_context_no_fixture_difficulty(self):
         """Test when fixture_difficulty data is missing."""
-        teams_df = pd.DataFrame({"id": [1], "name": ["Arsenal"]})
+        teams_df = pd.DataFrame({"team_id": [1], "name": ["Arsenal"]})
         fixtures_df = pd.DataFrame(
             {"id": [1], "event": [18], "team_h": [1], "team_a": [2]}
         )
@@ -349,7 +351,7 @@ class TestRunSAOptimizer:
 
         deps = AgentDeps(
             players_data=players_df,
-            teams_data=pd.DataFrame({"id": [1]}),
+            teams_data=pd.DataFrame({"team_id": [1]}),
             fixtures_data=pd.DataFrame({"id": [1], "event": [18]}),
             live_data=pd.DataFrame(),
             xg_rates=pd.DataFrame(),
@@ -388,6 +390,16 @@ class TestRunSAOptimizer:
                 target_gameweek=50,  # Invalid
             )
 
+        # Test invalid horizon
+        with pytest.raises(ValueError, match="horizon must be 1, 3, or 5"):
+            run_sa_optimizer(
+                ctx=mock_context_for_sa,
+                current_squad_ids=list(range(1, 16)),
+                num_transfers=1,
+                target_gameweek=18,
+                horizon=7,  # Invalid
+            )
+
     @patch("fpl_team_picker.domain.services.agent_tools.OptimizationService")
     @patch(
         "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
@@ -396,13 +408,14 @@ class TestRunSAOptimizer:
         self, mock_ml_service_class, mock_opt_service_class, mock_context_for_sa
     ):
         """Test successful SA optimization run."""
-        # Mock ML service
+        # Mock ML service with 3-GW predictions (default horizon)
         mock_ml_service = Mock()
-        mock_ml_service.calculate_expected_points.return_value = pd.DataFrame(
+        mock_ml_service.calculate_3gw_expected_points.return_value = pd.DataFrame(
             {
                 "player_id": list(range(1, 16)),
                 "web_name": [f"Player{i}" for i in range(1, 16)],
                 "ml_xP": [5.0] * 15,
+                "xP_3gw": [15.0] * 15,  # 3-GW total
             }
         )
         mock_ml_service_class.return_value = mock_ml_service
@@ -463,6 +476,8 @@ class TestAnalyzeSquadWeaknesses:
                 "web_name": [f"Player{i}" for i in range(1, 16)],
                 "position": ["GKP", "GKP"] + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3,
                 "price": [4.5] * 15,
+                "team": [1] * 15,  # All players from team 1
+                "team_id": [1] * 15,  # Match real data structure
             }
         )
 
@@ -475,7 +490,7 @@ class TestAnalyzeSquadWeaknesses:
 
         deps = AgentDeps(
             players_data=players_df,
-            teams_data=pd.DataFrame({"id": [1]}),
+            teams_data=pd.DataFrame({"team_id": [1], "name": ["Arsenal"]}),
             fixtures_data=pd.DataFrame({"id": [1], "event": [18]}),
             live_data=pd.DataFrame(),
             player_metrics=player_metrics_df,
@@ -503,11 +518,13 @@ class TestAnalyzeSquadWeaknesses:
     ):
         """Test identification of low xP players."""
         mock_service = Mock()
+        # ML service returns predictions with team_id (matches reality)
         mock_service.calculate_expected_points.return_value = pd.DataFrame(
             {
                 "player_id": list(range(1, 16)),
                 "web_name": [f"Player{i}" for i in range(1, 16)],
                 "position": ["GKP", "GKP"] + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3,
+                "team_id": [1] * 15,  # ML service preserves team_id
                 "ml_xP": [2.0, 2.5, 2.1, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],  # First 3 are low
             }
         )
@@ -542,7 +559,7 @@ class TestGetTemplatePlayers:
 
         deps = AgentDeps(
             players_data=players_df,
-            teams_data=pd.DataFrame({"id": [1]}),
+            teams_data=pd.DataFrame({"team_id": [1]}),
             fixtures_data=pd.DataFrame({"id": [1], "event": [18]}),
             live_data=pd.DataFrame(),
             xg_rates=pd.DataFrame(),

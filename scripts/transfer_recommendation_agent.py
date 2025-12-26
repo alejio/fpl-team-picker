@@ -112,33 +112,30 @@ def main(
             logger.remove()
             logger.add(sys.stderr, level="INFO")
 
-        logger.info(
-            "\n[bold cyan]🤖 Transfer Recommendation Agent[/bold cyan]", style="bold"
-        )
-        logger.info(
+        console.print("\n[bold cyan]🤖 Transfer Recommendation Agent[/bold cyan]")
+        console.print(
             f"[cyan]Target: GW{gameweek} | Strategy: {strategy_mode.value} | Options: {num_options} | ROI Threshold: +{roi_threshold} xP[/cyan]\n"
         )
 
         # Load gameweek data
-        logger.info("[yellow]📊 Loading gameweek data...[/yellow]")
+        console.print("[yellow]📊 Loading gameweek data...[/yellow]")
         data_service = DataOrchestrationService()
         gw_data = data_service.load_gameweek_data(gameweek)
 
         # Get current squad (15 players)
         current_squad = gw_data["current_squad"]
         if len(current_squad) != 15:
-            logger.error(
-                f"[red]Error: Expected 15-player squad, got {len(current_squad)}[/red]",
-                style="bold",
+            console.print(
+                f"[red]Error: Expected 15-player squad, got {len(current_squad)}[/red]"
             )
             raise typer.Exit(1)
 
         # Initialize agent service
-        logger.info("[yellow]🧠 Initializing agent service...[/yellow]")
+        console.print("[yellow]🧠 Initializing agent service...[/yellow]")
         agent_service = TransferPlanningAgentService(model=model, debug=debug)
 
         # Generate recommendations
-        logger.info(
+        console.print(
             "[yellow]🔍 Agent analyzing transfer options (this may take 30-60 seconds)...[/yellow]\n"
         )
         recommendations = agent_service.generate_single_gw_recommendations(

@@ -431,15 +431,15 @@ def _detect_dgw_bgw(
         # Find teams with DGW (2+ fixtures)
         dgw_team_ids = total_counts[total_counts >= 2].index.tolist()
         if dgw_team_ids:
-            team_names = teams[teams["id"].isin(dgw_team_ids)]["name"].tolist()
+            team_names = teams[teams["team_id"].isin(dgw_team_ids)]["name"].tolist()
             dgw_teams[gw] = team_names
 
         # Find teams with BGW (0 fixtures)
-        all_team_ids = set(teams["id"].tolist())
+        all_team_ids = set(teams["team_id"].tolist())
         playing_team_ids = set(total_counts.index.tolist())
         bgw_team_ids = all_team_ids - playing_team_ids
         if bgw_team_ids:
-            team_names = teams[teams["id"].isin(bgw_team_ids)]["name"].tolist()
+            team_names = teams[teams["team_id"].isin(bgw_team_ids)]["name"].tolist()
             bgw_teams[gw] = team_names
 
     has_dgw = len(dgw_teams) > 0
@@ -473,7 +473,7 @@ def _analyze_fixture_runs(
     team_difficulties = []
 
     for _, team in teams.iterrows():
-        team_id = team["id"]
+        team_id = team["team_id"]
         team_name = team["name"]
 
         # Get this team's fixtures
@@ -491,18 +491,18 @@ def _analyze_fixture_runs(
         for _, fixture in team_fixtures.iterrows():
             is_home = fixture["team_h"] == team_id
             opponent_id = fixture["team_a"] if is_home else fixture["team_h"]
-            opponent_name = teams[teams["id"] == opponent_id]["name"].values[0]
+            opponent_name = teams[teams["team_id"] == opponent_id]["name"].values[0]
 
             # Get difficulty from fixture_difficulty_df
-            # This should have columns: player_id, gameweek, fixture_difficulty
-            # For team-level, we can use an aggregate or lookup
-            # Simplified: use average difficulty from all players
-            gw_difficulty = fixture_difficulty_df[
-                fixture_difficulty_df["gameweek"] == fixture["event"]
+            # This DataFrame has team-level fixture difficulty (not player-level)
+            # Columns: team_id, opponent_id, gameweek, overall_difficulty, etc.
+            team_fixture = fixture_difficulty_df[
+                (fixture_difficulty_df["team_id"] == team_id)
+                & (fixture_difficulty_df["gameweek"] == fixture["event"])
             ]
 
-            if not gw_difficulty.empty:
-                avg_difficulty = gw_difficulty["fixture_difficulty"].mean()
+            if not team_fixture.empty:
+                avg_difficulty = team_fixture["overall_difficulty"].values[0]
             else:
                 avg_difficulty = 3.0  # Neutral default
 
@@ -571,6 +571,7 @@ def run_sa_optimizer(
     current_squad_ids: list[int],
     num_transfers: int,
     target_gameweek: int,
+    horizon: int = 3,
     must_include_ids: list[int] | None = None,
     must_exclude_ids: list[int] | None = None,
 ) -> Dict[str, Any]:
@@ -579,7 +580,7 @@ def run_sa_optimizer(
 
     Use this tool to validate your transfer recommendations against the SA optimizer's
     mathematically optimal solution. The optimizer searches thousands of combinations
-    to find the highest xP squad within constraints.
+    to find the highest xP squad within constraints over the specified horizon.
 
     IMPORTANT: Call this tool AFTER generating your candidate scenarios to validate them,
     not BEFORE. The agent should reason first, then validate.
@@ -589,6 +590,7 @@ def run_sa_optimizer(
         current_squad_ids: List of 15 player IDs in current squad
         num_transfers: Number of transfers to make (1-15)
         target_gameweek: Gameweek to optimize for (1-38)
+        horizon: Gameweeks ahead to optimize (1, 3, or 5; default: 3 for agent context)
         must_include_ids: Player IDs that must stay in squad (optional)
         must_exclude_ids: Player IDs to avoid (optional)
 
@@ -614,13 +616,22 @@ def run_sa_optimizer(
         }
 
     Example usage:
-        # Validate a 1-transfer scenario
+        # Validate a 1-transfer scenario with 3-GW horizon (default, matches agent context)
         sa_result = run_sa_optimizer(
             current_squad_ids=[1,2,3,...,15],
             num_transfers=1,
-            target_gameweek=18
+            target_gameweek=18,
+            horizon=3  # Default, can be 1, 3, or 5
         )
-        # Compare your scenario's xP to sa_result["expected_xp"]
+        # Compare your scenario's 3-GW xP to sa_result["expected_xp"]
+
+        # Use 1-GW horizon for immediate gameweek optimization
+        sa_result_1gw = run_sa_optimizer(
+            current_squad_ids=[1,2,3,...,15],
+            num_transfers=1,
+            target_gameweek=18,
+            horizon=1
+        )
 
         # Check if SA found a better transfer
         if len(sa_result["transfers"]) > 0:
@@ -631,6 +642,7 @@ def run_sa_optimizer(
         - Fails if current_squad_ids length != 15 (validation enforced)
         - num_transfers must be 1-15 (validated)
         - target_gameweek must be 1-38 (validated)
+        - horizon must be 1, 3, or 5 (validated)
         - Runtime increases with num_transfers (1: ~10s, 2: ~30s, 3: ~60s)
         - Returns empty transfers list if no improvement found
 
@@ -672,19 +684,81 @@ def run_sa_optimizer(
                 f"Found {len(current_squad_df)}/15"
             )
 
-        # Get xP predictions for optimization
+        # Validate horizon parameter
+        if horizon not in [1, 3, 5]:
+            raise ValueError(f"horizon must be 1, 3, or 5, got {horizon}")
+
+        # Get xP predictions for optimization based on horizon
         ml_service = MLExpectedPointsService(model_path=config.xp_model.ml_model_path)
-        players_with_xp = ml_service.calculate_expected_points(
-            players_data=deps.players_data,
-            teams_data=deps.teams_data,
-            xg_rates_data=deps.xg_rates
-            if deps.xg_rates is not None
-            else pd.DataFrame(),
-            fixtures_data=deps.fixtures_data,
-            target_gameweek=target_gameweek,
-            live_data=deps.live_data,
-            gameweeks_ahead=1,
-        )
+
+        if horizon == 1:
+            players_with_xp = ml_service.calculate_expected_points(
+                players_data=deps.players_data,
+                teams_data=deps.teams_data,
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
+                fixtures_data=deps.fixtures_data,
+                target_gameweek=target_gameweek,
+                live_data=deps.live_data,
+                gameweeks_ahead=1,
+                ownership_trends_df=deps.ownership_trends,
+                value_analysis_df=deps.value_analysis,
+                fixture_difficulty_df=deps.fixture_difficulty,
+                betting_features_df=deps.betting_features,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
+                players_enhanced_df=deps.players_enhanced,
+            )
+        elif horizon == 3:
+            players_with_xp = ml_service.calculate_3gw_expected_points(
+                players_data=deps.players_data,
+                teams_data=deps.teams_data,
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
+                fixtures_data=deps.fixtures_data,
+                target_gameweek=target_gameweek,
+                live_data=deps.live_data,
+                ownership_trends_df=deps.ownership_trends,
+                value_analysis_df=deps.value_analysis,
+                fixture_difficulty_df=deps.fixture_difficulty,
+                betting_features_df=deps.betting_features,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
+                players_enhanced_df=deps.players_enhanced,
+            )
+        else:  # horizon == 5
+            players_with_xp = ml_service.calculate_5gw_expected_points(
+                players_data=deps.players_data,
+                teams_data=deps.teams_data,
+                xg_rates_data=deps.xg_rates
+                if deps.xg_rates is not None
+                else pd.DataFrame(),
+                fixtures_data=deps.fixtures_data,
+                target_gameweek=target_gameweek,
+                live_data=deps.live_data,
+                ownership_trends_df=deps.ownership_trends,
+                value_analysis_df=deps.value_analysis,
+                fixture_difficulty_df=deps.fixture_difficulty,
+                betting_features_df=deps.betting_features,
+                derived_player_metrics_df=deps.player_metrics,
+                player_availability_snapshot_df=deps.player_availability,
+                derived_team_form_df=deps.team_form,
+                players_enhanced_df=deps.players_enhanced,
+            )
+
+        # Create column alias for optimizer (it expects 'xP_5gw' column)
+        # Map the horizon-specific column to what optimizer expects
+        if horizon == 1:
+            # For 1-GW, use ml_xP as the optimization target
+            players_with_xp["xP_5gw"] = players_with_xp["ml_xP"]
+        elif horizon == 3:
+            # For 3-GW, use xP_3gw as the optimization target
+            players_with_xp["xP_5gw"] = players_with_xp["xP_3gw"]
+        # For horizon==5, xP_5gw already exists, no alias needed
 
         # Initialize optimization service
         opt_service = OptimizationService()
@@ -835,6 +909,14 @@ def analyze_squad_weaknesses(
             target_gameweek=target_gameweek,
             live_data=deps.live_data,
             gameweeks_ahead=1,
+            ownership_trends_df=deps.ownership_trends,
+            value_analysis_df=deps.value_analysis,
+            fixture_difficulty_df=deps.fixture_difficulty,
+            betting_features_df=deps.betting_features,
+            derived_player_metrics_df=deps.player_metrics,
+            player_availability_snapshot_df=deps.player_availability,
+            derived_team_form_df=deps.team_form,
+            players_enhanced_df=deps.players_enhanced,
         )
 
         # 1. Low xP players (< 3.0)
@@ -897,27 +979,45 @@ def analyze_squad_weaknesses(
             ]
 
         # 4. Poor fixtures (if fixture_difficulty available)
+        # NOTE: fixture_difficulty is team-level data, not player-level
         poor_fixtures = []
         if deps.fixture_difficulty is not None and not deps.fixture_difficulty.empty:
+            # squad_with_xp already has team_id from ML service, use it directly
+            # Get team IDs from current squad
+            squad_team_ids = squad_with_xp["team_id"].dropna().unique().tolist()
+
+            # Filter fixtures by squad teams and target gameweek
             fixture_df = deps.fixture_difficulty[
-                (deps.fixture_difficulty["player_id"].isin(current_squad_ids))
+                (deps.fixture_difficulty["team_id"].isin(squad_team_ids))
                 & (deps.fixture_difficulty["gameweek"] == target_gameweek)
             ]
-            hard_fixtures = fixture_df[fixture_df.get("fixture_difficulty", 0) >= 4.0]
-            poor_fixtures = [
-                {
-                    "player_id": int(row["player_id"]),
-                    "web_name": squad_df[squad_df["player_id"] == row["player_id"]][
-                        "web_name"
-                    ].values[0],
-                    "fixture_difficulty": float(row.get("fixture_difficulty", 0)),
-                    "position": squad_df[squad_df["player_id"] == row["player_id"]][
-                        "position"
-                    ].values[0],
-                    "reason": "Poor fixture",
-                }
-                for _, row in hard_fixtures.head(5).iterrows()
+
+            # Find hard fixtures (overall_difficulty >= 4.0)
+            hard_fixtures_df = fixture_df[
+                fixture_df.get("overall_difficulty", 0) >= 4.0
             ]
+
+            # Map back to players from hard-fixture teams
+            for _, fixture_row in hard_fixtures_df.iterrows():
+                team_id = fixture_row["team_id"]
+                # Get all players from this team in the squad
+                team_players = squad_with_xp[squad_with_xp["team_id"] == team_id]
+
+                for _, player_row in team_players.iterrows():
+                    poor_fixtures.append(
+                        {
+                            "player_id": int(player_row["player_id"]),
+                            "web_name": player_row["web_name"],
+                            "fixture_difficulty": float(
+                                fixture_row.get("overall_difficulty", 0)
+                            ),
+                            "position": player_row["position"],
+                            "reason": "Poor fixture",
+                        }
+                    )
+
+            # Limit to 5 total
+            poor_fixtures = poor_fixtures[:5]
 
         # Build summary
         all_weaknesses = (
@@ -1034,6 +1134,14 @@ def get_template_players(
             target_gameweek=target_gameweek,
             live_data=deps.live_data,
             gameweeks_ahead=1,
+            ownership_trends_df=deps.ownership_trends,
+            value_analysis_df=deps.value_analysis,
+            fixture_difficulty_df=deps.fixture_difficulty,
+            betting_features_df=deps.betting_features,
+            derived_player_metrics_df=deps.player_metrics,
+            player_availability_snapshot_df=deps.player_availability,
+            derived_team_form_df=deps.team_form,
+            players_enhanced_df=deps.players_enhanced,
         )
 
         # Filter template players (high ownership)
