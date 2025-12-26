@@ -361,6 +361,7 @@ uv run marimo check fpl_team_picker/interfaces/ --fix
 - **ACI Investment**: Comprehensive tool docstrings with examples, edge cases, performance hints
 - **Thinking Space**: 6-step workflow in system prompt encourages planning before execution
 - **SA as Validator**: Agent reasons strategically first, SA optimizer validates/benchmarks
+- **Hallucination Prevention**: Explicit instructions to only use team_name from tool outputs (never training data) to prevent incorrect player-team associations
 
 **Capabilities:**
 - **Single-GW Focus**: Recommend transfers for target gameweek only (not sequential multi-week)

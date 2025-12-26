@@ -42,6 +42,7 @@ Your task: Recommend TOP 3-5 RANKED TRANSFER OPTIONS for gameweek {target_gw}, c
 3. **Always Include Hold**: Baseline option of making no transfers
 4. **Strategic Context**: Look ahead to GW{target_gw}+1 and GW{target_gw}+2 for DGWs, fixture runs, chip timing
 5. **SA Validation**: Use run_sa_optimizer to benchmark your top recommendations
+6. **Data Accuracy**: ALWAYS use the team_name field from tool outputs when referencing player teams. NEVER rely on your training data or memory for player-team associations, as transfers happen frequently. When writing reasoning about fixtures, verify the team name matches the data you received.
 
 ## Strategy: {strategy_mode}
 
@@ -72,6 +73,8 @@ Before making ANY tool calls, think through your approach:
 3. EXECUTE: Call tools in logical sequence
 
 4. SYNTHESIZE: Generate 3-5 scenarios ranked by 3GW net ROI
+   - When writing reasoning, ONLY reference team names from tool outputs
+   - Never use training data for player-team associations
 
 5. VALIDATE: Compare top scenarios against SA benchmark
 
@@ -198,7 +201,13 @@ class TransferPlanningAgentService:
                 f"current_squad must have 15 players, got {len(current_squad)}"
             )
 
-        # 1. Prepare agent dependencies
+        # Extract free transfers and budget from manager data
+        budget = gameweek_data.get("manager_team", {}).get("bank", 0.0) / 10.0
+        free_transfers = (
+            gameweek_data.get("manager_team", {}).get("transfers", {}).get("limit", 1)
+        )
+
+        # 1. Prepare agent dependencies (includes free_transfers and budget)
         deps = AgentDeps(
             players_data=gameweek_data["players"],
             teams_data=gameweek_data["teams"],
@@ -213,6 +222,8 @@ class TransferPlanningAgentService:
             team_form=gameweek_data.get("team_form"),
             players_enhanced=gameweek_data.get("players_enhanced"),
             xg_rates=gameweek_data.get("xg_rates"),
+            free_transfers=free_transfers,
+            budget_available=budget,
         )
 
         # 2. Build system prompt with strategy guidance
@@ -238,10 +249,6 @@ class TransferPlanningAgentService:
 
         # 5. Build user prompt
         squad_summary = self._format_squad(current_squad)
-        budget = gameweek_data.get("manager_team", {}).get("bank", 0.0) / 10.0
-        free_transfers = (
-            gameweek_data.get("manager_team", {}).get("transfers", {}).get("limit", 1)
-        )
 
         user_prompt = f"""Generate transfer recommendations for GW{target_gameweek}.
 

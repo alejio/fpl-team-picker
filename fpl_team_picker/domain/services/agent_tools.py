@@ -25,6 +25,33 @@ from fpl_team_picker.domain.services.optimization_service import OptimizationSer
 logger = logging.getLogger(__name__)
 
 
+def calculate_hit_cost(num_transfers: int, free_transfers: int) -> int:
+    """
+    Calculate hit cost for transfers.
+
+    FPL rules: First N free transfers cost 0 points, additional transfers cost points.
+    Uses config.optimization.transfer_cost (default: 4 points per transfer).
+
+    Args:
+        num_transfers: Number of transfers being made
+        free_transfers: Number of free transfers available (0-2, typically 1)
+
+    Returns:
+        Hit cost in points (0, -4, -8, etc.)
+
+    Examples:
+        >>> calculate_hit_cost(1, 1)  # 1 transfer with 1 FT
+        0
+        >>> calculate_hit_cost(2, 1)  # 2 transfers with 1 FT
+        -4
+        >>> calculate_hit_cost(3, 2)  # 3 transfers with 2 FTs
+        -4
+        >>> calculate_hit_cost(0, 1)  # No transfers (banking FT)
+        0
+    """
+    return -max(0, num_transfers - free_transfers) * config.optimization.transfer_cost
+
+
 # Type alias for agent dependencies (data passed to agent at runtime)
 class AgentDeps:
     """Dependencies injected into agent tools."""
@@ -44,6 +71,8 @@ class AgentDeps:
         team_form: pd.DataFrame | None = None,
         players_enhanced: pd.DataFrame | None = None,
         xg_rates: pd.DataFrame | None = None,
+        free_transfers: int = 1,
+        budget_available: float = 0.0,
     ):
         self.players_data = players_data
         self.teams_data = teams_data
@@ -58,6 +87,8 @@ class AgentDeps:
         self.team_form = team_form
         self.players_enhanced = players_enhanced
         self.xg_rates = xg_rates
+        self.free_transfers = free_transfers
+        self.budget_available = budget_available
 
 
 def get_multi_gw_xp_predictions(
@@ -582,11 +613,16 @@ def run_sa_optimizer(
     mathematically optimal solution. The optimizer searches thousands of combinations
     to find the highest xP squad within constraints over the specified horizon.
 
+    Hit costs are calculated automatically using free_transfers from context:
+    - First N free transfers cost 0 points
+    - Additional transfers cost -4 each
+    - Example: 2 transfers with 1 FT = -4 hit cost
+
     IMPORTANT: Call this tool AFTER generating your candidate scenarios to validate them,
     not BEFORE. The agent should reason first, then validate.
 
     Args:
-        ctx: Agent context with data dependencies
+        ctx: Agent context with data dependencies (includes free_transfers)
         current_squad_ids: List of 15 player IDs in current squad
         num_transfers: Number of transfers to make (1-15)
         target_gameweek: Gameweek to optimize for (1-38)
@@ -609,29 +645,31 @@ def run_sa_optimizer(
             ],
             "expected_xp": 65.3,  # Total squad xP
             "xp_gain": 4.2,  # Improvement vs current
-            "hit_cost": -4,  # Points deduction
+            "hit_cost": -4,  # Points deduction (calculated from free_transfers)
             "net_gain": 0.2,  # xP gain minus hit cost
+            "free_transfers_used": 1,  # How many FTs were used
             "runtime_seconds": 12.4,
             "formation": "4-4-2"
         }
 
     Example usage:
-        # Validate a 1-transfer scenario with 3-GW horizon (default, matches agent context)
+        # Validate a 1-transfer scenario (free if you have 1 FT)
         sa_result = run_sa_optimizer(
             current_squad_ids=[1,2,3,...,15],
             num_transfers=1,
             target_gameweek=18,
             horizon=3  # Default, can be 1, 3, or 5
         )
+        # If free_transfers=1, hit_cost will be 0
         # Compare your scenario's 3-GW xP to sa_result["expected_xp"]
 
-        # Use 1-GW horizon for immediate gameweek optimization
-        sa_result_1gw = run_sa_optimizer(
+        # Validate a 2-transfer scenario (takes a hit if only 1 FT)
+        sa_result_2t = run_sa_optimizer(
             current_squad_ids=[1,2,3,...,15],
-            num_transfers=1,
-            target_gameweek=18,
-            horizon=1
+            num_transfers=2,
+            target_gameweek=18
         )
+        # If free_transfers=1, hit_cost will be -4
 
         # Check if SA found a better transfer
         if len(sa_result["transfers"]) > 0:
@@ -645,11 +683,13 @@ def run_sa_optimizer(
         - horizon must be 1, 3, or 5 (validated)
         - Runtime increases with num_transfers (1: ~10s, 2: ~30s, 3: ~60s)
         - Returns empty transfers list if no improvement found
+        - Hit cost automatically calculated based on free_transfers in context
 
     Poka-yoke (error prevention):
         - current_squad_ids must be List[int], not DataFrame
         - All IDs validated against available players
         - Budget and squad constraints automatically enforced
+        - Free transfers from context used for hit cost calculation
 
     Performance:
         - 1 transfer: ~10-15s (exhaustive search if enabled)
@@ -779,9 +819,15 @@ def run_sa_optimizer(
 
         start_time = time.time()
 
+        # IMPORTANT: Pass the actual number of free transfers to the optimizer
+        # num_transfers parameter is how many transfers the agent wants to test,
+        # but we need to tell optimizer how many are free (from deps)
         optimal_squad, best_scenario, metadata = opt_service.optimize_transfers(
             current_squad=current_squad_df,
-            team_data={"bank": 0.0, "free_transfers": num_transfers},
+            team_data={
+                "bank": deps.budget_available,
+                "free_transfers": num_transfers,  # Tell optimizer how many transfers to make
+            },
             players_with_xp=players_with_xp,
             must_include_ids=set(must_include_ids) if must_include_ids else None,
             must_exclude_ids=set(must_exclude_ids) if must_exclude_ids else None,
@@ -807,15 +853,20 @@ def run_sa_optimizer(
                 }
             )
 
+        # Calculate hit cost using actual free transfers from context
+        actual_num_transfers = len(transfers)
+        hit_cost = calculate_hit_cost(actual_num_transfers, deps.free_transfers)
+
         # Build result
         result = {
             "optimal_squad_ids": optimal_squad["player_id"].tolist(),
             "transfers": transfers,
             "expected_xp": float(best_scenario.get("net_xp", 0.0)),
             "xp_gain": float(best_scenario.get("xp_gain", 0.0)),
-            "hit_cost": int(best_scenario.get("penalty", 0)),
+            "hit_cost": hit_cost,
             "net_gain": float(best_scenario.get("net_xp", 0.0))
-            - abs(best_scenario.get("penalty", 0)),
+            + hit_cost,  # hit_cost is negative
+            "free_transfers_used": min(actual_num_transfers, deps.free_transfers),
             "runtime_seconds": round(runtime, 1),
             "formation": best_scenario.get("formation", ""),
         }

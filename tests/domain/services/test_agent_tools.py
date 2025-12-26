@@ -19,10 +19,59 @@ from fpl_team_picker.domain.services.agent_tools import (
     AgentDeps,
     analyze_fixture_context,
     analyze_squad_weaknesses,
+    calculate_hit_cost,
     get_multi_gw_xp_predictions,
     get_template_players,
     run_sa_optimizer,
 )
+
+
+class TestCalculateHitCost:
+    """Test hit cost calculation helper function."""
+
+    def test_no_transfers_no_hit(self):
+        """Test that 0 transfers cost 0 points."""
+        assert calculate_hit_cost(0, 1) == 0
+        assert calculate_hit_cost(0, 2) == 0
+
+    def test_one_transfer_with_one_ft(self):
+        """Test that 1 transfer with 1 FT is free."""
+        assert calculate_hit_cost(1, 1) == 0
+
+    def test_one_transfer_with_two_fts(self):
+        """Test that 1 transfer with 2 FTs is free."""
+        assert calculate_hit_cost(1, 2) == 0
+
+    def test_two_transfers_with_one_ft(self):
+        """Test that 2 transfers with 1 FT costs -4."""
+        assert calculate_hit_cost(2, 1) == -4
+
+    def test_two_transfers_with_two_fts(self):
+        """Test that 2 transfers with 2 FTs is free."""
+        assert calculate_hit_cost(2, 2) == 0
+
+    def test_three_transfers_with_one_ft(self):
+        """Test that 3 transfers with 1 FT costs -8."""
+        assert calculate_hit_cost(3, 1) == -8
+
+    def test_three_transfers_with_two_fts(self):
+        """Test that 3 transfers with 2 FTs costs -4."""
+        assert calculate_hit_cost(3, 2) == -4
+
+    def test_wildcard_15_transfers(self):
+        """Test that 15 transfers with 15 FTs (wildcard) is free."""
+        assert calculate_hit_cost(15, 15) == 0
+
+    def test_no_free_transfers(self):
+        """Test that 0 FTs means every transfer costs -4."""
+        assert calculate_hit_cost(0, 0) == 0
+        assert calculate_hit_cost(1, 0) == -4
+        assert calculate_hit_cost(2, 0) == -8
+
+    def test_edge_case_more_fts_than_transfers(self):
+        """Test that having more FTs than transfers still costs 0."""
+        assert calculate_hit_cost(1, 5) == 0
+        assert calculate_hit_cost(2, 10) == 0
 
 
 class TestAgentDeps:
@@ -86,6 +135,65 @@ class TestAgentDeps:
         assert deps.ownership_trends is not None
         assert deps.fixture_difficulty is not None
         assert not deps.ownership_trends.empty
+
+    def test_agent_deps_with_free_transfers_and_budget(self):
+        """Test AgentDeps includes free_transfers and budget_available."""
+        players_df = pd.DataFrame({"player_id": [1]})
+        teams_df = pd.DataFrame({"team_id": [1]})
+        fixtures_df = pd.DataFrame({"id": [1]})
+        live_df = pd.DataFrame()
+
+        # Test with 1 free transfer (typical)
+        deps_1ft = AgentDeps(
+            players_data=players_df,
+            teams_data=teams_df,
+            fixtures_data=fixtures_df,
+            live_data=live_df,
+            free_transfers=1,
+            budget_available=2.5,
+        )
+        assert deps_1ft.free_transfers == 1
+        assert deps_1ft.budget_available == 2.5
+
+        # Test with 2 free transfers (banked)
+        deps_2ft = AgentDeps(
+            players_data=players_df,
+            teams_data=teams_df,
+            fixtures_data=fixtures_df,
+            live_data=live_df,
+            free_transfers=2,
+            budget_available=0.0,
+        )
+        assert deps_2ft.free_transfers == 2
+        assert deps_2ft.budget_available == 0.0
+
+        # Test with 0 free transfers (edge case)
+        deps_0ft = AgentDeps(
+            players_data=players_df,
+            teams_data=teams_df,
+            fixtures_data=fixtures_df,
+            live_data=live_df,
+            free_transfers=0,
+            budget_available=10.5,
+        )
+        assert deps_0ft.free_transfers == 0
+        assert deps_0ft.budget_available == 10.5
+
+    def test_agent_deps_defaults_to_one_free_transfer(self):
+        """Test that AgentDeps defaults to 1 free transfer if not specified."""
+        players_df = pd.DataFrame({"player_id": [1]})
+        teams_df = pd.DataFrame({"team_id": [1]})
+        fixtures_df = pd.DataFrame({"id": [1]})
+        live_df = pd.DataFrame()
+
+        deps = AgentDeps(
+            players_data=players_df,
+            teams_data=teams_df,
+            fixtures_data=fixtures_df,
+            live_data=live_df,
+        )
+        assert deps.free_transfers == 1  # Default
+        assert deps.budget_available == 0.0  # Default
 
 
 class TestGetMultiGWXPPredictions:
@@ -332,7 +440,7 @@ class TestRunSAOptimizer:
 
     @pytest.fixture
     def mock_context_for_sa(self):
-        """Create mock context for SA optimizer."""
+        """Create mock context for SA optimizer with 1 free transfer."""
         players_df = pd.DataFrame(
             {
                 "player_id": list(range(1, 16)),
@@ -348,6 +456,8 @@ class TestRunSAOptimizer:
             fixtures_data=pd.DataFrame({"id": [1], "event": [18]}),
             live_data=pd.DataFrame(),
             xg_rates=pd.DataFrame(),
+            free_transfers=1,
+            budget_available=0.0,
         )
 
         ctx = Mock(spec=RunContext)
@@ -395,10 +505,10 @@ class TestRunSAOptimizer:
 
     @patch("fpl_team_picker.domain.services.agent_tools.OptimizationService")
     @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
-    def test_run_sa_optimizer_success(
+    def test_run_sa_optimizer_success_free_transfer(
         self, mock_ml_service_class, mock_opt_service_class, mock_context_for_sa
     ):
-        """Test successful SA optimization run."""
+        """Test SA optimization with 1 transfer using 1 FT (free)."""
         # Mock ML service with 3-GW predictions (default horizon)
         mock_ml_service = Mock()
         mock_ml_service.calculate_3gw_expected_points.return_value = pd.DataFrame(
@@ -417,7 +527,7 @@ class TestRunSAOptimizer:
         best_scenario = {
             "net_xp": 65.0,
             "xp_gain": 4.0,
-            "penalty": -4,
+            "penalty": 0,  # No penalty from optimizer perspective
             "formation": "4-4-2",
         }
         metadata = {
@@ -438,6 +548,7 @@ class TestRunSAOptimizer:
         )
         mock_opt_service_class.return_value = mock_opt_service
 
+        # Test with 1 transfer using 1 FT (should be free)
         result = run_sa_optimizer(
             ctx=mock_context_for_sa,
             current_squad_ids=list(range(1, 16)),
@@ -447,10 +558,69 @@ class TestRunSAOptimizer:
 
         assert result["expected_xp"] == 65.0
         assert result["xp_gain"] == 4.0
-        assert result["hit_cost"] == -4
+        assert result["hit_cost"] == 0  # 1 transfer with 1 FT = free
+        assert result["free_transfers_used"] == 1
         assert len(result["transfers"]) == 1
         assert result["transfers"][0]["in_name"] == "NewPlayer"
         assert "runtime_seconds" in result
+
+    @patch("fpl_team_picker.domain.services.agent_tools.OptimizationService")
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
+    def test_run_sa_optimizer_with_hit(
+        self, mock_ml_service_class, mock_opt_service_class, mock_context_for_sa
+    ):
+        """Test SA optimization with 2 transfers using 1 FT (takes -4 hit)."""
+        # Mock ML service
+        mock_ml_service = Mock()
+        mock_ml_service.calculate_3gw_expected_points.return_value = pd.DataFrame(
+            {
+                "player_id": list(range(1, 16)),
+                "web_name": [f"Player{i}" for i in range(1, 16)],
+                "ml_xP": [5.0] * 15,
+                "xP_3gw": [15.0] * 15,
+            }
+        )
+        mock_ml_service_class.return_value = mock_ml_service
+
+        # Mock optimization service with 2 transfers
+        mock_opt_service = Mock()
+        optimal_squad_df = pd.DataFrame({"player_id": list(range(1, 16))})
+        best_scenario = {
+            "net_xp": 70.0,
+            "xp_gain": 6.0,
+            "penalty": 0,
+            "formation": "4-4-2",
+        }
+        metadata = {
+            "transfers_out": [
+                {"player_id": 5, "web_name": "Player5", "price": 5.0},
+                {"player_id": 6, "web_name": "Player6", "price": 6.0},
+            ],
+            "transfers_in": [
+                {"player_id": 42, "web_name": "NewPlayer1", "price": 5.5, "position": "MID"},
+                {"player_id": 43, "web_name": "NewPlayer2", "price": 6.5, "position": "FWD"},
+            ],
+        }
+        mock_opt_service.optimize_transfers.return_value = (
+            optimal_squad_df,
+            best_scenario,
+            metadata,
+        )
+        mock_opt_service_class.return_value = mock_opt_service
+
+        # Test with 2 transfers using 1 FT (should cost -4)
+        result = run_sa_optimizer(
+            ctx=mock_context_for_sa,
+            current_squad_ids=list(range(1, 16)),
+            num_transfers=2,
+            target_gameweek=18,
+        )
+
+        assert result["expected_xp"] == 70.0
+        assert result["xp_gain"] == 6.0
+        assert result["hit_cost"] == -4  # 2 transfers with 1 FT = -4 hit
+        assert result["free_transfers_used"] == 1
+        assert len(result["transfers"]) == 2
 
 
 class TestAnalyzeSquadWeaknesses:
