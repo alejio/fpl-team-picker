@@ -41,7 +41,9 @@ class TestAgentDeps:
         fixtures_df = pd.DataFrame(
             {"id": [1], "event": [18], "team_h": [1], "team_a": [2]}
         )
-        live_df = pd.DataFrame({"player_id": [1], "gameweek": [17], "total_points": [8]})
+        live_df = pd.DataFrame(
+            {"player_id": [1], "gameweek": [17], "total_points": [8]}
+        )
 
         deps = AgentDeps(
             players_data=players_df,
@@ -64,7 +66,12 @@ class TestAgentDeps:
 
         ownership_df = pd.DataFrame({"player_id": [1], "ownership_delta": [0.5]})
         fixture_difficulty_df = pd.DataFrame(
-            {"team_id": [1], "opponent_id": [2], "gameweek": [18], "overall_difficulty": [2.5]}
+            {
+                "team_id": [1],
+                "opponent_id": [2],
+                "gameweek": [18],
+                "overall_difficulty": [2.5],
+            }
         )
 
         deps = AgentDeps(
@@ -108,12 +115,8 @@ class TestGetMultiGWXPPredictions:
         ctx.deps = deps
         return ctx
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
-    def test_get_multi_gw_xp_predictions_1gw(
-        self, mock_ml_service_class, mock_context
-    ):
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
+    def test_get_multi_gw_xp_predictions_1gw(self, mock_ml_service_class, mock_context):
         """Test getting 1GW xP predictions."""
         # Mock ML service
         mock_service = Mock()
@@ -143,12 +146,8 @@ class TestGetMultiGWXPPredictions:
         assert result["players"][0]["xP_gw1"] == 8.2
         assert result["players"][0]["xP_uncertainty"] == 1.5
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
-    def test_get_multi_gw_xp_predictions_3gw(
-        self, mock_ml_service_class, mock_context
-    ):
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
+    def test_get_multi_gw_xp_predictions_3gw(self, mock_ml_service_class, mock_context):
         """Test getting 3GW xP predictions with per-GW breakdowns."""
         # Mock ML service to return 3GW data with all per-GW columns
         mock_service = Mock()
@@ -181,12 +180,8 @@ class TestGetMultiGWXPPredictions:
         assert player["xP_gw3"] == 9.5
         assert player["ml_xP"] == 25.5
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
-    def test_get_multi_gw_xp_summary_stats(
-        self, mock_ml_service_class, mock_context
-    ):
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
+    def test_get_multi_gw_xp_summary_stats(self, mock_ml_service_class, mock_context):
         """Test summary statistics calculation."""
         mock_service = Mock()
         mock_service.calculate_expected_points.return_value = pd.DataFrame(
@@ -213,9 +208,7 @@ class TestGetMultiGWXPPredictions:
         assert "avg_xp_total" in result["summary"]
         assert result["summary"]["avg_xp_gw1"] == pytest.approx((8.2 + 7.5 + 6.1) / 3)
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
     def test_get_multi_gw_xp_metadata(self, mock_ml_service_class, mock_context):
         """Test metadata is included in response."""
         mock_service = Mock()
@@ -401,9 +394,7 @@ class TestRunSAOptimizer:
             )
 
     @patch("fpl_team_picker.domain.services.agent_tools.OptimizationService")
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
     def test_run_sa_optimizer_success(
         self, mock_ml_service_class, mock_opt_service_class, mock_context_for_sa
     ):
@@ -430,9 +421,7 @@ class TestRunSAOptimizer:
             "formation": "4-4-2",
         }
         metadata = {
-            "transfers_out": [
-                {"player_id": 5, "web_name": "Player5", "price": 5.0}
-            ],
+            "transfers_out": [{"player_id": 5, "web_name": "Player5", "price": 5.0}],
             "transfers_in": [
                 {
                     "player_id": 42,
@@ -510,9 +499,7 @@ class TestAnalyzeSquadWeaknesses:
                 target_gameweek=18,
             )
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
     def test_analyze_squad_weaknesses_identifies_low_xp(
         self, mock_ml_service_class, mock_context_with_squad
     ):
@@ -525,7 +512,23 @@ class TestAnalyzeSquadWeaknesses:
                 "web_name": [f"Player{i}" for i in range(1, 16)],
                 "position": ["GKP", "GKP"] + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3,
                 "team_id": [1] * 15,  # ML service preserves team_id
-                "ml_xP": [2.0, 2.5, 2.1, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],  # First 3 are low
+                "ml_xP": [
+                    2.0,
+                    2.5,
+                    2.1,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                    5.0,
+                ],  # First 3 are low
             }
         )
         mock_ml_service_class.return_value = mock_service
@@ -580,9 +583,7 @@ class TestGetTemplatePlayers:
                 ownership_threshold=60.0,  # Too high
             )
 
-    @patch(
-        "fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService"
-    )
+    @patch("fpl_team_picker.domain.services.agent_tools.MLExpectedPointsService")
     def test_get_template_players_identifies_high_ownership(
         self, mock_ml_service_class, mock_context_for_templates
     ):

@@ -465,9 +465,7 @@ class TestErrorHandling:
         }
 
     @patch("fpl_team_picker.domain.services.transfer_planning_agent_service.Agent")
-    def test_handles_agent_runtime_error(
-        self, mock_agent_class, sample_gameweek_data
-    ):
+    def test_handles_agent_runtime_error(self, mock_agent_class, sample_gameweek_data):
         """Test handling of agent runtime errors."""
         mock_agent_instance = Mock()
         mock_agent_instance.run_sync.side_effect = RuntimeError(
@@ -550,10 +548,12 @@ class TestStrategyGuidanceCompleteness:
     def test_all_strategy_modes_have_guidance(self):
         """Test that every StrategyMode has corresponding guidance."""
         for strategy_mode in StrategyMode:
-            assert (
-                strategy_mode in STRATEGY_GUIDANCE
-            ), f"Missing guidance for {strategy_mode}"
-            assert STRATEGY_GUIDANCE[strategy_mode], f"Empty guidance for {strategy_mode}"
+            assert strategy_mode in STRATEGY_GUIDANCE, (
+                f"Missing guidance for {strategy_mode}"
+            )
+            assert STRATEGY_GUIDANCE[strategy_mode], (
+                f"Empty guidance for {strategy_mode}"
+            )
 
     def test_guidance_is_non_empty_string(self):
         """Test that all guidance entries are non-empty strings."""
