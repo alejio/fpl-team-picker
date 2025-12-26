@@ -148,7 +148,7 @@ def main(
         )
 
         # Print formatted output
-        print_recommendations(recommendations, logger)
+        print_recommendations(recommendations)
 
         logger.info("\n[green]✅ Recommendations generated successfully![/green]\n")
 
@@ -166,15 +166,15 @@ def print_recommendations(rec: SingleGWRecommendation):
     """Print recommendations in rich formatted output."""
 
     # Header
-    logger.info(
+    console.print(
         f"\n[bold cyan]📊 Transfer Recommendations for GW{rec.target_gameweek}[/bold cyan]\n"
     )
-    logger.info(
+    console.print(
         f"[cyan]Budget: £{rec.budget_available:.1f}m | Free Transfers: {rec.current_free_transfers}[/cyan]\n"
     )
 
     # Hold option
-    logger.info("[bold yellow]🛑 HOLD OPTION (Baseline)[/bold yellow]")
+    console.print("[bold yellow]🛑 HOLD OPTION (Baseline)[/bold yellow]")
     hold_table = Table(show_header=False, box=None, padding=(0, 2))
     hold_table.add_row("GW1 xP:", f"[green]{rec.hold_option.xp_gw1:.1f}[/green] points")
     hold_table.add_row("3GW xP:", f"[green]{rec.hold_option.xp_3gw:.1f}[/green] points")
@@ -182,8 +182,8 @@ def print_recommendations(rec: SingleGWRecommendation):
         "Next Week FTs:", f"[cyan]{rec.hold_option.free_transfers_next_week}[/cyan]"
     )
     hold_table.add_row("Reasoning:", f"[white]{rec.hold_option.reasoning}[/white]")
-    logger.info(hold_table)
-    logger.info()
+    console.print(hold_table)
+    console.print()
 
     # Transfer scenarios
     for i, scenario in enumerate(rec.recommended_scenarios, 1):
@@ -191,7 +191,7 @@ def print_recommendations(rec: SingleGWRecommendation):
         star = "⭐" if is_top else "📍"
         style = "bold green" if is_top else "bold white"
 
-        logger.info(
+        console.print(
             f"[{style}]{star} OPTION {i}: {scenario.scenario_id.upper()}[/{style}]"
         )
 
@@ -213,7 +213,7 @@ def print_recommendations(rec: SingleGWRecommendation):
                     f"[{cost_style}]{cost_str}[/{cost_style}]",
                 )
 
-            logger.info(transfer_table)
+            console.print(transfer_table)
 
         # Metrics table
         metrics_table = Table(show_header=False, box=None, padding=(0, 2))
@@ -253,7 +253,7 @@ def print_recommendations(rec: SingleGWRecommendation):
                 f"[{deviation_color}]{scenario.sa_deviation:+.1f}[/{deviation_color}] xP vs optimizer",
             )
 
-        logger.info(metrics_table)
+        console.print(metrics_table)
 
         # Context flags
         flags = []
@@ -265,24 +265,24 @@ def print_recommendations(rec: SingleGWRecommendation):
             flags.append("[magenta]Chip Prep[/magenta]")
 
         if flags:
-            logger.info(f"  Flags: {' | '.join(flags)}")
+            console.print(f"  Flags: {' | '.join(flags)}")
 
         # Reasoning
-        logger.info(f"  [white italic]{scenario.reasoning}[/white italic]")
-        logger.info()
+        console.print(f"  [white italic]{scenario.reasoning}[/white italic]")
+        console.print()
 
     # Final recommendation
-    logger.info("[bold green]🏆 TOP RECOMMENDATION[/bold green]")
+    console.print("[bold green]🏆 TOP RECOMMENDATION[/bold green]")
     top_rec_table = Table(show_header=False, box=None, padding=(0, 2))
     top_rec_table.add_row(
         "Choice:", f"[bold cyan]{rec.top_recommendation_id}[/bold cyan]"
     )
     top_rec_table.add_row("Reasoning:", f"[white]{rec.final_reasoning}[/white]")
-    logger.info(top_rec_table)
+    console.print(top_rec_table)
 
     # Context analysis summary
     if rec.context_analysis:
-        logger.info("\n[bold]📋 Context Analysis[/bold]")
+        console.print("\n[bold]📋 Context Analysis[/bold]")
         context_table = Table(show_header=False, box=None, padding=(0, 2))
 
         if "dgw_opportunities" in rec.context_analysis:
@@ -307,7 +307,7 @@ def print_recommendations(rec: SingleGWRecommendation):
                 f"[magenta]{rec.context_analysis['chip_timing']}[/magenta]",
             )
 
-        logger.info(context_table)
+        console.print(context_table)
 
 
 if __name__ == "__main__":

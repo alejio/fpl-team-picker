@@ -752,12 +752,23 @@ def run_sa_optimizer(
 
         # Create column alias for optimizer (it expects 'xP_5gw' column)
         # Map the horizon-specific column to what optimizer expects
+        logger.info(
+            f"📊 Available columns in players_with_xp: {list(players_with_xp.columns)}"
+        )
+
         if horizon == 1:
             # For 1-GW, use ml_xP as the optimization target
             players_with_xp["xP_5gw"] = players_with_xp["ml_xP"]
         elif horizon == 3:
             # For 3-GW, use xP_3gw as the optimization target
-            players_with_xp["xP_5gw"] = players_with_xp["xP_3gw"]
+            # Check if xP_3gw exists, if not use ml_xP (which is the 3gw total)
+            if "xP_3gw" in players_with_xp.columns:
+                players_with_xp["xP_5gw"] = players_with_xp["xP_3gw"]
+            else:
+                logger.warning(
+                    "⚠️ xP_3gw column not found, using ml_xP instead (this should contain 3GW total)"
+                )
+                players_with_xp["xP_5gw"] = players_with_xp["ml_xP"]
         # For horizon==5, xP_5gw already exists, no alias needed
 
         # Initialize optimization service
