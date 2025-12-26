@@ -73,7 +73,7 @@ class RawEnrichedPlayerData(BaseModel):
     second_name: Optional[str] = Field(None)
     team_id: int = Field(..., ge=1, le=20)
     position_id: int = Field(..., ge=1, le=4, description="Position ID 1-4")
-    now_cost: int = Field(..., ge=38, le=200, description="Price in 0.1m units")
+    now_cost: int = Field(..., ge=39, le=200, description="Price in 0.1m units")
     selected_by_percent: str = Field(..., description="Selection percentage")
     status: str = Field(default="a", description="Availability status")
     as_of_utc: datetime = Field(..., description="Data timestamp")

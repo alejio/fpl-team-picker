@@ -19,7 +19,7 @@ class XPModelConfig(BaseModel):
         default=True, description="Use ML model instead of rule-based model"
     )
     ml_model_path: str = Field(
-        default="models/hybrid/hybrid_gw1-15_20251213_123304.joblib",
+        default="models/hybrid/hybrid_gw1-17_20251225_203320.joblib",
         description="Trained using scripts/train_model.py full-pipeline --end-gw 14 --holdout-gws 2 --scorer fpl_hauler_ceiling --n-trials 75",
     )
     ml_ensemble_rule_weight: float = Field(
@@ -720,6 +720,20 @@ class CaptainSelectionConfig(BaseModel):
     )
 
 
+class TransferPlanningAgentConfig(BaseModel):
+    """Transfer Planning Agent Configuration"""
+
+    model: str = Field(
+        default="claude-sonnet-4-5",
+        description="Anthropic model to use",
+    )
+    api_key: str = Field(
+        default=None,
+        description="Anthropic API key",
+        nullable=True,
+    )
+
+
 class ChipCalendarConfig(BaseModel):
     """Chip Calendar and Deadline Configuration for 2025-26 Season"""
 
@@ -803,6 +817,10 @@ class FPLConfig(BaseModel):
     captain_selection: CaptainSelectionConfig = Field(
         default_factory=CaptainSelectionConfig,
         description="Intelligent Captain Selection Configuration",
+    )
+    transfer_planning_agent: TransferPlanningAgentConfig = Field(
+        default_factory=TransferPlanningAgentConfig,
+        description="Transfer Planning Agent Configuration",
     )
 
     @model_validator(mode="after")

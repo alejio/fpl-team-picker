@@ -296,9 +296,9 @@ class HybridPositionModel:
                 if null_pos_mask.any():
                     null_player_ids = unpredicted_rows[null_pos_mask][
                         "player_id"
-                    ].unique()
+                    ].tolist()
                     error_msg += (
-                        f"\nPlayer IDs with NaN positions: {list(null_player_ids)[:20]}"
+                        f"\nPlayer IDs with NaN positions: {list(null_player_ids[:20])}"
                     )
 
                 # Also show any non-null but unrecognized positions

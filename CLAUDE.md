@@ -25,6 +25,7 @@ Fantasy Premier League (FPL) analysis suite for the 2025-26 season with season-s
 - **PlayerAnalyticsService**: Type-safe player operations (70+ attributes)
 - **PredictionStorageService**: Save/load committed predictions for accurate performance tracking
 - **AFCONExclusionService**: Tournament-based player exclusions (AFCON 2025: GW17-22)
+- **TransferPlanningAgentService**: LLM-based single-GW transfer recommendations using Claude Agent SDK
 
 **Interfaces** (`interfaces/`): Marimo notebooks (gameweek_manager.py)
 
@@ -349,6 +350,107 @@ uv run marimo check fpl_team_picker/interfaces/ --fix
 - **Ceiling bonus**: Adds bonus for high-upside players (ceiling > 10) when `ceiling_bonus_enabled=True`
 - Used for weekly transfers (1-3 players), wildcards, and initial squad generation
 - Typical runtime: ~10-45 seconds depending on iterations
+
+## Single-Gameweek Transfer Recommendations (LLM Agent)
+
+**TransferPlanningAgentService** - Strategic single-GW transfer recommendations using Claude Agent SDK with orchestrator-workers pattern.
+
+**Architecture (from Anthropic's "Building Effective Agents")**:
+- **Orchestrator-Workers Pattern**: Main LLM agent delegates to 5 specialized tools
+- **Start Simple**: Core 5 tools in Phase 1, extensible for future enhancements
+- **ACI Investment**: Comprehensive tool docstrings with examples, edge cases, performance hints
+- **Thinking Space**: 6-step workflow in system prompt encourages planning before execution
+- **SA as Validator**: Agent reasons strategically first, SA optimizer validates/benchmarks
+- **Hallucination Prevention**: Explicit instructions to only use team_name from tool outputs (never training data) to prevent incorrect player-team associations
+
+**Capabilities:**
+- **Single-GW Focus**: Recommend transfers for target gameweek only (not sequential multi-week)
+- **Multi-GW Context**: Looks ahead 3 gameweeks for DGWs, fixture swings, chip timing
+- **Multiple Options**: Returns 3-5 ranked transfer scenarios + hold baseline
+- **Strategic Modes**: balanced, conservative, aggressive
+- **Hit Analysis**: Configurable ROI threshold for -4 hits (default: +5 xP over 3 GW)
+- **SA Validation**: Compares agent scenarios against mathematically optimal SA solution
+
+**5 Agent Tools:**
+1. `get_multi_gw_xp_predictions`: 1/3/5 GW xP forecasts with per-GW breakdowns, includes **team_name merge** to prevent LLM hallucinations
+2. `analyze_fixture_context`: DGW/BGW detection + fixture difficulty runs
+3. `run_sa_optimizer`: SA optimizer validation/benchmarking
+4. `analyze_squad_weaknesses`: Identify upgrade targets (low xP, rotation, injury risks)
+5. `get_template_players`: High ownership (>30%) players for safety consideration
+
+**Output Structure** (`SingleGWRecommendation` Pydantic model):
+- **Hold Option**: Baseline no-transfer scenario with xP projections
+- **Transfer Scenarios**: 3-5 ranked by 3GW net ROI, each with:
+  - Transfers list (player_out → player_in)
+  - Single-GW metrics (xP, gain, hit cost, net gain)
+  - Multi-GW metrics (3GW xP, gain, ROI)
+  - Strategic reasoning and confidence level
+  - Context flags (DGW leverage, fixture swing, chip prep)
+  - SA validation deviation
+- **Context Analysis**: DGW opportunities, fixture swings, chip timing
+- **Final Recommendation**: Top-ranked scenario ID + strategic summary
+
+**Usage:**
+```bash
+export ANTHROPIC_API_KEY=your_key_here
+
+# Default: 5 scenarios, balanced strategy, GW18
+uv run python scripts/transfer_recommendation_agent.py --gameweek 18
+
+# Conservative strategy with 3 options
+uv run python scripts/transfer_recommendation_agent.py -g 18 -s conservative -n 3
+
+# Aggressive with lower hit threshold
+uv run python scripts/transfer_recommendation_agent.py -g 18 -s aggressive -r 4.0
+
+# Use faster/cheaper Haiku model
+uv run python scripts/transfer_recommendation_agent.py -g 18 -m claude-haiku-3-7
+```
+
+**Configuration** (`TransferPlanningAgentConfig`):
+- `model`: Claude model (default: "claude-sonnet-4-5")
+- `api_key`: Anthropic API key (env: ANTHROPIC_API_KEY or FPL_TRANSFER_PLANNING_AGENT_API_KEY)
+- `default_strategy`: "balanced", "conservative", "aggressive"
+- `default_hit_roi_threshold`: Minimum xP gain for -4 hit (default: 5.0)
+
+**Example Output:**
+```
+📊 Transfer Recommendations for GW18
+Budget: £2.3m | Free Transfers: 1
+
+🛑 HOLD OPTION (Baseline)
+  GW1: 63.2 xP | 3GW: 189.5 xP
+  Bank FT → 2 FTs next week
+  Reasoning: Strong fixtures, worth banking for future flexibility
+
+⭐ OPTION 1: PREMIUM_UPGRADE
+  Transfer: Watkins → Haaland (£3.1m)
+  GW1: 65.8 xP (+2.6) | Net: -1.4 (with -4 hit)
+  3GW: 197.2 xP (+7.7) | ROI: +3.7
+  Hit: -4 | Confidence: high
+  SA Deviation: +0.3 xP vs optimizer
+  Reasoning: Haaland has Liverpool(H) DGW in GW20, worth taking hit for 3GW gain
+
+📍 OPTION 2: DIFFERENTIAL_PUNT
+  Transfer: Saka → Palmer (£0.5m)
+  GW1: 64.1 xP (+0.9) | Net: +0.9
+  3GW: 192.3 xP (+2.8) | ROI: +2.8
+  Hit: 0 | Confidence: medium
+  Reasoning: Palmer has easy fixture run (GW18-20), differential at 18% ownership
+
+🏆 TOP RECOMMENDATION: PREMIUM_UPGRADE
+  3GW ROI (+3.7) justifies the hit, DGW opportunity in GW20
+```
+
+**Design Principles:**
+- **Agent reasons strategically**: Considers fixtures, DGWs, template safety, chip timing
+- **SA validates mathematically**: Ensures agent picks are near-optimal xP-wise
+- **User maintains control**: Multiple ranked options allow informed decision-making
+- **Transparent reasoning**: Each scenario explains WHY it's recommended
+
+**Status**: Phase 1 complete (core backend + CLI). Phase 2-4 pending (tests, integration, UI).
+
+See: Draft PR #45 and plan at `/Users/alex/.claude/plans/prancy-launching-emerson.md` for implementation details.
 
 ## AFCON Player Exclusions (GW16-22, 2025-26 Season)
 
