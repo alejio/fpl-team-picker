@@ -372,7 +372,7 @@ uv run marimo check fpl_team_picker/interfaces/ --fix
 - **SA Validation**: Compares agent scenarios against mathematically optimal SA solution
 
 **5 Agent Tools:**
-1. `get_multi_gw_xp_predictions`: 1/3/5 GW xP forecasts with per-GW breakdowns
+1. `get_multi_gw_xp_predictions`: 1/3/5 GW xP forecasts with per-GW breakdowns, includes **team_name merge** to prevent LLM hallucinations
 2. `analyze_fixture_context`: DGW/BGW detection + fixture difficulty runs
 3. `run_sa_optimizer`: SA optimizer validation/benchmarking
 4. `analyze_squad_weaknesses`: Identify upgrade targets (low xP, rotation, injury risks)
