@@ -218,7 +218,7 @@ class TransferPlanningAgentService:
                 console=config.logfire.console,
             )
 
-            # Enable global instrumentation for pydantic-ai Agent
+            # Enable global instrumentation for pydantic-ai Agent (idempotent)
             logfire.instrument_pydantic_ai()
 
             # Log status based on actual configuration

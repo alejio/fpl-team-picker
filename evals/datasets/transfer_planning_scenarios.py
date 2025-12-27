@@ -276,6 +276,7 @@ transfer_planning_dataset = Dataset(
 def get_basic_scenarios() -> Dataset:
     """Get basic transfer scenarios (upgrades, differentials, template)."""
     return Dataset(
+        name="fpl_transfer_planning_basic",
         cases=[
             create_premium_upgrade_case(),
             create_differential_punt_case(),
@@ -287,6 +288,7 @@ def get_basic_scenarios() -> Dataset:
 def get_strategic_scenarios() -> Dataset:
     """Get strategic scenarios (DGW, fixture swings, chip prep)."""
     return Dataset(
+        name="fpl_transfer_planning_strategic",
         cases=[
             create_dgw_opportunity_case(),
             create_fixture_swing_case(),
@@ -298,6 +300,7 @@ def get_strategic_scenarios() -> Dataset:
 def get_constraint_scenarios() -> Dataset:
     """Get constraint-based scenarios (budget, injury, hold)."""
     return Dataset(
+        name="fpl_transfer_planning_constraints",
         cases=[
             create_budget_constraint_case(),
             create_injury_emergency_case(),

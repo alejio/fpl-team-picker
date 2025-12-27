@@ -501,8 +501,17 @@ Evaluate the quality of this recommendation."""
 
             # Parse JSON response
             import json
+            import re
 
-            scores = json.loads(result.data)
+            # Agent.run() returns result.output for text responses
+            output_text = result.output if hasattr(result, "output") else str(result)
+
+            # Try to extract JSON from response (might have markdown code blocks)
+            json_match = re.search(r"\{[^{}]*\}", output_text, re.DOTALL)
+            if json_match:
+                output_text = json_match.group(0)
+
+            scores = json.loads(output_text)
 
             # Return weighted overall score
             overall = (

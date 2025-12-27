@@ -501,8 +501,12 @@ def run_transfer_planning_eval(
     if not api_key:
         raise ValueError("ANTHROPIC_API_KEY environment variable is required")
 
+    # If Logfire is enabled at eval level, don't re-initialize in service
+    # (Logfire is already configured in run_evaluations with service name "fpl-transfer-evals")
+    service_logfire_enabled = False  # Always False when called from evals - Logfire is configured at eval level
+
     service = TransferPlanningAgentService(
-        model=model, api_key=api_key, enable_logfire=enable_logfire
+        model=model, api_key=api_key, enable_logfire=service_logfire_enabled
     )
 
     # Run agent
@@ -535,6 +539,40 @@ async def run_evaluations(
         max_cases: Maximum number of cases to run (None = all)
         use_llm_judge: Whether to use LLM-as-judge evaluator (slower, costs extra)
     """
+    # Configure Logfire once at eval level if enabled
+    if enable_logfire:
+        try:
+            import logfire
+            from fpl_team_picker.config.settings import config
+
+            # Configure Logfire for evals (use eval-specific service name)
+            logfire_token = os.getenv("LOGFIRE_TOKEN") or os.getenv("FPL_LOGFIRE_TOKEN")
+            logfire.configure(
+                token=logfire_token,
+                service_name="fpl-transfer-evals",  # Distinct service name for evals
+                service_version=config.logfire.service_version,
+                send_to_logfire=config.logfire.send_to_logfire,
+                console=config.logfire.console,
+            )
+
+            # Enable global instrumentation for pydantic-ai Agent
+            logfire.instrument_pydantic_ai()
+
+            token_status = "with token" if logfire_token else "without token"
+            logger.info(
+                f"✅ Logfire observability enabled for evals ({token_status}): "
+                f"service=fpl-transfer-evals v{config.logfire.service_version}"
+            )
+            logger.info(
+                "📊 View traces in Logfire UI: https://logfire.pydantic.dev "
+                "(look for service 'fpl-transfer-evals' in project 'fpl-team-picker')"
+            )
+        except Exception as e:
+            logger.warning(
+                f"⚠️  Failed to initialize Logfire for evals: {e}. "
+                "Continuing without observability."
+            )
+
     logger.info(f"Starting evaluations for dataset: {dataset.name}")
     logger.info(f"Total cases: {len(dataset.cases)}")
     logger.info(f"Model: {model}")
@@ -544,6 +582,7 @@ async def run_evaluations(
     # Limit cases if requested
     if max_cases:
         dataset = Dataset(
+            name=dataset.name or "fpl_transfer_planning",
             cases=dataset.cases[:max_cases],
         )
         logger.info(f"Limited to {max_cases} cases")
@@ -578,26 +617,52 @@ async def run_evaluations(
 
     # Re-create dataset with evaluators
     dataset_with_evals = Dataset(
+        name=dataset.name,
         cases=dataset.cases,
         evaluators=list(evaluators_dict.values()),
     )
 
     report = await dataset_with_evals.evaluate(eval_wrapper)
 
-    # Print detailed report
+    # Print detailed report (following pydantic-evals example pattern)
     logger.info("\n" + "=" * 80)
     logger.info("EVALUATION RESULTS")
     logger.info("=" * 80 + "\n")
 
-    # Print report with default settings
-    report.print()
+    # Print report with input/output included (like example)
+    report.print(include_input=True, include_output=True)
 
-    # Print summary statistics
+    # Print summary statistics (following example pattern)
     logger.info("\n" + "=" * 80)
     logger.info("SUMMARY STATISTICS")
     logger.info("=" * 80 + "\n")
 
-    logger.info("Evaluation complete. See report above for details.")
+    # Check averages like the example
+    avg = report.averages()
+    if avg:
+        # Show pass rate if available
+        if hasattr(avg, "assertions") and avg.assertions is not None:
+            pass_rate = avg.assertions
+            if pass_rate == 1.0:
+                logger.info("✅ All tests passed!")
+            else:
+                logger.info(f"❌ Some tests failed (pass rate: {pass_rate:.1%})")
+
+        # Show duration if available
+        if hasattr(avg, "task_duration") and avg.task_duration is not None:
+            logger.info(f"Average duration: {avg.task_duration:.2f}s")
+
+    # Show case summary
+    total_cases = len(report.cases)
+    # Check for failures - use report.failures list (contains case failures)
+    failed_cases = len(report.failures) if hasattr(report, "failures") else 0
+    passed_cases = total_cases - failed_cases
+
+    logger.info(f"Total cases: {total_cases}")
+    logger.info(f"Passed: {passed_cases}")
+    if failed_cases > 0:
+        logger.info(f"Failed: {failed_cases}")
+
     logger.info("=" * 80 + "\n")
 
 
