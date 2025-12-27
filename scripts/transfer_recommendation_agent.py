@@ -71,7 +71,7 @@ def main(
         "claude-sonnet-4-5",
         "--model",
         "-m",
-        help="Anthropic model to use (e.g., claude-haiku-3-7 for faster/cheaper)",
+        help="Anthropic model to use (e.g., claude-haiku-4-5 for faster/cheaper)",
     ),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
     enable_logfire: bool = typer.Option(

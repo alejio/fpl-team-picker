@@ -45,9 +45,9 @@ class TestTransferPlanningAgentServiceInit:
     def test_init_with_custom_model(self):
         """Test initialization with custom model."""
         service = TransferPlanningAgentService(
-            model="claude-haiku-3-7", api_key="test-key"
+            model="claude-haiku-4-5", api_key="test-key"
         )
-        assert service.model_name == "claude-haiku-3-7"
+        assert service.model_name == "claude-haiku-4-5"
         assert service.api_key == "test-key"
 
     def test_init_without_api_key_raises_error(self):
