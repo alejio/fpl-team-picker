@@ -16,7 +16,8 @@ Usage:
     # Quick test with 1 case (combined short options)
     uv run python evals/run_transfer_evals.py -d basic -n 1
 
-    # Enable Logfire reporting
+    # Enable Logfire reporting (requires LOGFIRE_TOKEN)
+    export LOGFIRE_TOKEN=your_token_here
     uv run python evals/run_transfer_evals.py --enable-logfire
 
     # Get help
@@ -521,7 +522,7 @@ def run_transfer_planning_eval(
 async def run_evaluations(
     dataset: Dataset,
     model: str = "claude-sonnet-4-5",
-    enable_logfire: bool = False,
+    enable_logfire: bool = False,  # Default False for opt-in behavior
     max_cases: int | None = None,
     use_llm_judge: bool = False,
 ) -> None:
@@ -632,9 +633,9 @@ def main(
         help="Claude model to use",
     ),
     enable_logfire: bool = typer.Option(
-        True,
+        False,
         "--enable-logfire",
-        help="Enable Logfire observability",
+        help="Enable Logfire observability (requires LOGFIRE_TOKEN environment variable)",
     ),
     max_cases: Optional[int] = typer.Option(
         None,
@@ -661,12 +662,23 @@ def main(
         # Quick test with 1 case
         $ python evals/run_transfer_evals.py -d basic -n 1
 
-        # Enable Logfire
+        # Enable Logfire (requires LOGFIRE_TOKEN)
+        $ export LOGFIRE_TOKEN=your_token_here
         $ python evals/run_transfer_evals.py --enable-logfire
 
         # Use LLM-as-judge for subjective quality assessment
         $ python evals/run_transfer_evals.py -d basic --use-llm-judge
     """
+    # Validate Logfire token if enabled
+    if enable_logfire:
+        logfire_token = os.getenv("LOGFIRE_TOKEN") or os.getenv("FPL_LOGFIRE_TOKEN")
+        if not logfire_token:
+            logger.error(
+                "❌ --enable-logfire is set but LOGFIRE_TOKEN (or FPL_LOGFIRE_TOKEN) environment variable is not set."
+            )
+            logger.error("   Set the token with: export LOGFIRE_TOKEN=your_token_here")
+            raise typer.Exit(1)
+
     # Select dataset
     if dataset == DatasetChoice.BASIC:
         selected_dataset = get_basic_scenarios()

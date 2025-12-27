@@ -15,6 +15,7 @@ Usage:
     uv run python scripts/transfer_recommendation_agent.py --gameweek 18 --strategy aggressive --roi-threshold 4.0
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -126,8 +127,17 @@ def main(
             f"[cyan]Target: GW{gameweek} | Strategy: {strategy_mode.value} | Options: {num_options} | ROI Threshold: +{roi_threshold} xP[/cyan]\n"
         )
 
-        # Show Logfire status if enabled
+        # Validate Logfire token if enabled
         if enable_logfire:
+            logfire_token = os.getenv("LOGFIRE_TOKEN") or os.getenv("FPL_LOGFIRE_TOKEN")
+            if not logfire_token:
+                console.print(
+                    "[bold red]❌ Error: --enable-logfire is set but LOGFIRE_TOKEN (or FPL_LOGFIRE_TOKEN) environment variable is not set.[/bold red]"
+                )
+                console.print(
+                    "[yellow]   Set the token with: export LOGFIRE_TOKEN=your_token_here[/yellow]"
+                )
+                raise typer.Exit(1)
             console.print("[yellow]🔍 Logfire observability enabled[/yellow]")
 
         # Load gameweek data
