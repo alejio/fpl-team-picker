@@ -18,14 +18,15 @@ Usage:
 """
 
 from .settings import (
-    FPLConfig,
-    XPModelConfig,
-    TeamStrengthConfig,
-    MinutesModelConfig,
-    StatisticalEstimationConfig,
     FixtureDifficultyConfig,
+    FPLConfig,
+    LogfireConfig,
+    MinutesModelConfig,
     OptimizationConfig,
+    StatisticalEstimationConfig,
+    TeamStrengthConfig,
     VisualizationConfig,
+    XPModelConfig,
     config,
     load_config,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "FixtureDifficultyConfig",
     "OptimizationConfig",
     "VisualizationConfig",
+    "LogfireConfig",
     "config",
     "load_config",
 ]

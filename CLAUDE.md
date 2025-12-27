@@ -452,6 +452,67 @@ Budget: £2.3m | Free Transfers: 1
 
 See: Draft PR #45 and plan at `/Users/alex/.claude/plans/prancy-launching-emerson.md` for implementation details.
 
+## Logfire Observability (Transfer Planning Agent)
+
+**Pydantic Logfire** - Production observability for LLM-based transfer planning agent.
+
+**What's Instrumented (Phase 1)**:
+- Agent lifecycle (initialization, completion, errors)
+- Tool calls (all 5 agent tools with arguments/outputs)
+- LLM requests/responses (prompts, completions, token usage)
+- Performance metrics (latency, model calls)
+
+**Configuration** (`LogfireConfig`):
+- `enabled`: Enable/disable (default: False for opt-in)
+- `token`: API token (env: LOGFIRE_TOKEN or FPL_LOGFIRE_TOKEN)
+- `service_name`: Service identifier (default: "fpl-transfer-agent")
+- `service_version`: Service version for tracing (default: "1.0.0")
+- `send_to_logfire`: Send to cloud (default: 'if-token-present' for automatic detection)
+  - `'if-token-present'`: Auto-detect token and send if available (recommended)
+  - `True`: Always send (requires token)
+  - `False`: Never send (local-only)
+- `console`: Print to console (default: False)
+
+**Usage:**
+
+```bash
+# Enable via CLI flag (requires LOGFIRE_TOKEN)
+export LOGFIRE_TOKEN=your_token_here
+uv run python scripts/transfer_recommendation_agent.py --gameweek 18 --enable-logfire
+
+# Enable via config file (config.json)
+{
+  "logfire": {
+    "enabled": true,
+    "token": "your_token_here"
+  }
+}
+
+# Enable via environment variables
+export FPL_LOGFIRE_ENABLED=true
+export LOGFIRE_TOKEN=your_token_here
+
+# Local-only mode (console output, no cloud)
+export FPL_LOGFIRE_ENABLED=true
+export FPL_LOGFIRE_CONSOLE=true
+export FPL_LOGFIRE_SEND_TO_LOGFIRE=false
+```
+
+**What You'll See:**
+- Agent reasoning steps (7-step workflow)
+- Tool call traces with inputs/outputs
+- LLM token usage and costs
+- Errors with full context
+- Performance bottlenecks
+
+**Graceful Degradation:**
+- With `send_to_logfire='if-token-present'` (default): Automatically detects token, no warnings needed
+- If initialization fails: Warns and continues without observability
+- Never crashes the agent service
+- Best practice: Use default 'if-token-present' for seamless dev/prod parity
+
+**Status**: Phase 1 complete (global instrumentation). Opt-in by default.
+
 ## AFCON Player Exclusions (GW16-22, 2025-26 Season)
 
 **AFCONExclusionService** - Automatic exclusion of players participating in Africa Cup of Nations 2025.
@@ -488,7 +549,7 @@ high_impact = service.get_afcon_player_ids(impact_filter=["high"])  # Just high-
 
 Pydantic models with env var overrides (`FPL_{SECTION}_{FIELD}`). Override via `config.json`.
 
-Config sections: XPModel, XPCalibration, TeamStrength, MinutesModel, StatisticalEstimation, Optimization, Visualization, ChipAssessment.
+Config sections: XPModel, XPCalibration, TeamStrength, MinutesModel, StatisticalEstimation, Optimization, Visualization, ChipAssessment, TransferPlanningAgent, Logfire.
 
 ## Data Contract & Boundary Validation
 

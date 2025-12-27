@@ -6,8 +6,9 @@ Provides type-safe configuration with validation and environment variable suppor
 """
 
 import os
-from typing import Dict, List, Optional
 from pathlib import Path
+from typing import Dict, List, Optional
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -780,6 +781,50 @@ class ChipCalendarConfig(BaseModel):
     )
 
 
+class LogfireConfig(BaseModel):
+    """Logfire Observability Configuration"""
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable Logfire observability for transfer planning agent (opt-in for production monitoring)",
+    )
+    token: str | None = Field(
+        default=None,
+        description="Logfire API token (from env: LOGFIRE_TOKEN or FPL_LOGFIRE_TOKEN)",
+    )
+    service_name: str = Field(
+        default="fpl-transfer-agent",
+        description="Service name for Logfire traces",
+    )
+    service_version: str = Field(
+        default="1.0.0",
+        description="Service version for Logfire traces",
+    )
+    send_to_logfire: bool | str = Field(
+        default="if-token-present",
+        description="Send traces to Logfire cloud: True (always), False (never), 'if-token-present' (auto-detect token)",
+    )
+    console: bool = Field(
+        default=False,
+        description="Print traces to console (useful for debugging, but noisy)",
+    )
+
+    @model_validator(mode="after")
+    def validate_token_when_enabled(self):
+        """Warn if enabled but no token provided and send_to_logfire is True."""
+        # Only warn if explicitly set to always send (True), not for 'if-token-present'
+        if self.enabled and self.send_to_logfire is True and not self.token:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                "⚠️  Logfire enabled with send_to_logfire=True but no token provided. "
+                "Set LOGFIRE_TOKEN or FPL_LOGFIRE_TOKEN environment variable, "
+                "or use send_to_logfire='if-token-present' for automatic detection."
+            )
+        return self
+
+
 class FPLConfig(BaseModel):
     """Master FPL Configuration Container"""
 
@@ -821,6 +866,10 @@ class FPLConfig(BaseModel):
     transfer_planning_agent: TransferPlanningAgentConfig = Field(
         default_factory=TransferPlanningAgentConfig,
         description="Transfer Planning Agent Configuration",
+    )
+    logfire: LogfireConfig = Field(
+        default_factory=LogfireConfig,
+        description="Logfire Observability Configuration",
     )
 
     @model_validator(mode="after")
@@ -877,6 +926,14 @@ def load_config(
 
     # Environment variable overrides
     env_overrides = {}
+
+    # Special handling for LOGFIRE_TOKEN (can use either LOGFIRE_TOKEN or FPL_LOGFIRE_TOKEN)
+    logfire_token = os.getenv("LOGFIRE_TOKEN") or os.getenv("FPL_LOGFIRE_TOKEN")
+    if logfire_token:
+        if "logfire" not in config_dict:
+            config_dict["logfire"] = {}
+        config_dict["logfire"]["token"] = logfire_token
+
     for env_var, value in os.environ.items():
         if env_var.startswith("FPL_"):
             # Parse FPL_SECTION_FIELD pattern
