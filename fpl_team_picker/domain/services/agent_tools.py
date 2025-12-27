@@ -466,8 +466,8 @@ def _detect_dgw_bgw(
         gw_fixtures = fixtures[fixtures["event"] == gw]
 
         # Count home and away fixtures per team
-        home_counts = gw_fixtures["team_h"].value_counts()
-        away_counts = gw_fixtures["team_a"].value_counts()
+        home_counts = gw_fixtures["home_team_id"].value_counts()
+        away_counts = gw_fixtures["away_team_id"].value_counts()
         total_counts = home_counts.add(away_counts, fill_value=0)
 
         # Find teams with DGW (2+ fixtures)
@@ -520,7 +520,8 @@ def _analyze_fixture_runs(
 
         # Get this team's fixtures
         team_fixtures = fixtures[
-            (fixtures["team_h"] == team_id) | (fixtures["team_a"] == team_id)
+            (fixtures["home_team_id"] == team_id)
+            | (fixtures["away_team_id"] == team_id)
         ]
 
         if len(team_fixtures) == 0:
@@ -531,8 +532,10 @@ def _analyze_fixture_runs(
         fixture_details = []
 
         for _, fixture in team_fixtures.iterrows():
-            is_home = fixture["team_h"] == team_id
-            opponent_id = fixture["team_a"] if is_home else fixture["team_h"]
+            is_home = fixture["home_team_id"] == team_id
+            opponent_id = (
+                fixture["away_team_id"] if is_home else fixture["home_team_id"]
+            )
             opponent_name = teams[teams["team_id"] == opponent_id]["name"].values[0]
 
             # Get difficulty from fixture_difficulty_df

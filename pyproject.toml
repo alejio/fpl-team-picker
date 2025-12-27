@@ -32,6 +32,7 @@ dependencies = [
     "loguru==0.7.3",
     "pydantic-ai>=1.39.0",
     "logfire>=4.16.0",
+    "pydantic-evals>=0.0.17",
 ]
 
 [dependency-groups]

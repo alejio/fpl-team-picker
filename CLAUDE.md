@@ -404,7 +404,7 @@ uv run python scripts/transfer_recommendation_agent.py -g 18 -s conservative -n 
 uv run python scripts/transfer_recommendation_agent.py -g 18 -s aggressive -r 4.0
 
 # Use faster/cheaper Haiku model
-uv run python scripts/transfer_recommendation_agent.py -g 18 -m claude-haiku-3-7
+uv run python scripts/transfer_recommendation_agent.py -g 18 -m claude-haiku-4-5
 ```
 
 **Configuration** (`TransferPlanningAgentConfig`):
@@ -512,6 +512,81 @@ export FPL_LOGFIRE_SEND_TO_LOGFIRE=false
 - Best practice: Use default 'if-token-present' for seamless dev/prod parity
 
 **Status**: Phase 1 complete (global instrumentation). Opt-in by default.
+
+## Transfer Planning Agent Evaluations (Pydantic AI Evals)
+
+**Systematic evaluation framework** for transfer planning agent quality using [Pydantic AI Evals](https://ai.pydantic.dev/evals/).
+
+**10 Realistic Test Scenarios**:
+1. Premium upgrade with hit analysis
+2. Differential punt (low ownership)
+3. Template safety (conservative strategy)
+4. DGW exploitation
+5. Fixture swing opportunities
+6. Budget-constrained decisions
+7. Injury emergency response
+8. Aggressive ceiling-seeking
+9. Banking transfer decisions
+10. Chip preparation (Wildcard)
+
+**5 Custom Evaluators**:
+- **StructuralValidityEvaluator** (20%): Pydantic model compliance
+- **ScenarioCoverageEvaluator** (25%): Hold option, min/max scenarios, top pick validity
+- **StrategicQualityEvaluator** (30%): Strategic flags (DGW/fixture/chip), reasoning quality
+- **HitAnalysisEvaluator** (15%): ROI calculations, threshold adherence
+- **OwnershipStrategyEvaluator** (10%): Template vs differential decisions
+- **CompositeTransferQualityEvaluator**: Weighted composite score
+
+**Usage:**
+
+```bash
+# Run all evaluations (10 scenarios, ~5-10 min)
+uv run python evals/run_transfer_evals.py
+
+# Run specific dataset subset
+uv run python evals/run_transfer_evals.py --dataset basic  # 3 scenarios
+uv run python evals/run_transfer_evals.py --dataset strategic  # DGW/fixture/chip
+uv run python evals/run_transfer_evals.py --dataset constraints  # Budget/injury/hold
+
+# Test with Haiku (faster/cheaper)
+uv run python evals/run_transfer_evals.py --model claude-haiku-4-5
+
+# Quick test (first 3 cases only)
+uv run python evals/run_transfer_evals.py --max-cases 3
+
+# Enable Logfire for visualization
+export LOGFIRE_TOKEN=your_token_here
+uv run python evals/run_transfer_evals.py --enable-logfire
+```
+
+**Output Metrics**:
+- Per-case scores for each evaluator (0.0-1.0)
+- Composite quality score (weighted average)
+- Overall pass rate
+- Failed case details for debugging
+
+**Example Output**:
+```
+SUMMARY STATISTICS
+structural_validity      : 100.00%
+scenario_coverage        : 98.00%
+strategic_quality        : 87.50%
+hit_analysis            : 85.00%
+ownership_strategy      : 90.00%
+composite_score         : 90.10%
+
+Overall Pass Rate: 90.00%
+Total Cases: 10
+Passed: 9
+Failed: 1
+```
+
+**Extending:**
+- Add cases: Edit `evals/datasets/transfer_planning_scenarios.py`
+- Add evaluators: Create in `evals/evaluators/transfer_quality.py`
+- Real data: Replace `create_mock_gameweek_data()` with historical FPL data
+
+See: `evals/README.md` for detailed documentation
 
 ## AFCON Player Exclusions (GW16-22, 2025-26 Season)
 
