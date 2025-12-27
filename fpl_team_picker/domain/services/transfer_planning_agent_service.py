@@ -4,7 +4,7 @@ This service implements an orchestrator-workers pattern following Anthropic's
 "Building Effective Agents" best practices:
 - Start simple: Core 5 tools + orchestrator (Phase 1)
 - ACI investment: Comprehensive tool docstrings
-- Thinking space: 6-step workflow in system prompt
+- Thinking space: 7-step workflow in system prompt
 - SA as validator: Agent reasons first, SA validates
 
 The agent recommends transfer options for a single gameweek while considering
@@ -44,8 +44,8 @@ Your task: Recommend TOP 3-5 RANKED TRANSFER OPTIONS for gameweek {target_gw}, c
 2. **Multiple Options**: Provide 3-5 ranked scenarios (NOT a single recommendation)
 3. **Always Include Hold**: Baseline option of making no transfers
 4. **Strategic Context**: Look ahead to GW{target_gw}+1 and GW{target_gw}+2 for DGWs, fixture runs, chip timing
-5. **SA Validation**: Use run_sa_optimizer to benchmark your top recommendations
-6. **Data Accuracy**: ALWAYS use the team_name field from tool outputs when referencing player teams. NEVER rely on your training data or memory for player-team associations, as transfers happen frequently. When writing reasoning about fixtures, verify the team name matches the data you received.
+5. **SA Validation**: Use run_sa_optimizer to benchmark your top recommendations AFTER generating them
+6. **Data Accuracy**: CRITICAL - ALWAYS use the team_name field from tool outputs when referencing player teams. NEVER rely on your training data or memory for player-team associations, as transfers happen frequently. When writing reasoning about fixtures, verify the team name matches the data you received.
 
 ## Strategy: {strategy_mode}
 
@@ -56,42 +56,74 @@ Your task: Recommend TOP 3-5 RANKED TRANSFER OPTIONS for gameweek {target_gw}, c
 Current ROI threshold: +{roi_threshold} xP over 3 gameweeks
 - Only recommend -4 hit if 3GW net ROI > threshold
 - Show both hit and no-hit options for comparison
+- net ROI = (3GW xP gain) - (hit cost in points)
+- Example: +6 xP gain with -4 hit = +2 net ROI (acceptable if > {roi_threshold})
 
 ## Step-by-Step Workflow (THINK BEFORE ACTING)
 
 Before making ANY tool calls, think through your approach:
 
 1. ANALYZE: What are the key questions to answer?
-   - Who are the weak players in current squad?
-   - Are there any DGWs or fixture swings coming?
-   - What's the template landscape?
+   - Who are the weak players in current squad? (use analyze_squad_weaknesses)
+   - Are there any DGWs or fixture swings coming? (use analyze_fixture_context)
+   - What's the template landscape? (use get_template_players for safety check)
 
 2. PLAN: Which tools do I need and in what order?
-   - Start with analyze_squad_weaknesses (identify targets)
-   - Then get_multi_gw_xp_predictions (find replacements)
-   - Then analyze_fixture_context (strategic context)
-   - Then get_template_players (safety check)
-   - Finally run_sa_optimizer (validate top 2-3 scenarios)
+   - Start: analyze_squad_weaknesses (identify targets)
+   - Then: get_multi_gw_xp_predictions (find replacements with best xP)
+   - Then: analyze_fixture_context (strategic context: DGWs, fixture swings)
+   - Then: get_template_players (safety check: ownership >30% for rank protection)
+   - Finally: run_sa_optimizer (validate top 2-3 scenarios AFTER generating them)
 
 3. EXECUTE: Call tools in logical sequence
+   - Use current_squad_ids from the squad summary when calling tools
+   - Get xP predictions for 3 gameweeks (start_gameweek={target_gw}, num_gameweeks=3)
+   - Check fixture context for GW{target_gw} through GW{target_gw}+2
 
-4. SYNTHESIZE: Generate 3-5 scenarios ranked by 3GW net ROI
+4. SYNTHESIZE: Generate 5-7 candidate scenarios, then rank
+   - Hold option (0 transfers): baseline xP
+   - 1-transfer options (free if you have 1 FT)
+   - 2-transfer options (hit if only 1 FT, but check if ROI > threshold)
+   - Consider: DGW players, fixture swings, template safety
    - When writing reasoning, ONLY reference team names from tool outputs
    - Never use training data for player-team associations
 
-5. VALIDATE: Compare top scenarios against SA benchmark
+5. VALIDATE: Compare top 2-3 scenarios against SA benchmark
+   - Call run_sa_optimizer for each top scenario (use exact transfers you're considering)
+   - Compare your scenario's 3GW xP to SA's expected_xp
+   - If deviation > 2.0 xP, reconsider your logic
+   - If SA suggests different transfers, note it in reasoning
 
-6. RECOMMEND: Return SingleGWRecommendation with clear reasoning
+6. RANK: Order scenarios by strategic value (not just net ROI)
+   - Primary: 3GW net ROI (xP gain - hit cost)
+   - Secondary: Strategic flags (DGW, fixture swing, chip prep)
+   - Tertiary: Risk level (template safety, confidence)
+   - Top recommendation should balance ROI + strategy + risk
+
+7. RECOMMEND: Return SingleGWRecommendation with clear reasoning
+   - Each scenario needs specific reasoning (not generic)
+   - Explain why this scenario beats alternatives
+   - Reference actual data from tools (xP values, fixture difficulty, ownership %)
 
 ## Output Requirements
 
 Return a SingleGWRecommendation with:
-- hold_option: Baseline no-transfer scenario
-- recommended_scenarios: 3-5 transfer scenarios ranked by net_roi_3gw
-- context_analysis: DGW opportunities, fixture swings identified
-- sa_benchmark: SA optimizer results
+- hold_option: Baseline no-transfer scenario (MUST include)
+- recommended_scenarios: 3-5 transfer scenarios ranked by strategic value
+- context_analysis: DGW opportunities, fixture swings identified (from analyze_fixture_context)
+- sa_benchmark: SA optimizer results for top scenarios (from run_sa_optimizer)
 - top_recommendation_id: Best overall option (can be "hold")
-- final_reasoning: Strategic summary (2-3 sentences)
+- final_reasoning: Strategic summary (2-3 sentences explaining the top choice)
+
+## Quality Checklist
+
+Before returning, verify:
+- [ ] All team names in reasoning match tool outputs (not training data)
+- [ ] Hold option is included
+- [ ] Top 2-3 scenarios validated with SA optimizer
+- [ ] Hit threshold respected (no -4 hits unless ROI > {roi_threshold})
+- [ ] Strategic context considered (DGWs, fixture swings)
+- [ ] Reasoning is specific and data-driven (mentions actual xP values, ownership %)
 
 Think carefully, use tools strategically, and provide data-driven reasoning.
 """
@@ -103,18 +135,21 @@ STRATEGY_GUIDANCE = {
 - Prefer free transfers, only take hits for +{roi_threshold} 3GW ROI
 - Consider template safety (>30% ownership) for rank protection
 - Look for fixture swings and DGW opportunities
+- Typical scenario mix: 1-2 free transfers, 0-1 hits (if ROI > threshold)
 """,
     StrategyMode.CONSERVATIVE: """
-- Minimize risk: prefer hold option unless clear upgrade
-- Require +{roi_threshold} 3GW ROI for any hit (higher threshold)
-- Heavily favor template players (>40% ownership)
-- Avoid differentials unless extremely high confidence
+- Minimize risk: prefer hold option unless clear upgrade (>3 xP gain)
+- Require +{roi_threshold} 3GW ROI for any hit (strict threshold)
+- Heavily favor template players (>40% ownership) for rank protection
+- Avoid differentials (<10% ownership) unless extremely high confidence
+- Typical scenario mix: 0-1 free transfers, rarely hits
 """,
     StrategyMode.AGGRESSIVE: """
 - Maximize upside: willing to take -4 hits for +{roi_threshold} 3GW ROI (lower threshold)
 - Target differentials (<10% ownership) with haul potential
 - Prioritize high-ceiling players (xP + 2×uncertainty > 12)
 - Front-load transfers for immediate gains
+- Typical scenario mix: 1-2 free transfers, 1-2 hits if ROI justifies
 """,
 }
 
@@ -262,15 +297,17 @@ Current Squad:
 Budget: £{budget:.1f}m in the bank
 Free Transfers: {free_transfers}
 
-Instructions:
-1. Think through your approach before calling tools
-2. Use tools in logical order (weaknesses → xP → context → templates → SA)
-3. When calling tools that need current_squad_ids, use the "Squad Player IDs" list shown above
-4. Generate 5-7 candidate scenarios (hold + various transfers)
-5. Validate top 3 scenarios with run_sa_optimizer using the squad IDs
-6. Rank by 3GW net ROI and return top {num_recommendations}
+Key Context:
+- Target gameweek: {target_gameweek}
+- Look ahead: GW{target_gameweek}+1 and GW{target_gameweek}+2 for strategic context
+- ROI threshold for hits: +{hit_roi_threshold} xP over 3 gameweeks
+- Strategy mode: {strategy_mode.value}
 
-Remember: Think step-by-step, use tools strategically, validate with SA.
+Remember:
+- Use the "Squad Player IDs" list when calling tools that need current_squad_ids
+- Generate 5-7 candidate scenarios, then validate top 2-3 with run_sa_optimizer
+- Rank by strategic value (net ROI + context flags + risk)
+- Include hold option as baseline
 """
 
         if must_include_ids:
@@ -294,7 +331,7 @@ Remember: Think step-by-step, use tools strategically, validate with SA.
         return result.output
 
     def _format_squad(self, squad_df: pd.DataFrame) -> str:
-        """Format current squad for display in prompt with player IDs."""
+        """Format current squad for display in prompt with player IDs and team names."""
         if squad_df.empty:
             return "No current squad data available"
 
@@ -303,7 +340,7 @@ Remember: Think step-by-step, use tools strategically, validate with SA.
             pos_players = squad_df[squad_df["position"] == pos]
             if not pos_players.empty:
                 players_str = ", ".join(
-                    f"{row['web_name']} (ID: {row['player_id']}, {row.get('name', 'Unknown')}, £{row['price']:.1f}m)"
+                    f"{row['web_name']} (ID: {row['player_id']}, Team: {row.get('name', 'Unknown Team')}, £{row['price']:.1f}m)"
                     for _, row in pos_players.iterrows()
                 )
                 lines.append(f"{pos}: {players_str}")
