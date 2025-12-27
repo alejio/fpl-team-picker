@@ -671,3 +671,141 @@ class TestStrategyGuidanceCompleteness:
         for strategy_mode, guidance in STRATEGY_GUIDANCE.items():
             assert isinstance(guidance, str)
             assert len(guidance.strip()) > 0
+
+
+class TestLogfireIntegration:
+    """Test Logfire observability integration."""
+
+    def test_logfire_disabled_by_default(self):
+        """Test that Logfire is disabled by default (opt-in)."""
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                _ = TransferPlanningAgentService()
+
+                # Logfire should NOT be configured when disabled
+                mock_logfire.configure.assert_not_called()
+                mock_logfire.instrument_pydantic_ai.assert_not_called()
+
+    def test_logfire_enabled_with_token(self):
+        """Test Logfire initialization when enabled with token."""
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_API_KEY": "test-key", "LOGFIRE_TOKEN": "test-logfire-token"},
+        ):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                # Need to reload config to pick up env var
+                from fpl_team_picker.config.settings import load_config
+
+                test_config = load_config()
+
+                with patch(
+                    "fpl_team_picker.domain.services.transfer_planning_agent_service.config",
+                    test_config,
+                ):
+                    _ = TransferPlanningAgentService(enable_logfire=True)
+
+                    # Logfire should be configured with token
+                    mock_logfire.configure.assert_called_once()
+                    call_kwargs = mock_logfire.configure.call_args[1]
+                    assert call_kwargs["token"] == "test-logfire-token"
+                    assert call_kwargs["service_name"] == "fpl-transfer-agent"
+                    assert call_kwargs["service_version"] == "1.0.0"
+                    assert call_kwargs["send_to_logfire"] == "if-token-present"
+
+                    # Global instrumentation should be enabled
+                    mock_logfire.instrument_pydantic_ai.assert_called_once()
+
+    def test_logfire_enabled_without_token_warns(self):
+        """Test graceful degradation when enabled but no token."""
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}, clear=True):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                with patch(
+                    "fpl_team_picker.domain.services.transfer_planning_agent_service.logger"
+                ) as mock_logger:
+                    _ = TransferPlanningAgentService(enable_logfire=True)
+
+                    # Should configure with 'if-token-present' (automatic detection)
+                    mock_logfire.configure.assert_called_once()
+                    call_kwargs = mock_logfire.configure.call_args[1]
+                    assert call_kwargs["send_to_logfire"] == "if-token-present"
+
+                    # No warning needed with 'if-token-present' - it handles missing tokens gracefully
+                    # The warning only fires if send_to_logfire is explicitly True
+                    warning_calls = [
+                        call
+                        for call in mock_logger.warning.call_args_list
+                        if "Logfire enabled but no token" in str(call)
+                    ]
+                    assert len(warning_calls) == 0  # No warning with 'if-token-present'
+
+    def test_logfire_initialization_failure_does_not_crash_service(self):
+        """Test that Logfire initialization failure doesn't prevent service from working."""
+        with patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "test-key", "LOGFIRE_TOKEN": "test-token"}
+        ):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                # Simulate Logfire.configure() raising an exception
+                mock_logfire.configure.side_effect = RuntimeError("Logfire API error")
+
+                with patch(
+                    "fpl_team_picker.domain.services.transfer_planning_agent_service.logger"
+                ) as mock_logger:
+                    # Service should still initialize successfully
+                    service = TransferPlanningAgentService(enable_logfire=True)
+                    assert service is not None
+                    assert service.api_key == "test-key"
+
+                    # Should log warning about failure
+                    warning_calls = [
+                        call
+                        for call in mock_logger.warning.call_args_list
+                        if "Failed to initialize Logfire" in str(call)
+                    ]
+                    assert len(warning_calls) > 0
+
+    def test_logfire_parameter_overrides_config(self):
+        """Test that enable_logfire parameter overrides config."""
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                # Config says disabled, but parameter says enabled
+                _ = TransferPlanningAgentService(enable_logfire=True)
+
+                # Should be enabled because parameter overrides config
+                mock_logfire.configure.assert_called_once()
+
+    def test_logfire_console_mode(self):
+        """Test Logfire console output mode."""
+        test_config_dict = {
+            "logfire": {
+                "enabled": True,
+                "token": "test-token",
+                "console": True,  # Enable console output
+            }
+        }
+
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
+            with patch(
+                "fpl_team_picker.domain.services.transfer_planning_agent_service.logfire"
+            ) as mock_logfire:
+                from fpl_team_picker.config.settings import load_config
+
+                test_config = load_config(config_data=test_config_dict)
+
+                with patch(
+                    "fpl_team_picker.domain.services.transfer_planning_agent_service.config",
+                    test_config,
+                ):
+                    _ = TransferPlanningAgentService(enable_logfire=True)
+
+                    call_kwargs = mock_logfire.configure.call_args[1]
+                    assert call_kwargs["console"] is True

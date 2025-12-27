@@ -15,6 +15,7 @@ import logging
 import os
 from typing import Dict, Set
 
+import logfire
 import pandas as pd
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -158,7 +159,11 @@ class TransferPlanningAgentService:
     """Service for generating single-gameweek transfer recommendations using LLM reasoning."""
 
     def __init__(
-        self, model: str | None = None, api_key: str | None = None, debug: bool = False
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        debug: bool = False,
+        enable_logfire: bool | None = None,
     ):
         """
         Initialize transfer planning agent service.
@@ -167,6 +172,7 @@ class TransferPlanningAgentService:
             model: Anthropic model to use (default: from config)
             api_key: Anthropic API key (default: from config or ANTHROPIC_API_KEY env var)
             debug: Enable debug logging
+            enable_logfire: Override config to enable/disable Logfire (default: from config)
         """
         self.model_name = model or config.transfer_planning_agent.model
 
@@ -190,6 +196,48 @@ class TransferPlanningAgentService:
 
         if debug:
             logger.setLevel(logging.DEBUG)
+
+        # Initialize Logfire observability (opt-in)
+        # Priority: parameter > config
+        logfire_enabled = (
+            enable_logfire if enable_logfire is not None else config.logfire.enabled
+        )
+
+        if logfire_enabled:
+            self._initialize_logfire()
+
+    def _initialize_logfire(self):
+        """Initialize Logfire observability with graceful degradation."""
+        try:
+            # Configure Logfire with automatic token detection
+            logfire.configure(
+                token=config.logfire.token,  # Can be None, Logfire handles it
+                service_name=config.logfire.service_name,
+                service_version=config.logfire.service_version,
+                send_to_logfire=config.logfire.send_to_logfire,  # 'if-token-present' by default
+                console=config.logfire.console,
+            )
+
+            # Enable global instrumentation for pydantic-ai Agent
+            logfire.instrument_pydantic_ai()
+
+            # Log status based on actual configuration
+            token_status = "with token" if config.logfire.token else "without token"
+            send_status = config.logfire.send_to_logfire
+            logger.info(
+                f"✅ Logfire observability enabled ({token_status}): "
+                f"service={config.logfire.service_name} v{config.logfire.service_version}, "
+                f"send_to_logfire={send_status}"
+            )
+
+        except Exception as e:
+            # Graceful degradation: log error but don't fail service initialization
+            logger.warning(
+                f"⚠️  Failed to initialize Logfire observability: {e}. "
+                "Continuing without observability. Set debug=True for full traceback."
+            )
+            if self.debug:
+                logger.exception("Logfire initialization error:")
 
     def generate_single_gw_recommendations(
         self,

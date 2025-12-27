@@ -74,6 +74,11 @@ def main(
         help="Anthropic model to use (e.g., claude-haiku-3-7 for faster/cheaper)",
     ),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug logging"),
+    enable_logfire: bool = typer.Option(
+        True,
+        "--enable-logfire",
+        help="Enable Logfire observability (requires LOGFIRE_TOKEN)",
+    ),
 ):
     """Generate single-GW transfer recommendations using LLM agent.
 
@@ -88,15 +93,14 @@ def main(
     try:
         # Validate inputs
         if not (1 <= gameweek <= 38):
-            logger.error(
-                f"[red]Error: gameweek must be 1-38, got {gameweek}[/red]", style="bold"
+            console.print(
+                f"[bold red]Error: gameweek must be 1-38, got {gameweek}[/bold red]"
             )
             raise typer.Exit(1)
 
         if not (3 <= num_options <= 5):
-            logger.error(
-                f"[red]Error: num-options must be 3-5, got {num_options}[/red]",
-                style="bold",
+            console.print(
+                f"[bold red]Error: num-options must be 3-5, got {num_options}[/bold red]"
             )
             raise typer.Exit(1)
 
@@ -104,9 +108,8 @@ def main(
             strategy_mode = StrategyMode(strategy.lower())
         except ValueError:
             valid_strategies = [s.value for s in StrategyMode]
-            logger.error(
-                f"[red]Error: strategy must be one of {valid_strategies}, got '{strategy}'[/red]",
-                style="bold",
+            console.print(
+                f"[bold red]Error: strategy must be one of {valid_strategies}, got '{strategy}'[/bold red]"
             )
             raise typer.Exit(1)
 
@@ -122,6 +125,10 @@ def main(
         console.print(
             f"[cyan]Target: GW{gameweek} | Strategy: {strategy_mode.value} | Options: {num_options} | ROI Threshold: +{roi_threshold} xP[/cyan]\n"
         )
+
+        # Show Logfire status if enabled
+        if enable_logfire:
+            console.print("[yellow]🔍 Logfire observability enabled[/yellow]")
 
         # Load gameweek data
         console.print("[yellow]📊 Loading gameweek data...[/yellow]")
@@ -155,7 +162,9 @@ def main(
 
         # Initialize agent service
         console.print("[yellow]🧠 Initializing agent service...[/yellow]")
-        agent_service = TransferPlanningAgentService(model=model, debug=debug)
+        agent_service = TransferPlanningAgentService(
+            model=model, debug=debug, enable_logfire=enable_logfire
+        )
 
         # Generate recommendations
         console.print(
@@ -173,13 +182,13 @@ def main(
         # Print formatted output
         print_recommendations(recommendations)
 
-        logger.info("\n[green]✅ Recommendations generated successfully![/green]\n")
+        console.print("\n[green]✅ Recommendations generated successfully![/green]\n")
 
     except KeyboardInterrupt:
-        logger.info("\n[yellow]⚠️  Interrupted by user[/yellow]")
+        console.print("\n[yellow]⚠️  Interrupted by user[/yellow]")
         raise typer.Exit(130)
     except Exception as e:
-        logger.error(f"\n[red]❌ Error: {e}[/red]", style="bold")
+        console.print(f"\n[bold red]❌ Error: {e}[/bold red]")
         if debug:
             logger.exception("Full traceback:")
         raise typer.Exit(1)
@@ -309,25 +318,31 @@ def print_recommendations(rec: SingleGWRecommendation):
         context_table = Table(show_header=False, box=None, padding=(0, 2))
 
         if "dgw_opportunities" in rec.context_analysis:
-            dgw_str = (
-                ", ".join(rec.context_analysis["dgw_opportunities"])
-                if rec.context_analysis["dgw_opportunities"]
-                else "None detected"
-            )
+            dgw_value = rec.context_analysis["dgw_opportunities"]
+            if isinstance(dgw_value, list):
+                dgw_str = ", ".join(dgw_value) if dgw_value else "None detected"
+            elif isinstance(dgw_value, str):
+                dgw_str = dgw_value if dgw_value else "None detected"
+            else:
+                dgw_str = str(dgw_value) if dgw_value else "None detected"
             context_table.add_row("DGW Opportunities:", f"[cyan]{dgw_str}[/cyan]")
 
         if "fixture_swings" in rec.context_analysis:
-            swing_str = (
-                ", ".join(rec.context_analysis["fixture_swings"])
-                if rec.context_analysis["fixture_swings"]
-                else "None detected"
-            )
+            swing_value = rec.context_analysis["fixture_swings"]
+            if isinstance(swing_value, list):
+                swing_str = ", ".join(swing_value) if swing_value else "None detected"
+            elif isinstance(swing_value, str):
+                swing_str = swing_value if swing_value else "None detected"
+            else:
+                swing_str = str(swing_value) if swing_value else "None detected"
             context_table.add_row("Fixture Swings:", f"[yellow]{swing_str}[/yellow]")
 
         if "chip_timing" in rec.context_analysis:
+            chip_value = rec.context_analysis["chip_timing"]
+            chip_str = str(chip_value) if chip_value else "None"
             context_table.add_row(
                 "Chip Timing:",
-                f"[magenta]{rec.context_analysis['chip_timing']}[/magenta]",
+                f"[magenta]{chip_str}[/magenta]",
             )
 
         console.print(context_table)
